@@ -13,7 +13,7 @@ import {
   resolveAiModel,
   validateAiChatSettings,
 } from "../settings/ai-chat-settings";
-import { searchBlocksByTag, searchBlocksByText } from "../services/search-service";
+import { searchBlocksByTag, searchBlocksByText, queryBlocksByTag } from "../services/search-service";
 
 type Message = {
   id: string;
@@ -236,6 +236,48 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         },
       },
     },
+    {
+      type: "function",
+      function: {
+        name: "queryBlocksByTag",
+        description: "Advanced query for blocks with a specific tag and property filters. Use this when the user wants to filter notes by tag properties (e.g., 'find tasks with priority >= 8', 'find notes without a category'). This supports property comparisons like >=, >, <, <=, ==, !=, 'is null', 'not null'.",
+        parameters: {
+          type: "object",
+          properties: {
+            tagName: {
+              type: "string",
+              description: "The tag name to query for (e.g., 'task', 'note', 'project')",
+            },
+            properties: {
+              type: "array",
+              description: "Array of property filters to apply",
+              items: {
+                type: "object",
+                properties: {
+                  name: {
+                    type: "string",
+                    description: "Property name (e.g., 'priority', 'category', 'author')",
+                  },
+                  op: {
+                    type: "string",
+                    description: "Comparison operator: '>=', '>', '<=', '<', '==', '!=', 'is null', 'not null', 'includes', 'not includes'",
+                  },
+                  value: {
+                    description: "Value to compare against (can be string, number, or boolean). Not required for 'is null' and 'not null' operators.",
+                  },
+                },
+                required: ["name", "op"],
+              },
+            },
+            maxResults: {
+              type: "number",
+              description: "Maximum number of results to return (default: 50, max: 50)",
+            },
+          },
+          required: ["tagName"],
+        },
+      },
+    },
   ];
 
   // Execute tool calls
@@ -300,6 +342,41 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         }).join("\n\n");
 
         return `Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
+      } else if (toolName === "queryBlocksByTag") {
+        // Advanced query with property filters
+        const tagName = args.tagName || args.tag || args.query;
+        const properties = args.properties || [];
+        const maxResults = args.maxResults || 50;
+        console.log("[executeTool] queryBlocksByTag params:", { tagName, properties, maxResults });
+
+        if (!tagName) {
+          console.error("[executeTool] Missing tagName parameter, args:", args);
+          return "Error: Missing tag name parameter";
+        }
+
+        const results = await queryBlocksByTag(tagName, {
+          properties,
+          maxResults: Math.min(maxResults, 50),
+        });
+        console.log("[executeTool] queryBlocksByTag results:", results);
+
+        if (results.length === 0) {
+          const filterDesc = properties.length > 0
+            ? ` with filters: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')}`
+            : '';
+          return `No notes found with tag "${tagName}"${filterDesc}.`;
+        }
+
+        // Optimized format: remove redundant fields and simplify output
+        const summary = results.map((r, i) => {
+          const body = r.fullContent ?? r.content;
+          return `${i + 1}.\n${body}`;
+        }).join("\n\n");
+
+        const filterDesc = properties.length > 0
+          ? ` (filtered by: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')})`
+          : '';
+        return `Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
       } else {
         console.error("[executeTool] Unknown tool:", toolName);
         return `Unknown tool: ${toolName}`;

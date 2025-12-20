@@ -1,11 +1,84 @@
 import { parseMarkdown, type MarkdownNode } from '../utils/markdown-renderer';
 
 const React = window.React as any;
-const { createElement, useMemo } = React;
+const { createElement, useMemo, useState } = React;
+const { Button } = orca.components;
 
 interface Props {
     content: string;
     role: 'user' | 'assistant' | 'tool';
+}
+
+// Helper component for Code Block with Copy
+function CodeBlock({ language, content }: { language?: string; content: string }) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy:', err);
+        }
+    };
+
+    return createElement(
+        'div',
+        {
+            style: {
+                marginTop: '12px',
+                marginBottom: '12px',
+                borderRadius: '8px',
+                border: '1px solid var(--orca-color-border)',
+                overflow: 'hidden',
+                background: 'var(--orca-color-bg-3)',
+            }
+        },
+        // Header
+        createElement(
+            'div',
+            {
+                style: {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '6px 12px',
+                    background: 'rgba(0,0,0,0.03)',
+                    borderBottom: '1px solid var(--orca-color-border)',
+                    fontSize: '12px',
+                    color: 'var(--orca-color-text-2)',
+                    userSelect: 'none',
+                }
+            },
+            createElement('span', { style: { fontFamily: 'monospace', fontWeight: 600 } }, language || 'text'),
+            createElement(
+                'div',
+                {
+                    style: { cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' },
+                    onClick: handleCopy,
+                },
+                createElement('i', { className: copied ? "ti ti-check" : "ti ti-copy" }),
+                copied ? "Copied!" : "Copy"
+            )
+        ),
+        // Code content
+        createElement(
+            'pre',
+            {
+                style: {
+                    margin: 0,
+                    padding: '12px',
+                    overflowX: 'auto',
+                    fontFamily: '"JetBrains Mono", Consolas, monospace',
+                    fontSize: '13px',
+                    lineHeight: '1.5',
+                    color: 'var(--orca-color-text-1)',
+                },
+            },
+            content
+        )
+    );
 }
 
 /**
@@ -73,33 +146,12 @@ function renderNode(node: MarkdownNode, index: number): any {
             );
 
         case 'codeblock':
-            return createElement(
-                'pre',
-                {
-                    key: index,
-                    style: {
-                        background: 'var(--orca-color-bg-3)',
-                        padding: '16px',
-                        borderRadius: '12px',
-                        overflow: 'auto',
-                        border: '1px solid var(--orca-color-border)',
-                        marginTop: '12px',
-                        marginBottom: '12px',
-                    },
-                },
-                createElement(
-                    'code',
-                    {
-                        style: {
-                            fontFamily: '"JetBrains Mono", Consolas, monospace',
-                            fontSize: '14px',
-                            lineHeight: '1.5',
-                            color: 'var(--orca-color-text-1)',
-                        },
-                    },
-                    node.content
-                )
-            );
+            // Code block with header and copy button
+            return createElement(CodeBlock, {
+                key: index,
+                language: node.language,
+                content: node.content
+            });
 
         case 'quote':
             return createElement(

@@ -3,6 +3,9 @@
  * Provides search functionality for blocks by tags and text content
  */
 
+import { buildQueryDescription } from "../utils/query-builder";
+import type { QueryBlocksByTagOptions } from "../utils/query-types";
+
 export interface SearchResult {
   id: number;
   title: string;
@@ -283,6 +286,120 @@ export async function searchBlocksByText(
   } catch (error: any) {
     console.error(`Failed to search blocks by text "${searchText}":`, error);
     throw new Error(`Text search failed: ${error?.message ?? error ?? "unknown error"}`);
+  }
+}
+
+/**
+ * Query blocks by tag name and optional tag properties (query backend).
+ * @param tagName - The tag name to query for
+ * @param options - Optional property filters, sorting, and pagination
+ * @returns Array of search results
+ */
+export async function queryBlocksByTag(
+  tagName: string,
+  options: QueryBlocksByTagOptions = {},
+): Promise<SearchResult[]> {
+  const maxResults = Math.min(Math.max(1, options.maxResults ?? 50), 50);
+  console.log("[queryBlocksByTag] Called with:", { tagName, options, maxResults });
+
+  try {
+    if (!tagName || typeof tagName !== "string") {
+      console.error("[queryBlocksByTag] Invalid tagName:", tagName);
+      return [];
+    }
+
+    const description = buildQueryDescription({
+      tagName,
+      properties: options.properties,
+      sort: options.sort ?? [{ field: "modified", direction: "DESC" }],
+      page: options.page,
+      pageSize: options.pageSize,
+      maxResults,
+    });
+    console.log("[queryBlocksByTag] Query description:", JSON.stringify(description));
+
+    const runQuery = async (desc: any) => {
+      const result = await orca.invokeBackend("query", desc);
+      const payload = unwrapBackendResult<any>(result);
+      throwIfBackendError(payload, "query");
+      return unwrapBlocks(payload);
+    };
+
+    let blocks: any[] = [];
+    try {
+      blocks = await runQuery(description as any);
+    } catch (err) {
+      console.warn("[queryBlocksByTag] QueryDescription2 failed, retrying legacy QueryDescription:", err);
+      const tagQuery = (description as any).q?.conditions?.[0];
+      const legacyDescription = {
+        ...description,
+        q: {
+          kind: 1,
+          conditions: [
+            {
+              kind: 4,
+              name: tagName,
+              properties: tagQuery?.properties,
+            },
+          ],
+        },
+      };
+      console.log("[queryBlocksByTag] Legacy query description:", JSON.stringify(legacyDescription));
+      blocks = await runQuery(legacyDescription);
+    }
+
+    if (!Array.isArray(blocks)) {
+      console.warn("[queryBlocksByTag] Result is not an array:", blocks);
+      return [];
+    }
+
+    const limitedBlocks = blocks.slice(0, maxResults);
+
+    const trees = await Promise.all(
+      limitedBlocks.map(async (block: any) => {
+        try {
+          const result = await orca.invokeBackend("get-block-tree", block.id);
+          const payload = unwrapBackendResult<any>(result);
+          throwIfBackendError(payload, "get-block-tree");
+          return { block, tree: payload };
+        } catch (err) {
+          console.warn("[queryBlocksByTag] Failed to load block tree:", {
+            id: block?.id,
+            err,
+          });
+          return { block, tree: null };
+        }
+      }),
+    );
+
+    return trees.map(({ block, tree }: { block: any; tree: any }) => {
+      let fullContent: string | undefined;
+      if (tree) {
+        const lines: string[] = [];
+        const state = { blocks: 0, maxBlocks: 200, maxDepth: 10, hitLimit: false };
+        flattenBlockTreeToLines(tree, 0, lines, state);
+
+        if (!lines.length) {
+          const t = safeText(block);
+          if (t) lines.push(`- ${t}`);
+        }
+        if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
+        fullContent = lines.join("\n").trim() || undefined;
+      }
+
+      return {
+        id: block.id,
+        title: extractTitle(block),
+        content: extractContent(block),
+        fullContent,
+        created: block.created ? new Date(block.created) : undefined,
+        modified: block.modified ? new Date(block.modified) : undefined,
+        tags: block.aliases || [],
+      };
+    });
+  } catch (error: any) {
+    console.error(`Failed to query blocks by tag "${tagName}":`, error);
+    throw new Error(`Tag query failed: ${error?.message ?? error ?? "unknown error"}`);
   }
 }
 

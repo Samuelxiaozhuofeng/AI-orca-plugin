@@ -45,10 +45,17 @@ export default function ChatInput({
   const canSend = text.trim().length > 0 && !disabled;
 
   const handleSend = useCallback(() => {
-    if (!canSend) return;
-    onSend(text.trim());
+    const val = textareaRef.current?.value || text;
+    const trimmed = val.trim();
+    if (!trimmed || disabled) return;
+
+    onSend(trimmed);
     setText("");
-  }, [canSend, text, onSend]);
+    // Also clear DOM directly to ensure UI reflects the change immediately
+    if (textareaRef.current) {
+        textareaRef.current.value = "";
+    }
+  }, [disabled, onSend, text]);
 
   const handleKeyDown = useCallback(
     (e: any) => {

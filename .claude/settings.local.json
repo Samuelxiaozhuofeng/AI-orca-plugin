@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(cask-w:*)",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(git checkout:*)"
     ]
   }
 }
