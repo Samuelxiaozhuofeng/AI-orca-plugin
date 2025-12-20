@@ -7,6 +7,7 @@ import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import ChatInput from "./ChatInput";
+import MarkdownMessage from "../components/MarkdownMessage";
 import {
   getAiChatSettings,
   resolveAiModel,
@@ -66,10 +67,55 @@ function safeText(block: any): string {
   return "";
 }
 
+// Inject keyframes styles
+const globalStyles = `
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+@keyframes loadingDots {
+    0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+    40% { transform: scale(1); opacity: 1; }
+}
+@keyframes messageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+`;
+
+const LoadingDots = () => {
+    const dotStyle = {
+        display: 'inline-block',
+        width: '6px',
+        height: '6px',
+        borderRadius: '50%',
+        background: 'var(--orca-color-text-3)',
+        margin: '0 3px',
+        animation: 'loadingDots 1.4s infinite ease-in-out',
+    };
+
+    return createElement(
+        'div',
+        { style: { padding: '12px 16px', display: 'flex', alignItems: 'center', height: '24px' } },
+        createElement('span', { style: { ...dotStyle, animationDelay: '0s' } }),
+        createElement('span', { style: { ...dotStyle, animationDelay: '0.2s' } }),
+        createElement('span', { style: { ...dotStyle, animationDelay: '0.4s' } })
+    );
+};
+
 export default function AiChatPanel({ panelId }: PanelProps) {
   const orcaSnap = useSnapshot(orca.state);
   const uiSnap = useSnapshot(uiStore);
   const [sending, setSending] = useState(false);
+  // Track which message is currently streaming to add typewriter cursor
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+
   const [messages, setMessages] = useState<Message[]>(() => [
     {
       id: nowId(),
@@ -83,10 +129,59 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  function scrollToBottom() {
+  // Inject styles on mount
+  useEffect(() => {
+    const styleEl = document.createElement('style');
+    styleEl.textContent = globalStyles;
+    document.head.appendChild(styleEl);
+    return () => {
+        document.head.removeChild(styleEl);
+    };
+  }, []);
+
+  function smoothScrollToBottom(duration = 300) {
     const el = listRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
+
+    // If close to bottom, snap to it
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 50) {
+        el.scrollTop = el.scrollHeight;
+        return;
+    }
+
+    const start = el.scrollTop;
+    const target = el.scrollHeight - el.clientHeight;
+    
+    // If target is less than start (e.g. content removed), just set it
+    if (target < start) {
+        el.scrollTop = target;
+        return;
+    }
+    
+    const distance = target - start;
+    let startTime: number | null = null;
+
+    function animation(currentTime: number) {
+        if (startTime === null) startTime = currentTime;
+        const timeElapsed = currentTime - startTime;
+        const progress = Math.min(timeElapsed / duration, 1);
+
+        // Ease out cubic
+        const ease = 1 - Math.pow(1 - progress, 3);
+
+        el!.scrollTop = start + distance * ease;
+
+        if (progress < 1) {
+            requestAnimationFrame(animation);
+        }
+    }
+
+    requestAnimationFrame(animation);
+  }
+
+  function scrollToBottom() {
+      // Use smooth scroll wrapper
+      smoothScrollToBottom();
   }
 
   async function buildContextForRequest(): Promise<string> {
@@ -286,6 +381,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
       // Call AI with tools enabled
       const assistantId = nowId();
+      setStreamingMessageId(assistantId);
+      
       setMessages((prev: Message[]) => [
         ...prev,
         {
@@ -342,6 +439,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
         }
       }
+
+      setStreamingMessageId(null);
 
       if (!gotAny) {
         setMessages((prev: Message[]) =>
@@ -432,6 +531,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
         // Call AI again with the tool results to get final response
         const finalAssistantId = nowId();
+        setStreamingMessageId(finalAssistantId);
+        
         setMessages((prev: Message[]) => [
           ...prev,
           {
@@ -471,7 +572,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             queueMicrotask(scrollToBottom);
           }
         }
-
+        
+        setStreamingMessageId(null);
         console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
       }
     } catch (err: any) {
@@ -496,6 +598,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     } finally {
       if (abortRef.current === aborter) abortRef.current = null;
       setSending(false);
+      setStreamingMessageId(null);
       queueMicrotask(scrollToBottom);
     }
   }
@@ -530,6 +633,113 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     return safeText(block) || "";
   }, [rootBlockId]);
 
+  // Construct message elements to properly handle loading state
+  const messageElements = messages.map((m: Message) => {
+      // Skip tool messages from display (they're internal)
+      if (m.role === "tool") {
+        return null;
+      }
+
+      return createElement(
+        "div",
+        {
+          key: m.id,
+          style: {
+            width: "100%",
+            display: "flex",
+            justifyContent: m.role === "user" ? "flex-end" : "flex-start",
+            marginBottom: "16px",
+            animation: "messageSlideIn 0.3s ease-out",
+          },
+        },
+        createElement(
+          "div",
+          {
+            style: {
+              maxWidth: m.role === "user" ? "75%" : "90%",
+              padding: m.role === "user" ? "12px 16px" : "16px 20px",
+              borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+              background: m.role === "user"
+                  ? "var(--orca-color-primary, #007bff)"
+                  : "var(--orca-color-bg-2)",
+              color: m.role === "user" ? "#fff" : "var(--orca-color-text-1)",
+              border: m.role === "assistant" ? "1px solid var(--orca-color-border)" : "none",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+              position: "relative",
+            },
+          },
+          // Use Markdown rendering for content
+          createElement(MarkdownMessage, {
+              content: m.content || "",
+              role: m.role,
+          }),
+          // Typewriter cursor for streaming message
+          (streamingMessageId === m.id) && createElement("span", {
+              style: {
+                  display: "inline-block",
+                  width: "2px",
+                  height: "1.2em",
+                  background: "var(--orca-color-primary, #007bff)",
+                  marginLeft: "2px",
+                  verticalAlign: "text-bottom",
+                  animation: "blink 1s step-end infinite",
+              }
+          }),
+          // Show tool calls if present
+          m.tool_calls && m.tool_calls.length > 0
+            ? createElement(
+                "div",
+                {
+                  style: {
+                    marginTop: 8,
+                    padding: 8,
+                    background: "var(--orca-color-bg-3)",
+                    borderRadius: 4,
+                    fontSize: "0.85em",
+                    opacity: 0.8,
+                    fontFamily: "monospace",
+                  },
+                },
+                `🔧 Calling tool: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
+              )
+            : null,
+        ),
+      );
+    }).filter(Boolean);
+
+    // Add loading dots if sending but no response yet (or only tool responses so far)
+    const lastMsg = messages[messages.length - 1];
+    if (sending && lastMsg && lastMsg.role === "user") {
+        messageElements.push(
+            createElement(
+                "div",
+                {
+                    key: "loading",
+                    style: {
+                        width: "100%",
+                        display: "flex",
+                        justifyContent: "flex-start",
+                        marginBottom: "16px",
+                        animation: "messageSlideIn 0.3s ease-out",
+                    },
+                },
+                createElement(
+                    "div",
+                    {
+                        style: {
+                            padding: "0",
+                            borderRadius: "18px 18px 18px 4px",
+                            background: "var(--orca-color-bg-2)",
+                            border: "1px solid var(--orca-color-border)",
+                            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                        }
+                    },
+                    createElement(LoadingDots)
+                )
+            )
+        );
+    }
+
   return createElement(
     "div",
     {
@@ -552,11 +762,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           alignItems: "center",
           gap: 8,
           borderBottom: "1px solid var(--orca-color-border)",
+          background: "var(--orca-color-bg-1)",
+          zIndex: 10,
         },
       },
       createElement(
         "div",
-        { style: { fontWeight: 600, flex: 1 } },
+        { style: { fontWeight: 600, flex: 1, fontFamily: "var(--chat-font-sans)" } },
         "AI Chat",
       ),
       createElement(
@@ -564,22 +776,23 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         {
           variant: "plain",
           onClick: () => void orca.commands.invokeCommand("core.openSettings"),
+          title: "Settings",
         },
         createElement("i", { className: "ti ti-settings" }),
       ),
       createElement(
         Button,
-        { variant: "plain", disabled: !sending, onClick: stop },
+        { variant: "plain", disabled: !sending, onClick: stop, title: "Stop generation" },
         createElement("i", { className: "ti ti-player-stop" }),
       ),
       createElement(
         Button,
-        { variant: "plain", onClick: clear },
+        { variant: "plain", onClick: clear, title: "Clear chat" },
         createElement("i", { className: "ti ti-trash" }),
       ),
       createElement(
         Button,
-        { variant: "plain", onClick: () => closeAiChatPanel(panelId) },
+        { variant: "plain", onClick: () => closeAiChatPanel(panelId), title: "Close" },
         createElement("i", { className: "ti ti-x" }),
       ),
     ),
@@ -591,66 +804,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         style: {
           flex: 1,
           overflow: "auto",
-          padding: 12,
+          padding: "20px",
           display: "flex",
           flexDirection: "column",
           gap: 10,
+          scrollBehavior: "smooth",
         },
       },
-      ...messages.map((m: Message) => {
-        // Skip tool messages from display (they're internal)
-        if (m.role === "tool") {
-          return null;
-        }
-
-        return createElement(
-          "div",
-          {
-            key: m.id,
-            style: {
-              width: "100%",
-              display: "flex",
-              justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-            },
-          },
-          createElement(
-            "div",
-            {
-              style: {
-                maxWidth: "85%",
-                padding: "8px 12px",
-                borderRadius: 10,
-                border: "1px solid var(--orca-color-border)",
-                background:
-                  m.role === "user"
-                    ? "var(--orca-color-bg-2)"
-                    : "var(--orca-color-bg-1)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              },
-            },
-            // Show content if available
-            m.content || "",
-            // Show tool calls if present
-            m.tool_calls && m.tool_calls.length > 0
-              ? createElement(
-                  "div",
-                  {
-                    style: {
-                      marginTop: 8,
-                      padding: 8,
-                      background: "var(--orca-color-bg-3)",
-                      borderRadius: 4,
-                      fontSize: "0.85em",
-                      opacity: 0.7,
-                    },
-                  },
-                  `🔧 Calling tool: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
-                )
-              : null,
-          ),
-        );
-      }).filter(Boolean),
+      ...messageElements,
     ),
     // Chat Input
     createElement(ChatInput, {
@@ -661,3 +822,4 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }),
   );
 }
+

@@ -37,6 +37,7 @@ export default function ChatInput({
 }: Props) {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
@@ -84,40 +85,18 @@ export default function ChatInput({
     "div",
     {
       style: {
-        padding: 12,
+        padding: "16px",
         borderTop: "1px solid var(--orca-color-border)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
+        background: "var(--orca-color-bg-1)",
+        // Glassmorphism effect
+        backdropFilter: "blur(10px)",
         position: "relative",
+        zIndex: 20,
       },
     },
 
     // Context Chips 区域
     createElement(ContextChips, { items: contextSnap.selected }),
-
-    // @ Add context 按钮
-    createElement(
-      "div",
-      {
-        ref: addContextBtnRef as any,
-        style: { display: "flex", alignItems: "center", gap: 8 },
-      },
-      createElement(
-        Button,
-        {
-          variant: "plain",
-          onClick: () => setPickerOpen(!pickerOpen),
-          style: {
-            padding: "4px 8px",
-            fontSize: 12,
-            color: "var(--orca-color-text-2)",
-          },
-        },
-        createElement("i", { className: "ti ti-at", style: { marginRight: 4 } }),
-        "Add context"
-      )
-    ),
 
     // Context Picker 悬浮菜单
     createElement(ContextPicker, {
@@ -128,39 +107,108 @@ export default function ChatInput({
       anchorRef: addContextBtnRef,
     }),
 
-    // 输入框 + 发送按钮
+    // Input Wrapper
     createElement(
-      "div",
-      {
-        style: {
-          display: "flex",
-          gap: 8,
-          alignItems: "flex-end",
-        },
-      },
-      createElement(CompositionTextArea as any, {
-        ref: textareaRef as any,
-        placeholder: "Your AI assistant for Orca-note • @ to add context • / for custom prompts",
-        value: text,
-        onChange: (e: any) => setText(e.target.value),
-        onKeyDown: handleKeyDown,
-        disabled,
-        style: {
-          flex: 1,
-          resize: "none",
-          minHeight: 64,
-          maxHeight: 200,
-        },
-      }),
-      createElement(
-        Button,
+        "div", 
         {
-          variant: "solid",
-          disabled: !canSend,
-          onClick: handleSend,
+            style: {
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                background: "var(--orca-color-bg-2)",
+                borderRadius: "24px",
+                padding: "12px 16px",
+                border: isFocused 
+                    ? "1px solid var(--orca-color-primary, #007bff)" 
+                    : "1px solid var(--orca-color-border)",
+                boxShadow: isFocused 
+                    ? "0 4px 12px rgba(0,0,0,0.05)" 
+                    : "0 2px 8px rgba(0,0,0,0.02)",
+                transition: "all 0.2s ease",
+            }
         },
-        disabled ? "Sending..." : "Send"
-      )
+        // Toolbar (Context button)
+        createElement(
+            "div",
+            {
+                ref: addContextBtnRef as any,
+                style: { display: "flex", alignItems: "center", gap: 8 },
+            },
+            createElement(
+                Button,
+                {
+                    variant: "plain",
+                    onClick: () => setPickerOpen(!pickerOpen),
+                    style: {
+                        padding: "2px 8px",
+                        height: "24px",
+                        fontSize: 12,
+                        color: "var(--orca-color-text-2)",
+                        borderRadius: "12px",
+                        background: "var(--orca-color-bg-3)",
+                    },
+                },
+                createElement("i", { className: "ti ti-at", style: { marginRight: 4 } }),
+                "Add context"
+            )
+        ),
+        // TextArea and Send Button Row
+        createElement(
+            "div",
+            {
+                style: {
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-end",
+                }
+            },
+            createElement(CompositionTextArea as any, {
+                ref: textareaRef as any,
+                placeholder: "Type a message... (@ for context)",
+                value: text,
+                onChange: (e: any) => setText(e.target.value),
+                onKeyDown: handleKeyDown,
+                onFocus: () => setIsFocused(true),
+                onBlur: () => setIsFocused(false),
+                disabled,
+                style: {
+                    flex: 1,
+                    resize: "none",
+                    minHeight: 24,
+                    maxHeight: 200,
+                    background: "transparent",
+                    border: "none",
+                    padding: 0,
+                    outline: "none",
+                    lineHeight: "1.5",
+                    fontSize: "15px",
+                },
+            }),
+            createElement(
+                Button,
+                {
+                    variant: "solid",
+                    disabled: !canSend,
+                    onClick: handleSend,
+                    style: {
+                        borderRadius: "50%",
+                        width: "32px",
+                        height: "32px",
+                        minWidth: "32px",
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        opacity: canSend ? 1 : 0.5,
+                        transition: "opacity 0.2s",
+                    }
+                },
+                disabled 
+                    ? createElement("i", { className: "ti ti-dots" })
+                    : createElement("i", { className: "ti ti-arrow-up" })
+            )
+        )
     )
   );
 }
+
