@@ -571,13 +571,22 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             );
             queueMicrotask(scrollToBottom);
           }
-        }
-        
-        setStreamingMessageId(null);
-        console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
-      }
-    } catch (err: any) {
-      const isAbort = String(err?.name ?? "") === "AbortError";
+	        }
+	        
+	        setStreamingMessageId(null);
+
+	        if (chunkCount === 0) {
+	          setMessages((prev: Message[]) =>
+	            prev.map((m: Message) =>
+	              m.id === finalAssistantId && !m.content ? { ...m, content: "(empty response)" } : m,
+	            ),
+	          );
+	        }
+
+	        console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
+	      }
+	    } catch (err: any) {
+	      const isAbort = String(err?.name ?? "") === "AbortError";
       const msg = String(err?.message ?? err ?? "unknown error");
       if (!isAbort) orca.notify("error", msg);
 
