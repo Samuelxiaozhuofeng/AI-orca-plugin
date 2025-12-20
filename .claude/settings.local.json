@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cask-w:*)",
       "Bash(npm run build)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(ls:*)"
     ]
   }
 }

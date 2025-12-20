@@ -25,22 +25,29 @@ function unwrapBackendResult<T>(result: any): T {
 
 function unwrapBlocks(result: any): any[] {
   if (!result) return [];
-  
+
   // Handle [aliasMatches, contentMatches] from search-blocks-by-text
   if (Array.isArray(result) && result.length === 2 && Array.isArray(result[0]) && Array.isArray(result[1])) {
-    return [...result[0], ...result[1]];
+    const combined = [...result[0], ...result[1]];
+    // Each item might be a wrapper { type, label, block } - extract the block
+    return combined.map(item => {
+      if (item && typeof item === "object" && "block" in item && item.block) {
+        return item.block;
+      }
+      return item;
+    });
   }
-  
+
   // Handle [count, blocks] from some other APIs
   if (Array.isArray(result) && result.length === 2 && typeof result[0] === "number" && Array.isArray(result[1])) {
     return result[1];
   }
-  
+
   if (Array.isArray(result)) return result;
-  
+
   // If it's a single object, wrap it
   if (typeof result === "object" && result.id) return [result];
-  
+
   return [];
 }
 
@@ -224,7 +231,13 @@ export async function searchBlocksByText(
 
     // Use orca.invokeBackend to search for blocks containing the text
     const result = await orca.invokeBackend("search-blocks-by-text", searchText);
+    console.log("[searchBlocksByText] Raw result:", JSON.stringify(result, null, 2));
     const blocks = unwrapBlocks(result);
+    console.log("[searchBlocksByText] Unwrapped blocks count:", blocks.length);
+    if (blocks.length > 0) {
+      console.log("[searchBlocksByText] First block structure:", JSON.stringify(blocks[0], null, 2));
+      console.log("[searchBlocksByText] First block keys:", Object.keys(blocks[0]));
+    }
 
     if (!Array.isArray(blocks)) {
       console.warn("[searchBlocksByText] Result is not an array:", blocks);
@@ -259,24 +272,37 @@ export async function searchBlocksByText(
 
     // Transform to SearchResult format
     return trees.map(({ block, tree }: { block: any; tree: any }) => {
+      console.log("[searchBlocksByText] Processing block:", { id: block?.id, hasTree: !!tree });
+      console.log("[searchBlocksByText] Block text field:", block?.text);
+      console.log("[searchBlocksByText] Block content field:", JSON.stringify(block?.content));
+
       let fullContent: string | undefined;
       if (tree) {
+        console.log("[searchBlocksByText] Tree structure:", JSON.stringify(tree, null, 2));
         const lines: string[] = [];
         const state = { blocks: 0, maxBlocks: 200, maxDepth: 10, hitLimit: false };
         flattenBlockTreeToLines(tree, 0, lines, state);
+        console.log("[searchBlocksByText] Flattened lines:", lines);
 
         if (!lines.length) {
           const t = safeText(block);
+          console.log("[searchBlocksByText] safeText fallback result:", t);
           if (t) lines.push(`- ${t}`);
         }
         if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
         fullContent = lines.join("\n").trim() || undefined;
       }
 
+      const title = extractTitle(block);
+      const content = extractContent(block);
+      console.log("[searchBlocksByText] Extracted title:", title);
+      console.log("[searchBlocksByText] Extracted content:", content);
+      console.log("[searchBlocksByText] fullContent:", fullContent);
+
       return {
         id: block.id,
-        title: extractTitle(block),
-        content: extractContent(block),
+        title,
+        content,
         fullContent,
         created: block.created ? new Date(block.created) : undefined,
         modified: block.modified ? new Date(block.modified) : undefined,

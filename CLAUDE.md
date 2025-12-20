@@ -40,7 +40,10 @@ The build outputs to `dist/main.js` as a single-file plugin.
 | OpenAI Client | `src/services/openai-client.ts` | OpenAI-compatible chat completions (SSE streaming) |
 | Settings | `src/settings/ai-chat-settings.ts` | OpenAI-compatible API settings schema |
 | Context Menu | `src/ui/ai-chat-context-menu.ts` | Block/tag right-click menu entries |
-| **Search Service** | `src/services/search-service.ts` | AI tool functions: searchBlocksByTag, searchBlocksByText (with child blocks) |
+| **Search Service** | `src/services/search-service.ts` | AI tool functions: searchBlocksByTag, searchBlocksByText, **queryBlocksByTag** (advanced query with property filters) |
+| **Query Builder** | `src/utils/query-builder.ts` | Builds QueryDescription2 for complex queries |
+| **Query Converters** | `src/utils/query-converters.ts` | Type conversion and operator mapping for query parameters |
+| **Query Types** | `src/utils/query-types.ts` | TypeScript type definitions for query system |
 
 ### State Management
 
@@ -110,6 +113,24 @@ const taggedBlocks = await orca.invokeBackend("get-blocks-with-tags", [tagName])
 
 // Search blocks by text (returns [aliasMatches, contentMatches])
 const result = await orca.invokeBackend("search-blocks-by-text", searchText);
+
+// Advanced query with property filters (NEW in v1.1.0)
+const queryResult = await orca.invokeBackend("query", {
+  q: {
+    kind: 100, // SELF_AND
+    conditions: [
+      {
+        kind: 4, // QueryTag
+        name: "task",
+        properties: [
+          { name: "priority", op: 9, v: 8 } // priority >= 8
+        ]
+      }
+    ]
+  },
+  sort: [["modified", "DESC"]],
+  pageSize: 50
+});
 ```
 
 **Important**: Backend APIs return different data formats. Always use adapter functions:
@@ -127,7 +148,60 @@ Per `progress.md`, completed steps:
 2. Chat Panel (mock conversation, dual-column layout)
 3. Settings (OpenAI-compatible schema)
 4. Context system (block/page/tag selection, preview)
+5. **Query system (Phase 1)**: Advanced query with property filters ✅
+
+### Recent Updates (v1.1.0 - 2024-12-20)
+
+**Query Blocks Feature - Phase 1 Completed**:
+- ✅ Advanced query tool `queryBlocksByTag` with property filters
+- ✅ Type conversion system for query parameters
+- ✅ Query builder for QueryDescription2 format
+- ✅ AI tool integration (AI can automatically filter by properties)
+- ✅ Support for 10+ comparison operators (>=, >, <=, <, ==, !=, is null, etc.)
+
+See `CHANGELOG-QUERY-BLOCKS.md` for detailed changes.
+
+**UI/UX Enhancements by Gemini**:
+- ✅ Code block with copy button
+- ✅ Message hover actions
+- ✅ Tool call visualization cards
 
 Remaining:
-5. (Optional) Session persistence (`setData/getData`)
-6. Polish (keyboard shortcuts, export, prompt templates)
+6. Query system (Phase 2-4): Complex combinations, time ranges, advanced features
+7. (Optional) Session persistence (`setData/getData`)
+8. Polish (keyboard shortcuts, export, prompt templates)
+
+## AI Tools Reference
+
+The plugin provides the following AI tools (automatically available to AI during chat):
+
+### 1. searchBlocksByTag
+Simple tag-based search.
+```typescript
+searchBlocksByTag(tagName: string, maxResults?: number)
+```
+
+### 2. searchBlocksByText
+Full-text search across all blocks.
+```typescript
+searchBlocksByText(searchText: string, maxResults?: number)
+```
+
+### 3. queryBlocksByTag (NEW)
+Advanced query with property filters.
+```typescript
+queryBlocksByTag(tagName: string, options?: {
+  properties?: Array<{
+    name: string;
+    op: ">=" | ">" | "<=" | "<" | "==" | "!=" | "is null" | "not null" | "includes" | "not includes";
+    value?: any;
+  }>;
+  maxResults?: number;
+})
+```
+
+**Examples**:
+- Find high-priority tasks: `queryBlocksByTag("task", { properties: [{ name: "priority", op: ">=", value: 8 }] })`
+- Find notes without category: `queryBlocksByTag("note", { properties: [{ name: "category", op: "is null" }] })`
+- Find specific author: `queryBlocksByTag("article", { properties: [{ name: "author", op: "==", value: "张三" }] })`
+

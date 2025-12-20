@@ -634,7 +634,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
           signal: aborter.signal,
-          tools: TOOLS,
+          // Don't pass tools here - we want a text response, not more tool calls
         })) {
           chunkCount++;
           console.log(`[handleSend] Final response chunk #${chunkCount}:`, chunk);
