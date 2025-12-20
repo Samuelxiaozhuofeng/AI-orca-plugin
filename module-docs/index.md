@@ -12,6 +12,7 @@
 2. `module-docs/02-chat-panel.md`：AI Chat 面板（mock 对话、双栏布局、基础交互）
 3. `module-docs/03-settings.md`：设置面板接入（settings schema → Orca 设置面板 `.orca-settings`）
 4. `module-docs/04-context.md`：上下文读取与选择（block/page/tag、预览、右键菜单入口）
+5. `module-docs/05-session-persistence.md`：会话持久化（保存/加载/历史/自动保存）
 
 ## 约定（所有模块通用）
 

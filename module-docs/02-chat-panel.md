@@ -37,15 +37,19 @@
 ## 已知限制
 
 - 需要先在 Settings 中配置 API Key / URL / Model，否则会提示缺失配置
-- 消息列表未做持久化与会话管理（后续 Step 3 可扩展）
 
 ## 下一步
 
-- （可选）会话历史持久化（`orca.plugins.setData/getData`）
 - （可选）Prompt 模板 / 快捷键 / 导出等完善
+- （可选）会话搜索功能
 
 ## 更新记录
 
 - 2025-12-19：实现双栏布局、mock 对话与基础交互
 - 2025-12-19：右侧信息栏接入 ContextSelector 与 Preview（详情见 `module-docs/04-context.md`）
 - 2025-12-19：接入 OpenAI-compatible 对话（含流式 + Stop）
+- 2025-12-20：实现会话持久化功能（详情见 `module-docs/05-session-persistence.md`）
+  - Header 新增 Save 按钮和 History 下拉菜单
+  - 支持保存/加载/删除会话
+  - 支持创建新对话
+  - 支持关闭时自动保存（需在设置中启用）

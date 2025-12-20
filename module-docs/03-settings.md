@@ -18,6 +18,8 @@
 
 通过 `orca.plugins.setSettingsSchema(pluginName, schema)` 注册：
 
+### API 配置
+
 - `apiKey`：API Key
 - `apiUrl`：API URL（默认 `https://api.openai.com/v1`）
 - `model`：模型选择（含 Custom）
@@ -25,6 +27,14 @@
 - `systemPrompt`：系统提示词
 - `temperature`：温度
 - `maxTokens`：最大 tokens
+
+### 会话持久化配置
+
+- `autoSaveChat`：自动保存模式
+  - `on_close`：关闭面板时自动保存
+  - `manual`：仅手动保存（默认）
+  - `never`：从不保存
+- `maxSavedSessions`：最大保存会话数（默认 10）
 
 ## UI 交互
 
@@ -41,13 +51,15 @@
 
 ## 已知限制
 
-- 当前仅注册 schema；AI 面板尚未消费这些配置（Step 3 才真正接入请求逻辑）。
+- 设置变更后立即生效，无需重启插件
 
 ## 下一步
 
-- Step 3：根据 settings 组装请求参数（key/url/model/prompt），并在发送时校验缺失字段与错误提示。
+- （可选）更多 AI 模型预设选项
+- （可选）导出/导入设置
 
 ## 更新记录
 
 - 2025-12-19：把 AI 配置迁移到 Orca 设置面板（schema）
+- 2025-12-20：新增会话持久化设置项（autoSaveChat, maxSavedSessions）
 
