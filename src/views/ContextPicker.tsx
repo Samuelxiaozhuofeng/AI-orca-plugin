@@ -293,19 +293,36 @@ export default function ContextPicker({
     const gap = 4;
 
     let left = rect.left;
-    let top = rect.bottom + gap;
+    // Removed default "top" calculation here
 
     left = Math.max(
       viewportPadding,
       Math.min(left, window.innerWidth - menuMaxWidth - viewportPadding),
     );
 
-    if (top + menuMaxHeight + viewportPadding > window.innerHeight) {
-      top = Math.max(viewportPadding, rect.top - menuMaxHeight - gap);
-    }
-
     menuStyle.left = left;
-    menuStyle.top = top;
+
+    // Smart positioning: Prefer "bottom" (show above) if space below is limited
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    
+    // If space below is less than menu height AND space above is larger, show above
+    // Assuming button is at bottom, spaceBelow is small
+    const showAbove = spaceBelow < menuMaxHeight && spaceAbove > spaceBelow;
+
+    if (showAbove) {
+        // Position using 'bottom' property so it grows upwards from the button
+        menuStyle.bottom = window.innerHeight - rect.top + gap;
+        menuStyle.maxHeight = Math.min(menuMaxHeight, spaceAbove - viewportPadding);
+        menuStyle.top = "auto";
+        // Also ensure flex direction is column-reverse if we want items to grow up? 
+        // No, standard list is fine, just the container box moves up.
+    } else {
+        // Standard drop-down
+        menuStyle.top = rect.bottom + gap;
+        menuStyle.maxHeight = Math.min(menuMaxHeight, spaceBelow - viewportPadding);
+        menuStyle.bottom = "auto";
+    }
   } else {
     menuStyle.top = 8;
     menuStyle.left = 8;
