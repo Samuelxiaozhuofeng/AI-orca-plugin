@@ -10,14 +10,16 @@ const React = window.React as unknown as {
   useState: <T>(
     initial: T | (() => T),
   ) => [T, (next: T | ((prev: T) => T)) => void];
+  useMemo: <T>(fn: () => T, deps: any[]) => T;
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
 };
-const { createElement, useRef, useState, useCallback } = React;
+const { createElement, useRef, useState, useMemo, useCallback } = React;
 
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
 };
-const { Button, CompositionTextArea, Select } = orca.components;
+const { Button, CompositionTextArea, ContextMenu, Menu, MenuText, MenuTitle, MenuSeparator, Input } =
+  orca.components;
 
 type Props = {
   onSend: (message: string) => void;
@@ -27,6 +29,7 @@ type Props = {
   modelOptions: AiModelOption[];
   selectedModel: string;
   onModelChange: (model: string) => void;
+  onAddModel?: (model: string) => void | Promise<void>;
 };
 
 /**
@@ -41,15 +44,83 @@ export default function ChatInput({
   modelOptions,
   selectedModel,
   onModelChange,
+  onAddModel,
 }: Props) {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const [modelFilter, setModelFilter] = useState("");
+  const [modelDraft, setModelDraft] = useState("");
+  const [addingModel, setAddingModel] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
 
   const canSend = text.trim().length > 0 && !disabled;
+
+  const selectedModelLabel = useMemo(() => {
+    const hit = modelOptions.find((o) => o.value === selectedModel);
+    return hit?.label || selectedModel || "Select model";
+  }, [modelOptions, selectedModel]);
+
+  const filteredModelOptions = useMemo(() => {
+    const q = modelFilter.trim().toLowerCase();
+    if (!q) return modelOptions;
+    return modelOptions.filter((o) => {
+      const label = (o.label || "").toLowerCase();
+      const value = (o.value || "").toLowerCase();
+      return label.includes(q) || value.includes(q);
+    });
+  }, [modelFilter, modelOptions]);
+
+  const modelGroups = useMemo(() => {
+    const order = ["Built-in", "Custom", "Other"];
+    const grouped = new Map<string, AiModelOption[]>();
+    for (const opt of filteredModelOptions) {
+      const g = opt.group || "Other";
+      const arr = grouped.get(g);
+      if (arr) arr.push(opt);
+      else grouped.set(g, [opt]);
+    }
+    const keys = [
+      ...order.filter((k) => grouped.has(k)),
+      ...[...grouped.keys()].filter((k) => !order.includes(k)).sort(),
+    ];
+    return keys.map((k) => ({ group: k, options: grouped.get(k) || [] }));
+  }, [filteredModelOptions]);
+
+  const handleAddModel = useCallback(
+    async (close: () => void) => {
+      const next = modelDraft.trim();
+      if (!next) return;
+
+      // If already exists, just select it.
+      if (modelOptions.some((o) => o.value === next)) {
+        onModelChange(next);
+        setModelDraft("");
+        close();
+        return;
+      }
+
+      if (!onAddModel) {
+        onModelChange(next);
+        setModelDraft("");
+        close();
+        return;
+      }
+
+      try {
+        setAddingModel(true);
+        await onAddModel(next);
+        onModelChange(next);
+        setModelDraft("");
+        close();
+      } finally {
+        setAddingModel(false);
+      }
+    },
+    [modelDraft, modelOptions, onAddModel, onModelChange],
+  );
 
   const handleSend = useCallback(() => {
     const val = textareaRef.current?.value || text;
@@ -176,20 +247,187 @@ export default function ChatInput({
                   "Add context"
               ),
             ),
-            createElement(Select as any, {
-              selected: selectedModel ? [selectedModel] : [],
-              options: modelOptions,
-              onChange: (selected: string[]) => {
-                const next = selected?.[0] ?? "";
-                if (next && next !== selectedModel) onModelChange(next);
+            createElement(
+              ContextMenu as any,
+              {
+                defaultPlacement: "top",
+                placement: "vertical",
+                alignment: "right",
+                allowBeyondContainer: true,
+                offset: 8,
+                menu: (close: () => void) => {
+                  const menuItems: any[] = [];
+                  if (modelGroups.length === 0) {
+                    menuItems.push(
+                      createElement(MenuText as any, {
+                        key: "empty",
+                        title: "No models found",
+                        disabled: true,
+                      }),
+                    );
+                  } else {
+                    for (let i = 0; i < modelGroups.length; i++) {
+                      const { group, options } = modelGroups[i];
+                      menuItems.push(createElement(MenuTitle as any, { key: `t:${group}`, title: group }));
+                      menuItems.push(
+                        ...options.map((opt) => {
+                          const isSelected = opt.value === selectedModel;
+                          const subtitle = opt.label === opt.value ? undefined : opt.value;
+                          return createElement(MenuText as any, {
+                            key: opt.value,
+                            title: opt.label,
+                            subtitle,
+                            postIcon: isSelected ? "ti ti-check" : undefined,
+                            onClick: () => {
+                              if (opt.value !== selectedModel) onModelChange(opt.value);
+                              close();
+                            },
+                          });
+                        }),
+                      );
+                      if (i !== modelGroups.length - 1) {
+                        menuItems.push(createElement(MenuSeparator as any, { key: `s:${group}` }));
+                      }
+                    }
+                  }
+
+                  return createElement(
+                    "div",
+                    {
+                      style: {
+                        width: 520,
+                        padding: 12,
+                        background: "var(--orca-color-bg-1)",
+                      },
+                    },
+                    createElement(
+                      "div",
+                      { style: { display: "flex", gap: 12 } },
+                      // Left: model list
+                      createElement(
+                        "div",
+                        {
+                          style: {
+                            flex: 1,
+                            minWidth: 0,
+                            borderRight: "1px solid var(--orca-color-border)",
+                            paddingRight: 12,
+                          },
+                        },
+                        createElement(Input as any, {
+                          placeholder: "Filter models…",
+                          value: modelFilter,
+                          onChange: (e: any) => setModelFilter(e.target.value),
+                          pre: createElement("i", { className: "ti ti-search" }),
+                        }),
+                        createElement(
+                          "div",
+                          {
+                            style: {
+                              marginTop: 8,
+                              maxHeight: 280,
+                              overflow: "auto",
+                              paddingRight: 4,
+                            },
+                          },
+                          createElement(
+                            Menu as any,
+                            { keyboardNav: true, navDirection: "vertical" },
+                            ...menuItems,
+                          ),
+                        ),
+                      ),
+                      // Right: add model
+                      createElement(
+                        "div",
+                        { style: { width: 220, flexShrink: 0 } },
+                        createElement(
+                          "div",
+                          {
+                            style: {
+                              fontSize: 12,
+                              fontWeight: 600,
+                              marginBottom: 8,
+                              color: "var(--orca-color-text-1)",
+                            },
+                          },
+                          "Add model",
+                        ),
+                        createElement(Input as any, {
+                          placeholder: "e.g. gpt-4.1-mini",
+                          value: modelDraft,
+                          onChange: (e: any) => setModelDraft(e.target.value),
+                          onKeyDown: (e: any) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              void handleAddModel(close);
+                            }
+                          },
+                          pre: createElement("i", { className: "ti ti-plus" }),
+                        }),
+                        createElement(
+                          Button,
+                          {
+                            variant: "solid",
+                            disabled: addingModel || !modelDraft.trim(),
+                            onClick: () => void handleAddModel(close),
+                            style: { marginTop: 8, width: "100%" },
+                          },
+                          addingModel ? "Adding..." : "Add",
+                        ),
+                        createElement(
+                          "div",
+                          {
+                            style: {
+                              marginTop: 8,
+                              fontSize: 11,
+                              color: "var(--orca-color-text-3)",
+                              lineHeight: 1.4,
+                            },
+                          },
+                          "Models share the same API URL/Key (for now).",
+                        ),
+                      ),
+                    ),
+                  );
+                },
               },
-              width: 200,
-              placeholder: "Select model",
-              filter: true,
-              filterPlaceholder: "Search models...",
-              withClear: false,
-              pre: createElement("i", { className: "ti ti-cpu" }),
-            }),
+              (openMenu: (e: any) => void) =>
+                createElement(
+                  Button,
+                  {
+                    variant: "plain",
+                    onClick: openMenu,
+                    title: `Model: ${selectedModel}`,
+                    style: {
+                      padding: "2px 10px",
+                      height: "24px",
+                      fontSize: 12,
+                      color: "var(--orca-color-text-2)",
+                      borderRadius: "12px",
+                      background: "var(--orca-color-bg-3)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      maxWidth: 240,
+                    },
+                  },
+                  createElement("i", { className: "ti ti-cpu" }),
+                  createElement(
+                    "span",
+                    {
+                      style: {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        maxWidth: 170,
+                      },
+                    },
+                    selectedModelLabel,
+                  ),
+                  createElement("i", { className: "ti ti-chevron-up" }),
+                ),
+            ),
         ),
         // TextArea and Send Button Row
         createElement(

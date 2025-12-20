@@ -13,6 +13,7 @@ import {
   buildAiModelOptions,
   getAiChatSettings,
   resolveAiModel,
+  updateAiChatSettings,
   validateAiChatSettingsWithModel,
 } from "../settings/ai-chat-settings";
 import { searchBlocksByTag, searchBlocksByText, queryBlocksByTag } from "../services/search-service";
@@ -858,6 +859,27 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setCurrentSession((prev: SavedSession) => ({ ...prev, model: nextModel }));
   }, []);
 
+  const handleAddModelToSettings = useCallback(
+    async (model: string) => {
+      const trimmed = model.trim();
+      if (!trimmed) return;
+
+      try {
+        const current = getAiChatSettings(pluginNameForUi);
+        if (current.customModels.some((m) => m.model === trimmed)) return;
+
+        await updateAiChatSettings("app", pluginNameForUi, {
+          customModels: [...current.customModels, { model: trimmed }],
+        });
+        orca.notify("success", `Added model: ${trimmed}`);
+      } catch (err: any) {
+        const msg = String(err?.message ?? err ?? "unknown error");
+        orca.notify("error", `Failed to add model: ${msg}`);
+      }
+    },
+    [pluginNameForUi],
+  );
+
   // Construct message elements to properly handle loading state
   const messageElements = messages.map((m: Message) => {
       // Skip tool messages from display (they're internal)
@@ -1066,6 +1088,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       modelOptions,
       selectedModel,
       onModelChange: handleModelChange,
+      onAddModel: handleAddModelToSettings,
     }),
   );
 }

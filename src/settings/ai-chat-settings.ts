@@ -30,15 +30,10 @@ export async function registerAiChatSettingsSchema(
     customModels: {
       label: "Saved Custom Models",
       description:
-        "Saved model names for quick switching in Chat Panel (models share the same API URL/Key for now).",
+        "Saved model names for quick switching in Chat Panel (models share the same API URL/Key for now). You can also add models from the Chat Panel model picker.",
       type: "array",
       defaultValue: [],
       arrayItemSchema: {
-        label: {
-          label: "Label (optional)",
-          type: "string",
-          defaultValue: "",
-        },
         model: {
           label: "Model Name",
           type: "string",
@@ -95,7 +90,7 @@ export type AiChatSettings = {
 };
 
 export type AiModelPreset = {
-  label: string;
+  label?: string;
   model: string;
 };
 
