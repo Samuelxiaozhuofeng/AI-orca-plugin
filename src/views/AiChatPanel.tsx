@@ -17,6 +17,7 @@ import {
   validateAiChatSettingsWithModel,
 } from "../settings/ai-chat-settings";
 import { searchBlocksByTag, searchBlocksByText, queryBlocksByTag } from "../services/search-service";
+import { parsePropertyFilters } from "../utils/query-filter-parser";
 import {
   loadSessions,
   saveSession,
@@ -378,6 +379,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               type: "string",
               description: "The tag name to query for (e.g., 'task', 'note', 'project')",
             },
+            tag: {
+              type: "string",
+              description: "Alias of tagName (some clients/models may send `tag` instead).",
+            },
             properties: {
               type: "array",
               description: "Array of property filters to apply",
@@ -398,6 +403,22 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                 },
                 required: ["name", "op"],
               },
+            },
+            property_filters: {
+              type: "string",
+              description: "Optional compact filter string like \"priority == 6\" or \"priority >= 8 and category is null\". Prefer `properties` when possible.",
+            },
+            propertyFilter: {
+              type: "string",
+              description: "Alias of `property_filters` (some clients/models may send `propertyFilter`).",
+            },
+            filter: {
+              type: "string",
+              description: "Alias of `property_filters` (some clients/models may send `filter`).",
+            },
+            query: {
+              type: "string",
+              description: "Alias of `property_filters` (some clients/models may send `query` like \"priority > 5\" along with `tagName`/`tag`).",
             },
             maxResults: {
               type: "number",
@@ -469,13 +490,60 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         return `Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
       } else if (toolName === "queryBlocksByTag") {
         // Advanced query with property filters
-        const tagName = args.tagName || args.tag || args.query;
-        const properties = args.properties || [];
+        let tagName = typeof args.tagName === "string"
+          ? args.tagName
+          : (typeof args.tag === "string" ? args.tag : undefined);
+
+        const queryText = typeof args.query === "string" ? args.query : undefined;
+        const propertyFiltersInput = args.property_filters
+          ?? args.propertyFilters
+          ?? args.propertyFilter
+          ?? args.property_filter
+          ?? args.filters
+          ?? args.filter;
+        let properties: any[] = [];
+
+        if (Array.isArray(args.properties)) {
+          properties = args.properties;
+        } else if (args.properties && typeof args.properties === "object") {
+          properties = [args.properties];
+        } else if (typeof args.properties === "string") {
+          properties = parsePropertyFilters(args.properties);
+        }
+
+        if (propertyFiltersInput !== undefined) {
+          properties = [...properties, ...parsePropertyFilters(propertyFiltersInput)];
+        }
+
+        if (queryText && queryText.trim()) {
+          if (tagName) {
+            const trimmedTag = String(tagName).trim();
+            const trimmedQuery = queryText.trim();
+            if (trimmedQuery !== trimmedTag) {
+              const parsedFromQuery = parsePropertyFilters(trimmedQuery);
+              if (parsedFromQuery.length === 0) {
+                return "Error: Unable to parse property filters from `query`. Use `properties` array or a string like \"priority == 6\".";
+              }
+              properties = [...properties, ...parsedFromQuery];
+            }
+          } else {
+            const parsedFromQuery = parsePropertyFilters(queryText);
+            if (parsedFromQuery.length > 0) {
+              properties = [...properties, ...parsedFromQuery];
+            } else {
+              tagName = queryText;
+            }
+          }
+        }
         const maxResults = args.maxResults || 50;
 
         if (!tagName) {
           console.error("[Tool] Missing tag name parameter");
           return "Error: Missing tag name parameter";
+        }
+
+        if (propertyFiltersInput !== undefined && properties.length === 0) {
+          return "Error: Unable to parse property filters. Use `properties` array or a string like \"priority == 6\".";
         }
 
         const results = await queryBlocksByTag(tagName, {
@@ -491,10 +559,28 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         }
 
         // Format with clickable block links
+        const formatPropValue = (value: any) => {
+          if (value === null) return "null";
+          if (typeof value === "string") return value;
+          if (typeof value === "number" || typeof value === "boolean") return String(value);
+          try {
+            const s = JSON.stringify(value);
+            return s.length > 120 ? `${s.slice(0, 117)}...` : s;
+          } catch {
+            return String(value);
+          }
+        };
+
         const summary = results.map((r, i) => {
           const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
           const body = r.fullContent ?? r.content;
-          return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
+          const propValues = (r as any).propertyValues && typeof (r as any).propertyValues === "object"
+            ? (r as any).propertyValues
+            : null;
+          const propSuffix = propValues && Object.keys(propValues).length > 0
+            ? ` (${Object.entries(propValues).map(([k, v]) => `${k}=${formatPropValue(v)}`).join(", ")})`
+            : "";
+          return `${i + 1}. [${linkTitle}](orca-block:${r.id})${propSuffix}\n${body}`;
         }).join("\n\n");
 
         const filterDesc = properties.length > 0
@@ -858,18 +944,56 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
         }
 
-        setStreamingMessageId(null);
+        if (!usedFallback && finalContent.trim().length === 0) {
+          console.warn("[AI] Empty final response, retrying with fallback format...");
+          usedFallback = true;
+          messagesWithTools = messagesWithToolsFallback;
 
-        if (chunkCount === 0) {
-          console.warn("[AI] No response received from API");
+          try {
+            chunkCount = 0;
+            finalContent = "";
+
+            for await (const chunk of openAIChatCompletionsStream({
+              apiUrl: settings.apiUrl,
+              apiKey: settings.apiKey,
+              model,
+              messages: messagesWithTools,
+              temperature: settings.temperature,
+              maxTokens: settings.maxTokens,
+              signal: aborter.signal,
+            })) {
+              chunkCount++;
+
+              if (chunk.type === "content" && chunk.content) {
+                finalContent += chunk.content;
+                setMessages((prev: Message[]) =>
+                  prev.map((m: Message) =>
+                    m.id === finalAssistantId ? { ...m, content: finalContent } : m,
+                  ),
+                );
+                queueMicrotask(scrollToBottom);
+              }
+            }
+          } catch (fallbackErr: any) {
+            console.error("[AI] Fallback retry after empty response failed:", fallbackErr);
+          }
+        }
+
+        if (finalContent.trim().length === 0) {
+          const toolFallback = toolResultMessages.map((m) => m.content).join("\n\n").trim();
+          finalContent = toolFallback || "(empty response from API)";
           setMessages((prev: Message[]) =>
             prev.map((m: Message) =>
-              m.id === finalAssistantId && !m.content ? { ...m, content: "(empty response from API)" } : m,
+              m.id === finalAssistantId ? { ...m, content: finalContent } : m,
             ),
           );
-        } else {
-          console.log(`[AI] Final response complete (${finalContent.length} chars)`);
         }
+
+        setStreamingMessageId(null);
+
+        const hasRenderableText = finalContent.trim().length > 0;
+        if (!hasRenderableText) console.warn("[AI] No response received from API");
+        else console.log(`[AI] Final response complete (${finalContent.length} chars)`);
 	      }
 	    } catch (err: any) {
 	      const isAbort = String(err?.name ?? "") === "AbortError";

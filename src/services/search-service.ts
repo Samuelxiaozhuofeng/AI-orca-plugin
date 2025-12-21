@@ -14,6 +14,7 @@ export interface SearchResult {
   created?: Date;
   modified?: Date;
   tags?: string[];
+  propertyValues?: Record<string, any>;
 }
 
 function unwrapBackendResult<T>(result: any): T {
@@ -334,6 +335,10 @@ export async function queryBlocksByTag(
       return [];
     }
 
+    if (!options.properties || options.properties.length === 0) {
+      return await searchBlocksByTag(tagName, maxResults);
+    }
+
     const description = buildQueryDescription({
       tagName,
       properties: options.properties,
@@ -371,7 +376,21 @@ export async function queryBlocksByTag(
         },
       };
       console.log("[queryBlocksByTag] Legacy query description:", JSON.stringify(legacyDescription));
-      blocks = await runQuery(legacyDescription);
+      try {
+        blocks = await runQuery(legacyDescription);
+      } catch (legacyErr) {
+        console.warn("[queryBlocksByTag] Legacy QueryDescription failed, retrying direct tag query:", legacyErr);
+        const directDescription = {
+          ...description,
+          q: {
+            kind: 4,
+            name: tagName,
+            properties: tagQuery?.properties,
+          },
+        };
+        console.log("[queryBlocksByTag] Direct tag query description:", JSON.stringify(directDescription));
+        blocks = await runQuery(directDescription);
+      }
     }
 
     if (!Array.isArray(blocks)) {
@@ -398,6 +417,13 @@ export async function queryBlocksByTag(
       }),
     );
 
+    const propNames = Array.isArray(options.properties)
+      ? options.properties
+        .map((p: any) => p?.name)
+        .filter((v: any) => typeof v === "string" && v.trim())
+        .map((v: string) => v.trim())
+      : [];
+
     return trees.map(({ block, tree }: { block: any; tree: any }) => {
       let fullContent: string | undefined;
       if (tree) {
@@ -418,6 +444,9 @@ export async function queryBlocksByTag(
         title: extractTitle(block),
         content: extractContent(block),
         fullContent,
+        propertyValues: propNames.length
+          ? buildPropertyValues(pickBlockForPropertyExtraction(block, tree), propNames)
+          : undefined,
         created: block.created ? new Date(block.created) : undefined,
         modified: block.modified ? new Date(block.modified) : undefined,
         tags: block.aliases || [],
@@ -467,4 +496,72 @@ function safeText(block: any): string {
       .trim();
   }
   return "";
+}
+
+function findPropertyValueInList(list: any, propertyName: string): any | undefined {
+  if (!Array.isArray(list)) return undefined;
+  const target = String(propertyName ?? "").trim();
+  if (!target) return undefined;
+
+  const exact = list.find((p: any) => p && typeof p.name === "string" && p.name === target);
+  if (exact && "value" in exact) return exact.value;
+
+  const lowered = target.toLowerCase();
+  const ci = list.find((p: any) => p && typeof p.name === "string" && p.name.toLowerCase() === lowered);
+  if (ci && "value" in ci) return ci.value;
+
+  return undefined;
+}
+
+function extractPropertyValueFromBlock(block: any, propertyName: string): any | undefined {
+  const fromProps = findPropertyValueInList(block?.properties, propertyName);
+  if (fromProps !== undefined) return fromProps;
+
+  const refs = Array.isArray(block?.refs) ? block.refs : [];
+  for (const ref of refs) {
+    const fromRef = findPropertyValueInList(ref?.data, propertyName);
+    if (fromRef !== undefined) return fromRef;
+  }
+
+  const backRefs = Array.isArray(block?.backRefs) ? block.backRefs : [];
+  for (const ref of backRefs) {
+    const fromRef = findPropertyValueInList(ref?.data, propertyName);
+    if (fromRef !== undefined) return fromRef;
+  }
+
+  return undefined;
+}
+
+function buildPropertyValues(block: any, names: string[]): Record<string, any> | undefined {
+  const out: Record<string, any> = {};
+  const seen = new Set<string>();
+
+  for (const nameRaw of names) {
+    const name = String(nameRaw ?? "").trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+
+    const value = extractPropertyValueFromBlock(block, name);
+    if (value !== undefined) out[name] = value;
+  }
+
+  return Object.keys(out).length ? out : undefined;
+}
+
+function pickBlockForPropertyExtraction(block: any, tree: any): any {
+  if (block && typeof block === "object") return block;
+  if (!tree) return block;
+
+  if (Array.isArray(tree)) {
+    const candidate = tree.find((item) => item && typeof item === "object");
+    return candidate ?? block;
+  }
+
+  if (tree && typeof tree === "object" && typeof (tree as any).block === "object") {
+    return (tree as any).block;
+  }
+
+  if (tree && typeof tree === "object") return tree;
+
+  return block;
 }
