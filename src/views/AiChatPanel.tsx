@@ -412,22 +412,18 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   // Execute tool calls
   async function executeTool(toolName: string, args: any): Promise<string> {
-    console.log("[executeTool] Called with:", { toolName, args });
-
     try {
       if (toolName === "searchBlocksByTag") {
         // Support multiple parameter names: tagName, tag, query
         const tagName = args.tagName || args.tag || args.query;
         const maxResults = args.maxResults || 50;
-        console.log("[executeTool] searchBlocksByTag params:", { tagName, maxResults });
 
         if (!tagName) {
-          console.error("[executeTool] Missing tagName parameter, args:", args);
+          console.error("[Tool] Missing tag name parameter");
           return "Error: Missing tag name parameter";
         }
 
         const results = await searchBlocksByTag(tagName, Math.min(maxResults, 50));
-        console.log("[executeTool] searchBlocksByTag results:", results);
 
         if (results.length === 0) {
           return `No notes found with tag "${tagName}".`;
@@ -450,15 +446,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         }
 
         const maxResults = args.maxResults || 50;
-        console.log("[executeTool] searchBlocksByText params:", { searchText, maxResults });
 
         if (!searchText || typeof searchText !== "string") {
-          console.error("[executeTool] Missing or invalid searchText parameter, args:", args);
+          console.error("[Tool] Missing or invalid search text parameter");
           return "Error: Missing search text parameter";
         }
 
         const results = await searchBlocksByText(searchText, Math.min(maxResults, 50));
-        console.log("[executeTool] searchBlocksByText results:", results);
 
         if (results.length === 0) {
           return `No notes found containing "${searchText}".`;
@@ -477,10 +471,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         const tagName = args.tagName || args.tag || args.query;
         const properties = args.properties || [];
         const maxResults = args.maxResults || 50;
-        console.log("[executeTool] queryBlocksByTag params:", { tagName, properties, maxResults });
 
         if (!tagName) {
-          console.error("[executeTool] Missing tagName parameter, args:", args);
+          console.error("[Tool] Missing tag name parameter");
           return "Error: Missing tag name parameter";
         }
 
@@ -488,7 +481,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           properties,
           maxResults: Math.min(maxResults, 50),
         });
-        console.log("[executeTool] queryBlocksByTag results:", results);
 
         if (results.length === 0) {
           const filterDesc = properties.length > 0
@@ -508,11 +500,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           : '';
         return `Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
       } else {
-        console.error("[executeTool] Unknown tool:", toolName);
+        console.error("[Tool] Unknown tool:", toolName);
         return `Unknown tool: ${toolName}`;
       }
     } catch (error: any) {
-      console.error("[executeTool] Error:", error);
+      console.error("[Tool] Error:", error);
       return `Error executing ${toolName}: ${error?.message ?? error ?? "unknown error"}`;
     }
   }
@@ -587,9 +579,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       };
 
       // Call AI with tools enabled
+      console.log("[AI] Sending user message:", content);
+
       const assistantId = nowId();
       setStreamingMessageId(assistantId);
-      
+
       setMessages((prev: Message[]) => [
         ...prev,
         {
@@ -673,18 +667,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           const toolName = toolCall.function.name;
           let args: any = {};
 
-          console.log("[handleSend] Processing tool call:", toolCall);
-          console.log("[handleSend] Tool function arguments string:", toolCall.function.arguments);
+          console.log(`[AI] Calling tool: ${toolName}`, toolCall.function.arguments);
 
           try {
             args = JSON.parse(toolCall.function.arguments);
-            console.log("[handleSend] Parsed arguments:", args);
           } catch (err) {
-            console.error("[handleSend] Failed to parse tool arguments:", toolCall.function.arguments, err);
+            console.error("[AI] Failed to parse tool arguments:", err);
           }
 
           const result = await executeTool(toolName, args);
-          console.log("[handleSend] Tool result:", result);
+          console.log(`[AI] Tool result: ${result.substring(0, 100)}${result.length > 100 ? '...' : ''}`);
 
           // Create tool result message
           const toolResultMsg: Message = {
@@ -761,12 +753,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         let messagesWithTools = messagesWithToolsStandard;
         let usedFallback = false;
 
-        console.log("[handleSend] Messages with tool results:", JSON.stringify(messagesWithTools, null, 2));
-
         // Call AI again with the tool results to get final response
+        console.log("[AI] Sending tool results back to AI...");
+
         const finalAssistantId = nowId();
         setStreamingMessageId(finalAssistantId);
-        
+
         setMessages((prev: Message[]) => [
           ...prev,
           {
@@ -777,9 +769,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           },
         ]);
         queueMicrotask(scrollToBottom);
-
-        console.log("[handleSend] Calling AI again with tool results...");
-        console.log("[handleSend] Final messages for AI:", JSON.stringify(messagesWithTools, null, 2));
 
         let finalContent = "";
         let chunkCount = 0;
@@ -809,7 +798,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           })) {
             clearTimeout(timeoutId); // Clear timeout on first chunk
             chunkCount++;
-            console.log(`[handleSend] Final response chunk #${chunkCount}:`, chunk);
 
             if (chunk.type === "content" && chunk.content) {
               finalContent += chunk.content;
@@ -823,13 +811,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
 
           clearTimeout(timeoutId);
-          console.log("[handleSend] Stream iteration complete. Total chunks:", chunkCount);
         } catch (streamErr: any) {
-          console.error("[handleSend] Error during final response stream:", streamErr);
+          console.error("[AI] Error during final response:", streamErr);
 
           // If we haven't used fallback yet and error is not abort, try fallback format
           if (!usedFallback && String(streamErr?.name) !== "AbortError") {
-            console.log("[handleSend] Retrying with fallback message format (tool results as user message)...");
+            console.log("[AI] Retrying with fallback format...");
             usedFallback = true;
             messagesWithTools = messagesWithToolsFallback;
 
@@ -848,7 +835,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                 signal: aborter.signal,
               })) {
                 chunkCount++;
-                console.log(`[handleSend] Fallback response chunk #${chunkCount}:`, chunk);
 
                 if (chunk.type === "content" && chunk.content) {
                   finalContent += chunk.content;
@@ -860,9 +846,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                   queueMicrotask(scrollToBottom);
                 }
               }
-              console.log("[handleSend] Fallback succeeded. Total chunks:", chunkCount);
+              console.log("[AI] Fallback succeeded");
             } catch (fallbackErr: any) {
-              console.error("[handleSend] Fallback also failed:", fallbackErr);
+              console.error("[AI] Fallback also failed:", fallbackErr);
               throw fallbackErr; // Re-throw to be caught by outer catch
             }
           } else {
@@ -873,15 +859,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         setStreamingMessageId(null);
 
         if (chunkCount === 0) {
-          console.warn("[handleSend] No chunks received from final response!");
+          console.warn("[AI] No response received from API");
           setMessages((prev: Message[]) =>
             prev.map((m: Message) =>
               m.id === finalAssistantId && !m.content ? { ...m, content: "(empty response from API)" } : m,
             ),
           );
+        } else {
+          console.log(`[AI] Final response complete (${finalContent.length} chars)`);
         }
-
-        console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
 	      }
 	    } catch (err: any) {
 	      const isAbort = String(err?.name ?? "") === "AbortError";

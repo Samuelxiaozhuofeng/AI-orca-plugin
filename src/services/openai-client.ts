@@ -159,9 +159,6 @@ export async function* openAIChatCompletionsStream(
     requestBody.tools = args.tools;
   }
 
-  console.log("[openAIChatCompletionsStream] Request URL:", url);
-  console.log("[openAIChatCompletionsStream] Request body:", JSON.stringify(requestBody, null, 2));
-
   let res: Response;
   try {
     res = await fetch(url, {
@@ -174,49 +171,35 @@ export async function* openAIChatCompletionsStream(
       body: JSON.stringify(requestBody),
       signal: args.signal,
     });
-    console.log("[openAIChatCompletionsStream] Response received");
   } catch (fetchErr: any) {
-    console.error("[openAIChatCompletionsStream] Fetch error:", fetchErr);
+    console.error("[openAI] Fetch error:", fetchErr);
     throw fetchErr;
   }
 
-  console.log("[openAIChatCompletionsStream] Response status:", res.status);
-  console.log("[openAIChatCompletionsStream] Response headers:", Array.from(res.headers.entries()));
-
   if (!res.ok) {
     const msg = await readErrorMessage(res);
-    console.error("[openAIChatCompletionsStream] Error response:", msg);
+    console.error("[openAI] Error response:", res.status, msg);
     throw new Error(msg);
   }
 
   const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-  console.log("[openAIChatCompletionsStream] Content-Type:", contentType);
 
   if (!res.body || contentType.includes("application/json")) {
-    console.log("[openAIChatCompletionsStream] Non-streaming response detected");
     const json = await res.json();
-    console.log("[openAIChatCompletionsStream] JSON response:", json);
     const chunk = safeDeltaFromEvent(json);
     if (chunk.content || chunk.tool_calls) {
-      console.log("[openAIChatCompletionsStream] Yielding chunk:", chunk);
       yield chunk;
     }
     return;
   }
 
-  console.log("[openAIChatCompletionsStream] Starting SSE stream processing");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let lineCount = 0;
-  let chunkCount = 0;
 
   while (true) {
     const { value, done } = await reader.read();
-    if (done) {
-      console.log("[openAIChatCompletionsStream] Stream done. Total lines:", lineCount, "Total chunks:", chunkCount);
-      break;
-    }
+    if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
 
@@ -225,7 +208,6 @@ export async function* openAIChatCompletionsStream(
       if (newlineIndex === -1) break;
       const rawLine = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      lineCount++;
 
       const line = rawLine.trim();
       if (!line) continue;
@@ -233,22 +215,17 @@ export async function* openAIChatCompletionsStream(
 
       const data = line.slice("data:".length).trim();
       if (!data) continue;
-      if (data === "[DONE]") {
-        console.log("[openAIChatCompletionsStream] Received [DONE] marker");
-        return;
-      }
+      if (data === "[DONE]") return;
 
       let obj: any;
       try {
         obj = JSON.parse(data);
       } catch (parseErr) {
-        console.warn("[openAIChatCompletionsStream] Failed to parse SSE data:", data, parseErr);
+        console.warn("[openAI] Failed to parse SSE data:", data);
         continue;
       }
       const chunk = safeDeltaFromEvent(obj);
       if (chunk.content || chunk.tool_calls) {
-        chunkCount++;
-        console.log(`[openAIChatCompletionsStream] Yielding chunk #${chunkCount}:`, chunk);
         yield chunk;
       }
     }
