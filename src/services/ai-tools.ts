@@ -12,6 +12,7 @@ import {
   searchJournalEntries,
   queryBlocksAdvanced,
   getTagSchema,
+  getCachedTagSchema,
 } from "./search-service";
 import { parsePropertyFilters } from "../utils/query-filter-parser";
 import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
@@ -388,10 +389,10 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return "Error: Unable to parse property filters. Use `properties` array or a string like \"priority == 6\".";
       }
 
-      // Enrich properties with type information from tag schema
+      // Enrich properties with type information from tag schema (using cached version)
       if (properties.length > 0) {
         try {
-          const schema = await getTagSchema(tagName);
+          const schema = await getCachedTagSchema(tagName);
           properties = properties.map((prop: any) => {
             // If type is already set, use it
             if (prop.type !== undefined) {

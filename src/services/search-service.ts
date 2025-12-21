@@ -498,6 +498,71 @@ const PROPERTY_TYPE_NAMES: Record<number, string> = {
   6: "text-choices", // PropType.TextChoices
 };
 
+// ============================================================================
+// Tag Schema Cache
+// ============================================================================
+
+/**
+ * Cache entry for tag schema
+ */
+interface TagSchemaCacheEntry {
+  schema: TagSchema;
+  expiry: number;
+}
+
+/**
+ * In-memory cache for tag schemas to avoid redundant API calls
+ */
+const tagSchemaCache = new Map<string, TagSchemaCacheEntry>();
+
+/**
+ * Cache TTL: 30 minutes
+ */
+const TAG_SCHEMA_CACHE_TTL = 30 * 60 * 1000;
+
+/**
+ * Get cached tag schema or fetch from backend if cache miss/expired
+ * @param tagName - The name of the tag
+ * @returns Tag schema (from cache or freshly fetched)
+ */
+export async function getCachedTagSchema(tagName: string): Promise<TagSchema> {
+  const normalizedTagName = tagName.trim().toLowerCase();
+  const cached = tagSchemaCache.get(normalizedTagName);
+  
+  if (cached && Date.now() < cached.expiry) {
+    console.log(`[getCachedTagSchema] Cache hit for tag: "${tagName}"`);
+    return cached.schema;
+  }
+  
+  console.log(`[getCachedTagSchema] Cache miss for tag: "${tagName}", fetching...`);
+  const schema = await getTagSchema(tagName);
+  
+  tagSchemaCache.set(normalizedTagName, {
+    schema,
+    expiry: Date.now() + TAG_SCHEMA_CACHE_TTL,
+  });
+  
+  return schema;
+}
+
+/**
+ * Clear the tag schema cache (useful for testing or manual refresh)
+ */
+export function clearTagSchemaCache(): void {
+  tagSchemaCache.clear();
+  console.log("[clearTagSchemaCache] Cache cleared");
+}
+
+/**
+ * Remove a specific tag from the cache
+ * @param tagName - The tag name to invalidate
+ */
+export function invalidateTagSchemaCache(tagName: string): void {
+  const normalizedTagName = tagName.trim().toLowerCase();
+  tagSchemaCache.delete(normalizedTagName);
+  console.log(`[invalidateTagSchemaCache] Invalidated cache for tag: "${tagName}"`);
+}
+
 /**
  * Get the schema (property definitions) for a specific tag
  * This includes property names, types, and for choice properties, the option mappings
