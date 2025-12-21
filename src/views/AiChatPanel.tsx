@@ -704,7 +704,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         queueMicrotask(scrollToBottom);
 
         // Build the complete message history including tool results
-        const messagesWithTools: OpenAIChatMessage[] = [
+        // Option 1: Standard OpenAI format with tool role
+        const messagesWithToolsStandard: OpenAIChatMessage[] = [
           ...(systemParts.length
             ? [{ role: "system" as const, content: systemParts.join("\n\n") }]
             : []),
@@ -734,6 +735,32 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           })),
         ];
 
+        // Option 2: Fallback format - convert tool results to user messages
+        // Some API servers don't support the "tool" role, so we provide a fallback
+        const messagesWithToolsFallback: OpenAIChatMessage[] = [
+          ...(systemParts.length
+            ? [{ role: "system" as const, content: systemParts.join("\n\n") }]
+            : []),
+          ...messages.filter((m) => !m.localOnly).map((m) => {
+            const msg: OpenAIChatMessage = {
+              role: m.role as any,
+              content: m.content,
+            };
+            // Don't include tool_calls in fallback mode
+            return msg;
+          }),
+          { role: "user" as const, content },
+          // Include tool results as a user message
+          {
+            role: "user" as const,
+            content: `Tool Results:\n${toolResultMessages.map(m => `[${m.name}]: ${m.content}`).join('\n\n')}`,
+          },
+        ];
+
+        // Try standard format first, fallback if it fails
+        let messagesWithTools = messagesWithToolsStandard;
+        let usedFallback = false;
+
         console.log("[handleSend] Messages with tool results:", JSON.stringify(messagesWithTools, null, 2));
 
         // Call AI again with the tool results to get final response
@@ -756,41 +783,105 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
         let finalContent = "";
         let chunkCount = 0;
-        for await (const chunk of openAIChatCompletionsStream({
-          apiUrl: settings.apiUrl,
-          apiKey: settings.apiKey,
-          model,
-          messages: messagesWithTools,
-          temperature: settings.temperature,
-          maxTokens: settings.maxTokens,
-          signal: aborter.signal,
-          // Don't pass tools here - we want a text response, not more tool calls
-        })) {
-          chunkCount++;
-          console.log(`[handleSend] Final response chunk #${chunkCount}:`, chunk);
+        try {
+          // Create a timeout signal (30 seconds)
+          const timeoutController = new AbortController();
+          const timeoutId = setTimeout(() => {
+            console.warn("[handleSend] Request timeout after 30s, aborting...");
+            timeoutController.abort();
+          }, 30000);
 
-          if (chunk.type === "content" && chunk.content) {
-            finalContent += chunk.content;
-            setMessages((prev: Message[]) =>
-              prev.map((m: Message) =>
-                m.id === finalAssistantId ? { ...m, content: finalContent } : m,
-              ),
-            );
-            queueMicrotask(scrollToBottom);
+          // Combine with existing abort signal
+          const combinedSignal = aborter.signal;
+          if (timeoutController.signal.aborted || combinedSignal.aborted) {
+            throw new Error("Request aborted");
           }
-	        }
-	        
-	        setStreamingMessageId(null);
 
-	        if (chunkCount === 0) {
-	          setMessages((prev: Message[]) =>
-	            prev.map((m: Message) =>
-	              m.id === finalAssistantId && !m.content ? { ...m, content: "(empty response)" } : m,
-	            ),
-	          );
-	        }
+          for await (const chunk of openAIChatCompletionsStream({
+            apiUrl: settings.apiUrl,
+            apiKey: settings.apiKey,
+            model,
+            messages: messagesWithTools,
+            temperature: settings.temperature,
+            maxTokens: settings.maxTokens,
+            signal: combinedSignal,
+            // Don't pass tools here - we want a text response, not more tool calls
+          })) {
+            clearTimeout(timeoutId); // Clear timeout on first chunk
+            chunkCount++;
+            console.log(`[handleSend] Final response chunk #${chunkCount}:`, chunk);
 
-	        console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
+            if (chunk.type === "content" && chunk.content) {
+              finalContent += chunk.content;
+              setMessages((prev: Message[]) =>
+                prev.map((m: Message) =>
+                  m.id === finalAssistantId ? { ...m, content: finalContent } : m,
+                ),
+              );
+              queueMicrotask(scrollToBottom);
+            }
+          }
+
+          clearTimeout(timeoutId);
+          console.log("[handleSend] Stream iteration complete. Total chunks:", chunkCount);
+        } catch (streamErr: any) {
+          console.error("[handleSend] Error during final response stream:", streamErr);
+
+          // If we haven't used fallback yet and error is not abort, try fallback format
+          if (!usedFallback && String(streamErr?.name) !== "AbortError") {
+            console.log("[handleSend] Retrying with fallback message format (tool results as user message)...");
+            usedFallback = true;
+            messagesWithTools = messagesWithToolsFallback;
+
+            // Retry with fallback format
+            try {
+              chunkCount = 0;
+              finalContent = "";
+
+              for await (const chunk of openAIChatCompletionsStream({
+                apiUrl: settings.apiUrl,
+                apiKey: settings.apiKey,
+                model,
+                messages: messagesWithTools,
+                temperature: settings.temperature,
+                maxTokens: settings.maxTokens,
+                signal: aborter.signal,
+              })) {
+                chunkCount++;
+                console.log(`[handleSend] Fallback response chunk #${chunkCount}:`, chunk);
+
+                if (chunk.type === "content" && chunk.content) {
+                  finalContent += chunk.content;
+                  setMessages((prev: Message[]) =>
+                    prev.map((m: Message) =>
+                      m.id === finalAssistantId ? { ...m, content: finalContent } : m,
+                    ),
+                  );
+                  queueMicrotask(scrollToBottom);
+                }
+              }
+              console.log("[handleSend] Fallback succeeded. Total chunks:", chunkCount);
+            } catch (fallbackErr: any) {
+              console.error("[handleSend] Fallback also failed:", fallbackErr);
+              throw fallbackErr; // Re-throw to be caught by outer catch
+            }
+          } else {
+            throw streamErr; // Re-throw to be caught by outer catch
+          }
+        }
+
+        setStreamingMessageId(null);
+
+        if (chunkCount === 0) {
+          console.warn("[handleSend] No chunks received from final response!");
+          setMessages((prev: Message[]) =>
+            prev.map((m: Message) =>
+              m.id === finalAssistantId && !m.content ? { ...m, content: "(empty response from API)" } : m,
+            ),
+          );
+        }
+
+        console.log("[handleSend] Final response complete. Total chunks:", chunkCount, "Content:", finalContent);
 	      }
 	    } catch (err: any) {
 	      const isAbort = String(err?.name ?? "") === "AbortError";

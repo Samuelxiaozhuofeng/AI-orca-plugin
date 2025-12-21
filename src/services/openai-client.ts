@@ -159,38 +159,64 @@ export async function* openAIChatCompletionsStream(
     requestBody.tools = args.tools;
   }
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${args.apiKey}`,
-    },
-    body: JSON.stringify(requestBody),
-    signal: args.signal,
-  });
+  console.log("[openAIChatCompletionsStream] Request URL:", url);
+  console.log("[openAIChatCompletionsStream] Request body:", JSON.stringify(requestBody, null, 2));
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+      signal: args.signal,
+    });
+    console.log("[openAIChatCompletionsStream] Response received");
+  } catch (fetchErr: any) {
+    console.error("[openAIChatCompletionsStream] Fetch error:", fetchErr);
+    throw fetchErr;
+  }
+
+  console.log("[openAIChatCompletionsStream] Response status:", res.status);
+  console.log("[openAIChatCompletionsStream] Response headers:", Array.from(res.headers.entries()));
 
   if (!res.ok) {
     const msg = await readErrorMessage(res);
+    console.error("[openAIChatCompletionsStream] Error response:", msg);
     throw new Error(msg);
   }
 
   const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+  console.log("[openAIChatCompletionsStream] Content-Type:", contentType);
 
   if (!res.body || contentType.includes("application/json")) {
+    console.log("[openAIChatCompletionsStream] Non-streaming response detected");
     const json = await res.json();
+    console.log("[openAIChatCompletionsStream] JSON response:", json);
     const chunk = safeDeltaFromEvent(json);
-    if (chunk.content || chunk.tool_calls) yield chunk;
+    if (chunk.content || chunk.tool_calls) {
+      console.log("[openAIChatCompletionsStream] Yielding chunk:", chunk);
+      yield chunk;
+    }
     return;
   }
 
+  console.log("[openAIChatCompletionsStream] Starting SSE stream processing");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let lineCount = 0;
+  let chunkCount = 0;
 
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
+    if (done) {
+      console.log("[openAIChatCompletionsStream] Stream done. Total lines:", lineCount, "Total chunks:", chunkCount);
+      break;
+    }
 
     buffer += decoder.decode(value, { stream: true });
 
@@ -199,6 +225,7 @@ export async function* openAIChatCompletionsStream(
       if (newlineIndex === -1) break;
       const rawLine = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
+      lineCount++;
 
       const line = rawLine.trim();
       if (!line) continue;
@@ -206,16 +233,24 @@ export async function* openAIChatCompletionsStream(
 
       const data = line.slice("data:".length).trim();
       if (!data) continue;
-      if (data === "[DONE]") return;
+      if (data === "[DONE]") {
+        console.log("[openAIChatCompletionsStream] Received [DONE] marker");
+        return;
+      }
 
       let obj: any;
       try {
         obj = JSON.parse(data);
-      } catch {
+      } catch (parseErr) {
+        console.warn("[openAIChatCompletionsStream] Failed to parse SSE data:", data, parseErr);
         continue;
       }
       const chunk = safeDeltaFromEvent(obj);
-      if (chunk.content || chunk.tool_calls) yield chunk;
+      if (chunk.content || chunk.tool_calls) {
+        chunkCount++;
+        console.log(`[openAIChatCompletionsStream] Yielding chunk #${chunkCount}:`, chunk);
+        yield chunk;
+      }
     }
   }
 }
