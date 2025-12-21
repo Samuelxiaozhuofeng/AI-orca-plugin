@@ -4,8 +4,16 @@
  */
 
 import type { OpenAITool } from "./openai-client";
-import { searchBlocksByTag, searchBlocksByText, queryBlocksByTag } from "./search-service";
+import {
+  searchBlocksByTag,
+  searchBlocksByText,
+  queryBlocksByTag,
+  searchTasks,
+  searchJournalEntries,
+  queryBlocksAdvanced,
+} from "./search-service";
 import { parsePropertyFilters } from "../utils/query-filter-parser";
+import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
 
 /**
  * AI Tool definitions for OpenAI function calling
@@ -112,6 +120,96 @@ export const TOOLS: OpenAITool[] = [
           },
         },
         required: ["tagName"],
+      },
+    },
+  },
+  // ========== New Advanced Query Tools ==========
+  {
+    type: "function",
+    function: {
+      name: "searchTasks",
+      description: "Search for task blocks with optional completion status filter. Use when user asks about todos, tasks, or checklists (e.g., 'show my incomplete tasks', 'find all done tasks').",
+      parameters: {
+        type: "object",
+        properties: {
+          completed: {
+            type: "boolean",
+            description: "Filter by completion status: true for completed tasks, false for incomplete tasks. Omit to get all tasks.",
+          },
+          maxResults: {
+            type: "number",
+            description: "Maximum number of results to return (default: 50, max: 50)",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "searchJournalEntries",
+      description: "Search for journal/daily note entries within a date range. Use when user asks about journal entries, daily notes, or diary entries (e.g., 'show last week's journal', 'find journal from yesterday').",
+      parameters: {
+        type: "object",
+        properties: {
+          startOffset: {
+            type: "number",
+            description: "Start date as days offset from today (negative for past, e.g., -7 for 7 days ago, 0 for today)",
+          },
+          endOffset: {
+            type: "number",
+            description: "End date as days offset from today (negative for past, e.g., -1 for yesterday, 0 for today)",
+          },
+          maxResults: {
+            type: "number",
+            description: "Maximum number of results to return (default: 50, max: 50)",
+          },
+        },
+        required: ["startOffset", "endOffset"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "query_blocks",
+      description: "Execute complex queries with multiple conditions using AND, OR, or hierarchical matching. Use for complex searches combining tags, text, and other criteria (e.g., 'find notes tagged urgent OR important', 'find tasks containing deadline inside project notes').",
+      parameters: {
+        type: "object",
+        properties: {
+          conditions: {
+            type: "array",
+            description: "Array of query conditions to combine",
+            items: {
+              type: "object",
+              properties: {
+                type: {
+                  type: "string",
+                  enum: ["tag", "text", "task", "journal", "ref", "block", "blockMatch"],
+                  description: "Type of condition: tag (match tag), text (match content), task (match tasks), journal (date range), ref (references), block (block properties), blockMatch (specific block ID)",
+                },
+                name: { type: "string", description: "For tag: the tag name" },
+                text: { type: "string", description: "For text: the text to search" },
+                completed: { type: "boolean", description: "For task: completion status" },
+                blockId: { type: "number", description: "For ref/blockMatch: the block ID" },
+                hasTags: { type: "boolean", description: "For block: whether has tags" },
+                startOffset: { type: "number", description: "For journal: start date offset in days" },
+                endOffset: { type: "number", description: "For journal: end date offset in days" },
+              },
+              required: ["type"],
+            },
+          },
+          combineMode: {
+            type: "string",
+            enum: ["and", "or", "chain_and"],
+            description: "How to combine conditions: 'and' (all must match), 'or' (any can match), 'chain_and' (match in ancestor/descendant hierarchy)",
+          },
+          maxResults: {
+            type: "number",
+            description: "Maximum number of results to return (default: 50, max: 50)",
+          },
+        },
+        required: ["conditions", "combineMode"],
       },
     },
   },
@@ -301,6 +399,107 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         ? ` (filtered by: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')})`
         : '';
       return `Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
+    } else if (toolName === "searchTasks") {
+      // Search for task blocks
+      const completed = typeof args.completed === "boolean" ? args.completed : undefined;
+      const maxResults = args.maxResults || 50;
+
+      console.log("[Tool] searchTasks:", { completed, maxResults });
+
+      const results = await searchTasks(completed, { maxResults: Math.min(maxResults, 50) });
+
+      if (results.length === 0) {
+        const statusDesc = completed === true ? "completed" : completed === false ? "incomplete" : "";
+        return `No ${statusDesc} tasks found.`;
+      }
+
+      const summary = results.map((r, i) => {
+        const linkTitle = r.title.replace(/[\[\]]/g, '');
+        const body = r.fullContent ?? r.content;
+        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
+      }).join("\n\n");
+
+      const statusDesc = completed === true ? "completed " : completed === false ? "incomplete " : "";
+      return `Found ${results.length} ${statusDesc}task(s):\n${summary}`;
+    } else if (toolName === "searchJournalEntries") {
+      // Search for journal entries in date range
+      const startOffset = typeof args.startOffset === "number" ? args.startOffset : -7;
+      const endOffset = typeof args.endOffset === "number" ? args.endOffset : 0;
+      const maxResults = args.maxResults || 50;
+
+      console.log("[Tool] searchJournalEntries:", { startOffset, endOffset, maxResults });
+
+      const start: QueryDateSpec = { type: "relative", value: startOffset, unit: "d" };
+      const end: QueryDateSpec = { type: "relative", value: endOffset, unit: "d" };
+
+      const results = await searchJournalEntries(start, end, { maxResults: Math.min(maxResults, 50) });
+
+      if (results.length === 0) {
+        return `No journal entries found from ${startOffset} to ${endOffset} days.`;
+      }
+
+      const summary = results.map((r, i) => {
+        const linkTitle = r.title.replace(/[\[\]]/g, '');
+        const body = r.fullContent ?? r.content;
+        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
+      }).join("\n\n");
+
+      return `Found ${results.length} journal entries from ${startOffset} to ${endOffset} days:\n${summary}`;
+    } else if (toolName === "query_blocks") {
+      // Advanced query with multiple conditions
+      const conditions = args.conditions;
+      const combineMode = args.combineMode || "and";
+      const maxResults = args.maxResults || 50;
+
+      if (!Array.isArray(conditions) || conditions.length === 0) {
+        return "Error: At least one condition is required for query_blocks.";
+      }
+
+      console.log("[Tool] query_blocks:", { conditions, combineMode, maxResults });
+
+      // Convert AI-friendly conditions to internal format
+      const convertedConditions: QueryCondition[] = conditions.map((c: any) => {
+        switch (c.type) {
+          case "tag":
+            return { type: "tag" as const, name: c.name || "" };
+          case "text":
+            return { type: "text" as const, text: c.text || "" };
+          case "task":
+            return { type: "task" as const, completed: c.completed };
+          case "journal":
+            return {
+              type: "journal" as const,
+              start: { type: "relative" as const, value: c.startOffset ?? -7, unit: "d" as const },
+              end: { type: "relative" as const, value: c.endOffset ?? 0, unit: "d" as const },
+            };
+          case "ref":
+            return { type: "ref" as const, blockId: c.blockId || 0 };
+          case "block":
+            return { type: "block" as const, hasTags: c.hasTags };
+          case "blockMatch":
+            return { type: "blockMatch" as const, blockId: c.blockId || 0 };
+          default:
+            return { type: "tag" as const, name: "" };
+        }
+      });
+
+      const results = await queryBlocksAdvanced({
+        conditions: convertedConditions,
+        combineMode: combineMode as QueryCombineMode,
+        pageSize: Math.min(maxResults, 50),
+      });
+
+      if (results.length === 0) {
+        return `No blocks found matching the ${combineMode.toUpperCase()} query.`;
+      }
+
+      const summary = results.map((r, i) => {
+        const linkTitle = r.title.replace(/[\[\]]/g, '');
+        const body = r.fullContent ?? r.content;
+        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
+      }).join("\n\n");
+
+      return `Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
     } else {
       console.error("[Tool] Unknown tool:", toolName);
       return `Unknown tool: ${toolName}`;

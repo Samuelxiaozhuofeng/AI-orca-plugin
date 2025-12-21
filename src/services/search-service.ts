@@ -3,8 +3,19 @@
  * Provides search functionality for blocks by tags and text content
  */
 
-import { buildQueryDescription } from "../utils/query-builder";
-import type { QueryBlocksByTagOptions } from "../utils/query-types";
+import {
+  buildQueryDescription,
+  buildTaskQuery,
+  buildJournalQuery,
+  buildAdvancedQuery,
+} from "../utils/query-builder";
+import type {
+  QueryBlocksByTagOptions,
+  QueryDateSpec,
+  TaskQueryOptions,
+  JournalQueryOptions,
+  AdvancedQueryOptions,
+} from "../utils/query-types";
 import { safeText, extractTitle, extractContent } from "../utils/text-utils";
 import {
   unwrapBackendResult,
@@ -278,3 +289,129 @@ async function executeQueryWithFallback(
 
   return await runQuery(directDescription);
 }
+
+// ============================================================================
+// Advanced Query Functions
+// ============================================================================
+
+/**
+ * Search for task blocks with optional completion status filter
+ * @param completed - Filter by completion status (undefined = all tasks)
+ * @param options - Additional query options
+ * @returns Array of search results
+ */
+export async function searchTasks(
+  completed?: boolean,
+  options: Omit<TaskQueryOptions, "completed"> = {}
+): Promise<SearchResult[]> {
+  const maxResults = Math.min(Math.max(1, options.maxResults ?? 50), 50);
+  console.log("[searchTasks] Called with:", { completed, options, maxResults });
+
+  try {
+    const description = buildTaskQuery({
+      completed,
+      ...options,
+      maxResults,
+    });
+    console.log("[searchTasks] Query description:", JSON.stringify(description));
+
+    const result = await orca.invokeBackend("query", description);
+    const payload = unwrapBackendResult<any>(result);
+    throwIfBackendError(payload, "query");
+    const blocks = unwrapBlocks(payload);
+
+    if (!Array.isArray(blocks)) {
+      console.warn("[searchTasks] Result is not an array:", blocks);
+      return [];
+    }
+
+    const limitedBlocks = blocks.slice(0, maxResults);
+    const trees = await fetchBlockTrees(limitedBlocks);
+    return transformToSearchResults(trees, { includeProperties: false });
+  } catch (error: any) {
+    console.error("[searchTasks] Failed:", error);
+    throw new Error(`Task search failed: ${error?.message ?? error ?? "unknown error"}`);
+  }
+}
+
+/**
+ * Search for journal entries in a date range
+ * @param start - Start date specification
+ * @param end - End date specification
+ * @param options - Additional query options
+ * @returns Array of search results
+ */
+export async function searchJournalEntries(
+  start: QueryDateSpec,
+  end: QueryDateSpec,
+  options: Omit<JournalQueryOptions, "start" | "end"> = {}
+): Promise<SearchResult[]> {
+  const maxResults = Math.min(Math.max(1, options.maxResults ?? 50), 50);
+  console.log("[searchJournalEntries] Called with:", { start, end, options, maxResults });
+
+  try {
+    const description = buildJournalQuery({
+      start,
+      end,
+      ...options,
+      maxResults,
+    });
+    console.log("[searchJournalEntries] Query description:", JSON.stringify(description));
+
+    const result = await orca.invokeBackend("query", description);
+    const payload = unwrapBackendResult<any>(result);
+    throwIfBackendError(payload, "query");
+    const blocks = unwrapBlocks(payload);
+
+    if (!Array.isArray(blocks)) {
+      console.warn("[searchJournalEntries] Result is not an array:", blocks);
+      return [];
+    }
+
+    const limitedBlocks = blocks.slice(0, maxResults);
+    const trees = await fetchBlockTrees(limitedBlocks);
+    return transformToSearchResults(trees, { includeProperties: false });
+  } catch (error: any) {
+    console.error("[searchJournalEntries] Failed:", error);
+    throw new Error(`Journal search failed: ${error?.message ?? error ?? "unknown error"}`);
+  }
+}
+
+/**
+ * Execute an advanced query with full QueryDescription2 support
+ * Supports AND, OR, and CHAIN_AND combining modes
+ * @param options - Advanced query options
+ * @returns Array of search results
+ */
+export async function queryBlocksAdvanced(
+  options: AdvancedQueryOptions
+): Promise<SearchResult[]> {
+  const maxResults = Math.min(Math.max(1, options.pageSize ?? 50), 50);
+  console.log("[queryBlocksAdvanced] Called with:", { options, maxResults });
+
+  try {
+    const description = buildAdvancedQuery({
+      ...options,
+      pageSize: maxResults,
+    });
+    console.log("[queryBlocksAdvanced] Query description:", JSON.stringify(description));
+
+    const result = await orca.invokeBackend("query", description);
+    const payload = unwrapBackendResult<any>(result);
+    throwIfBackendError(payload, "query");
+    const blocks = unwrapBlocks(payload);
+
+    if (!Array.isArray(blocks)) {
+      console.warn("[queryBlocksAdvanced] Result is not an array:", blocks);
+      return [];
+    }
+
+    const limitedBlocks = blocks.slice(0, maxResults);
+    const trees = await fetchBlockTrees(limitedBlocks);
+    return transformToSearchResults(trees, { includeProperties: true });
+  } catch (error: any) {
+    console.error("[queryBlocksAdvanced] Failed:", error);
+    throw new Error(`Advanced query failed: ${error?.message ?? error ?? "unknown error"}`);
+  }
+}
+
