@@ -38,3 +38,26 @@ export function safeText(block: any): string {
   
   return "";
 }
+
+/**
+ * Extract title from block (first line or first 50 characters)
+ */
+export function extractTitle(block: any): string {
+  const text = safeText(block);
+  if (!text) return "(untitled)";
+
+  // Get first line or first 50 characters
+  const firstLine = text.split("\n")[0];
+  return firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
+}
+
+/**
+ * Extract content preview from block (first 200 characters)
+ */
+export function extractContent(block: any): string {
+  const text = safeText(block);
+  if (!text) return "";
+
+  // Return first 200 characters as preview
+  return text.length > 200 ? text.substring(0, 200) + "..." : text;
+}

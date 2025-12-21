@@ -7,7 +7,9 @@
 ## 关联文件
 
 - `src/services/search-service.ts`：核心搜索服务
-- `src/utils/text-utils.ts`：共享文本工具函数
+- `src/utils/text-utils.ts`：文本工具（`safeText`, `extractTitle`, `extractContent`）
+- `src/utils/block-utils.ts`：Block 工具（结果解包、树遍历、批量获取）
+- `src/utils/property-utils.ts`：属性工具（属性提取）
 - `src/utils/query-builder.ts`：查询描述构建器
 - `src/utils/query-types.ts`：查询类型定义
 
@@ -30,11 +32,13 @@ interface SearchResult {
 
 ## 核心函数
 
-| 函数                                         | 说明         |
-| -------------------------------------------- | ------------ |
-| `searchBlocksByTag(tagName, maxResults)`     | 按标签搜索   |
-| `searchBlocksByText(searchText, maxResults)` | 按文本搜索   |
-| `queryBlocksByTag(tagName, options)`         | 高级属性查询 |
+| 函数                                         | 说明                   |
+| -------------------------------------------- | ---------------------- |
+| `searchBlocksByTag(tagName, maxResults)`     | 按标签搜索             |
+| `searchBlocksByText(searchText, maxResults)` | 按文本搜索             |
+| `queryBlocksByTag(tagName, options)`         | 高级属性查询           |
+| `transformToSearchResults(trees, options)`   | 内部：统一结果转换     |
+| `executeQueryWithFallback(...)`              | 内部：带回退的查询执行 |
 
 ## 后端 API 映射
 
@@ -44,20 +48,14 @@ interface SearchResult {
 | `searchBlocksByText` | `search-blocks-by-text` |
 | `queryBlocksByTag`   | `query`                 |
 
-## 内部工具函数
-
-- `unwrapBackendResult<T>`: 解包后端返回的 `[code, data]` 格式
-- `unwrapBlocks`: 从各种格式中提取 block 数组
-- `flattenBlockTreeToLines`: 将 block 树展平为文本行
-- `extractTitle/extractContent`: 提取标题和内容预览
-- `extractAllProperties`: 提取所有属性值
-
 ## 限制与注意事项
 
 - 搜索结果按 `modified` 降序排序
 - `fullContent` 最多展开 200 个子 block，深度限制 10 层
 - 属性值从 `refs`、`backRefs`、`properties` 多处提取
+- `queryBlocksByTag` 支持三种查询格式回退策略
 
 ## 更新记录
 
+- 2025-12-21：重构模块化，提取 `block-utils.ts` 和 `property-utils.ts`
 - 2025-12-21：重构使用共享 `safeText` 函数

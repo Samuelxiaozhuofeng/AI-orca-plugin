@@ -5,7 +5,21 @@
 
 import { buildQueryDescription } from "../utils/query-builder";
 import type { QueryBlocksByTagOptions } from "../utils/query-types";
-import { safeText } from "../utils/text-utils";
+import { safeText, extractTitle, extractContent } from "../utils/text-utils";
+import {
+  unwrapBackendResult,
+  unwrapBlocks,
+  throwIfBackendError,
+  flattenBlockTreeToLines,
+  createFlattenState,
+  fetchBlockTrees,
+  sortAndLimitBlocks,
+} from "../utils/block-utils";
+import {
+  extractAllProperties,
+  buildPropertyValues,
+  pickBlockForPropertyExtraction,
+} from "../utils/property-utils";
 
 export interface SearchResult {
   id: number;
@@ -18,112 +32,65 @@ export interface SearchResult {
   propertyValues?: Record<string, any>;
 }
 
-function unwrapBackendResult<T>(result: any): T {
-  if (Array.isArray(result) && result.length === 2 && typeof result[0] === "number") {
-    return result[1] as T;
-  }
-  return result as T;
+interface TransformOptions {
+  includeProperties?: boolean;
+  propNames?: string[];
 }
 
-function unwrapBlocks(result: any): any[] {
-  if (!result) return [];
+/**
+ * Transform block/tree pairs to SearchResult array
+ */
+function transformToSearchResults(
+  trees: { block: any; tree: any }[],
+  options: TransformOptions = {}
+): SearchResult[] {
+  const { includeProperties = true, propNames = [] } = options;
 
-  // Handle [aliasMatches, contentMatches] from search-blocks-by-text
-  if (Array.isArray(result) && result.length === 2 && Array.isArray(result[0]) && Array.isArray(result[1])) {
-    const combined = [...result[0], ...result[1]];
-    // Each item might be a wrapper { type, label, block } - extract the block
-    return combined.map(item => {
-      if (item && typeof item === "object" && "block" in item && item.block) {
-        return item.block;
+  return trees.map(({ block, tree }) => {
+    let fullContent: string | undefined;
+    if (tree) {
+      const lines: string[] = [];
+      const state = createFlattenState();
+      flattenBlockTreeToLines(tree, 0, lines, state);
+
+      if (!lines.length) {
+        const t = safeText(block);
+        if (t) lines.push(`- ${t}`);
       }
-      return item;
-    });
-  }
-
-  // Handle [count, blocks] from some other APIs
-  if (Array.isArray(result) && result.length === 2 && typeof result[0] === "number" && Array.isArray(result[1])) {
-    return result[1];
-  }
-
-  if (Array.isArray(result)) return result;
-
-  // If it's a single object, wrap it
-  if (typeof result === "object" && result.id) return [result];
-
-  return [];
-}
-
-function throwIfBackendError(result: any, label: string): void {
-  if (result && typeof result === "object" && typeof (result as any).code === "string") {
-    throw new Error(`${label} failed: ${(result as any).code}`);
-  }
-}
-
-function treeChildren(tree: any): any[] {
-  if (!tree) return [];
-  if (Array.isArray(tree.children)) return tree.children;
-  const node = tree?.block && typeof tree.block === "object" ? tree.block : tree;
-  if (Array.isArray(node.children)) return node.children;
-  if (node !== tree) return treeChildren(node);
-  return [];
-}
-
-function flattenBlockTreeToLines(
-  tree: any,
-  depth: number,
-  out: string[],
-  state: { blocks: number; maxBlocks: number; maxDepth: number; hitLimit: boolean },
-): void {
-  if (!tree) return;
-
-  if (Array.isArray(tree)) {
-    for (const item of tree) {
-      flattenBlockTreeToLines(item, depth, out, state);
+      if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
+      fullContent = lines.join("\n").trim() || undefined;
     }
-    return;
-  }
 
-  if (!tree) return;
-  if (state.blocks >= state.maxBlocks) {
-    state.hitLimit = true;
-    return;
-  }
-  if (depth > state.maxDepth) return;
-
-  if (typeof tree === "number") {
-    const block = (orca.state.blocks as any)?.[tree];
-    if (block) flattenBlockTreeToLines(block, depth, out, state);
-    return;
-  }
-  if (typeof tree === "string" && /^\d+$/.test(tree)) {
-    const id = Number(tree);
-    const block = (orca.state.blocks as any)?.[id];
-    if (block) flattenBlockTreeToLines(block, depth, out, state);
-    return;
-  }
-
-  const node = tree?.block && typeof tree.block === "object" ? tree.block : tree;
-  const text = safeText(node);
-  if (text) {
-    out.push(`${"  ".repeat(depth)}- ${text}`);
-    state.blocks += 1;
-  }
-
-  if (state.blocks >= state.maxBlocks) {
-    state.hitLimit = true;
-    return;
-  }
-
-  const children = treeChildren(tree);
-  if (!children.length) return;
-
-  for (const child of children) {
-    if (state.blocks >= state.maxBlocks) {
-      state.hitLimit = true;
-      break;
+    let propertyValues: Record<string, any> | undefined;
+    if (includeProperties) {
+      const blockForProps = pickBlockForPropertyExtraction(block, tree);
+      const allProps = extractAllProperties(blockForProps);
+      
+      if (propNames.length) {
+        const queryProps = buildPropertyValues(blockForProps, propNames);
+        propertyValues = allProps || queryProps
+          ? { ...(allProps ?? {}), ...(queryProps ?? {}) }
+          : undefined;
+      } else {
+        propertyValues = allProps;
+      }
+      
+      if (propertyValues && !Object.keys(propertyValues).length) {
+        propertyValues = undefined;
+      }
     }
-    flattenBlockTreeToLines(child, depth + 1, out, state);
-  }
+
+    return {
+      id: block.id,
+      title: extractTitle(block),
+      content: extractContent(block),
+      fullContent,
+      propertyValues,
+      created: block.created ? new Date(block.created) : undefined,
+      modified: block.modified ? new Date(block.modified) : undefined,
+      tags: block.aliases || [],
+    };
+  });
 }
 
 /**
@@ -139,13 +106,11 @@ export async function searchBlocksByTag(
   console.log("[searchBlocksByTag] Called with:", { tagName, maxResults });
 
   try {
-    // Validate input
     if (!tagName || typeof tagName !== "string") {
       console.error("[searchBlocksByTag] Invalid tagName:", tagName);
       return [];
     }
 
-    // Use orca.invokeBackend to search for blocks with the specified tag
     const result = await orca.invokeBackend("get-blocks-with-tags", [tagName]);
     const blocks = unwrapBlocks(result);
 
@@ -154,60 +119,9 @@ export async function searchBlocksByTag(
       return [];
     }
 
-    // Sort by modified date (most recent first) and limit results
-    const sortedBlocks = blocks
-      .sort((a: any, b: any) => {
-        const aTime = a.modified ? new Date(a.modified).getTime() : 0;
-        const bTime = b.modified ? new Date(b.modified).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, maxResults);
-
-    const trees = await Promise.all(
-      sortedBlocks.map(async (block: any) => {
-        try {
-          const result = await orca.invokeBackend("get-block-tree", block.id);
-          const payload = unwrapBackendResult<any>(result);
-          throwIfBackendError(payload, "get-block-tree");
-          return { block, tree: payload };
-        } catch (err) {
-          console.warn("[searchBlocksByTag] Failed to load block tree:", {
-            id: block?.id,
-            err,
-          });
-          return { block, tree: null };
-        }
-      }),
-    );
-
-    // Transform to SearchResult format
-    return trees.map(({ block, tree }: { block: any; tree: any }) => {
-      let fullContent: string | undefined;
-      if (tree) {
-        const lines: string[] = [];
-        const state = { blocks: 0, maxBlocks: 200, maxDepth: 10, hitLimit: false };
-        flattenBlockTreeToLines(tree, 0, lines, state);
-
-        if (!lines.length) {
-          const t = safeText(block);
-          if (t) lines.push(`- ${t}`);
-        }
-        if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
-        fullContent = lines.join("\n").trim() || undefined;
-      }
-
-      const blockForProps = pickBlockForPropertyExtraction(block, tree);
-      return {
-        id: block.id,
-        title: extractTitle(block),
-        content: extractContent(block),
-        fullContent,
-        propertyValues: extractAllProperties(blockForProps),
-        created: block.created ? new Date(block.created) : undefined,
-        modified: block.modified ? new Date(block.modified) : undefined,
-        tags: block.aliases || [],
-      };
-    });
+    const sortedBlocks = sortAndLimitBlocks(blocks, maxResults);
+    const trees = await fetchBlockTrees(sortedBlocks);
+    return transformToSearchResults(trees, { includeProperties: true });
   } catch (error: any) {
     console.error(`Failed to search blocks by tag "${tagName}":`, error);
     throw new Error(`Tag search failed: ${error?.message ?? error ?? "unknown error"}`);
@@ -227,92 +141,22 @@ export async function searchBlocksByText(
   console.log("[searchBlocksByText] Called with:", { searchText, maxResults });
 
   try {
-    // Validate input
     if (!searchText || typeof searchText !== "string") {
       console.error("[searchBlocksByText] Invalid searchText:", searchText);
       return [];
     }
 
-    // Use orca.invokeBackend to search for blocks containing the text
     const result = await orca.invokeBackend("search-blocks-by-text", searchText);
-    console.log("[searchBlocksByText] Raw result:", JSON.stringify(result, null, 2));
     const blocks = unwrapBlocks(result);
-    console.log("[searchBlocksByText] Unwrapped blocks count:", blocks.length);
-    if (blocks.length > 0) {
-      console.log("[searchBlocksByText] First block structure:", JSON.stringify(blocks[0], null, 2));
-      console.log("[searchBlocksByText] First block keys:", Object.keys(blocks[0]));
-    }
 
     if (!Array.isArray(blocks)) {
       console.warn("[searchBlocksByText] Result is not an array:", blocks);
       return [];
     }
 
-    // Sort by modified date (most recent first) and limit results
-    const sortedBlocks = blocks
-      .sort((a: any, b: any) => {
-        const aTime = a.modified ? new Date(a.modified).getTime() : 0;
-        const bTime = b.modified ? new Date(b.modified).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, maxResults);
-
-    const trees = await Promise.all(
-      sortedBlocks.map(async (block: any) => {
-        try {
-          const result = await orca.invokeBackend("get-block-tree", block.id);
-          const payload = unwrapBackendResult<any>(result);
-          throwIfBackendError(payload, "get-block-tree");
-          return { block, tree: payload };
-        } catch (err) {
-          console.warn("[searchBlocksByText] Failed to load block tree:", {
-            id: block?.id,
-            err,
-          });
-          return { block, tree: null };
-        }
-      }),
-    );
-
-    // Transform to SearchResult format
-    return trees.map(({ block, tree }: { block: any; tree: any }) => {
-      console.log("[searchBlocksByText] Processing block:", { id: block?.id, hasTree: !!tree });
-      console.log("[searchBlocksByText] Block text field:", block?.text);
-      console.log("[searchBlocksByText] Block content field:", JSON.stringify(block?.content));
-
-      let fullContent: string | undefined;
-      if (tree) {
-        console.log("[searchBlocksByText] Tree structure:", JSON.stringify(tree, null, 2));
-        const lines: string[] = [];
-        const state = { blocks: 0, maxBlocks: 200, maxDepth: 10, hitLimit: false };
-        flattenBlockTreeToLines(tree, 0, lines, state);
-        console.log("[searchBlocksByText] Flattened lines:", lines);
-
-        if (!lines.length) {
-          const t = safeText(block);
-          console.log("[searchBlocksByText] safeText fallback result:", t);
-          if (t) lines.push(`- ${t}`);
-        }
-        if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
-        fullContent = lines.join("\n").trim() || undefined;
-      }
-
-      const title = extractTitle(block);
-      const content = extractContent(block);
-      console.log("[searchBlocksByText] Extracted title:", title);
-      console.log("[searchBlocksByText] Extracted content:", content);
-      console.log("[searchBlocksByText] fullContent:", fullContent);
-
-      return {
-        id: block.id,
-        title,
-        content,
-        fullContent,
-        created: block.created ? new Date(block.created) : undefined,
-        modified: block.modified ? new Date(block.modified) : undefined,
-        tags: block.aliases || [],
-      };
-    });
+    const sortedBlocks = sortAndLimitBlocks(blocks, maxResults);
+    const trees = await fetchBlockTrees(sortedBlocks);
+    return transformToSearchResults(trees, { includeProperties: false });
   } catch (error: any) {
     console.error(`Failed to search blocks by text "${searchText}":`, error);
     throw new Error(`Text search failed: ${error?.message ?? error ?? "unknown error"}`);
@@ -338,6 +182,7 @@ export async function queryBlocksByTag(
       return [];
     }
 
+    // Fallback to simple tag search if no property filters
     if (!options.properties || options.properties.length === 0) {
       return await searchBlocksByTag(tagName, maxResults);
     }
@@ -359,42 +204,9 @@ export async function queryBlocksByTag(
       return unwrapBlocks(payload);
     };
 
+    // Try query with fallback strategies
     let blocks: any[] = [];
-    try {
-      blocks = await runQuery(description as any);
-    } catch (err) {
-      console.warn("[queryBlocksByTag] QueryDescription2 failed, retrying legacy QueryDescription:", err);
-      const tagQuery = (description as any).q?.conditions?.[0];
-      const legacyDescription = {
-        ...description,
-        q: {
-          kind: 1,
-          conditions: [
-            {
-              kind: 4,
-              name: tagName,
-              properties: tagQuery?.properties,
-            },
-          ],
-        },
-      };
-      console.log("[queryBlocksByTag] Legacy query description:", JSON.stringify(legacyDescription));
-      try {
-        blocks = await runQuery(legacyDescription);
-      } catch (legacyErr) {
-        console.warn("[queryBlocksByTag] Legacy QueryDescription failed, retrying direct tag query:", legacyErr);
-        const directDescription = {
-          ...description,
-          q: {
-            kind: 4,
-            name: tagName,
-            properties: tagQuery?.properties,
-          },
-        };
-        console.log("[queryBlocksByTag] Direct tag query description:", JSON.stringify(directDescription));
-        blocks = await runQuery(directDescription);
-      }
-    }
+    blocks = await executeQueryWithFallback(runQuery, description, tagName);
 
     if (!Array.isArray(blocks)) {
       console.warn("[queryBlocksByTag] Result is not an array:", blocks);
@@ -402,23 +214,7 @@ export async function queryBlocksByTag(
     }
 
     const limitedBlocks = blocks.slice(0, maxResults);
-
-    const trees = await Promise.all(
-      limitedBlocks.map(async (block: any) => {
-        try {
-          const result = await orca.invokeBackend("get-block-tree", block.id);
-          const payload = unwrapBackendResult<any>(result);
-          throwIfBackendError(payload, "get-block-tree");
-          return { block, tree: payload };
-        } catch (err) {
-          console.warn("[queryBlocksByTag] Failed to load block tree:", {
-            id: block?.id,
-            err,
-          });
-          return { block, tree: null };
-        }
-      }),
-    );
+    const trees = await fetchBlockTrees(limitedBlocks);
 
     const propNames = Array.isArray(options.properties)
       ? options.properties
@@ -427,43 +223,7 @@ export async function queryBlocksByTag(
         .map((v: string) => v.trim())
       : [];
 
-    return trees.map(({ block, tree }: { block: any; tree: any }) => {
-      let fullContent: string | undefined;
-      if (tree) {
-        const lines: string[] = [];
-        const state = { blocks: 0, maxBlocks: 200, maxDepth: 10, hitLimit: false };
-        flattenBlockTreeToLines(tree, 0, lines, state);
-
-        if (!lines.length) {
-          const t = safeText(block);
-          if (t) lines.push(`- ${t}`);
-        }
-        if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
-        fullContent = lines.join("\n").trim() || undefined;
-      }
-
-      const blockForProps = pickBlockForPropertyExtraction(block, tree);
-      // Always extract all properties, merging with any specific ones from the query
-      const allProps = extractAllProperties(blockForProps);
-      const queryProps = propNames.length
-        ? buildPropertyValues(blockForProps, propNames)
-        : undefined;
-      // Merge: allProps as base, queryProps may override (though they should be same values)
-      const propertyValues = allProps || queryProps
-        ? { ...(allProps ?? {}), ...(queryProps ?? {}) }
-        : undefined;
-
-      return {
-        id: block.id,
-        title: extractTitle(block),
-        content: extractContent(block),
-        fullContent,
-        propertyValues: Object.keys(propertyValues ?? {}).length ? propertyValues : undefined,
-        created: block.created ? new Date(block.created) : undefined,
-        modified: block.modified ? new Date(block.modified) : undefined,
-        tags: block.aliases || [],
-      };
-    });
+    return transformToSearchResults(trees, { includeProperties: true, propNames });
   } catch (error: any) {
     console.error(`Failed to query blocks by tag "${tagName}":`, error);
     throw new Error(`Tag query failed: ${error?.message ?? error ?? "unknown error"}`);
@@ -471,149 +231,50 @@ export async function queryBlocksByTag(
 }
 
 /**
- * Extract title from block (first line or first N characters)
+ * Execute query with fallback strategies for different query formats
  */
-function extractTitle(block: any): string {
-  const text = safeText(block);
-  if (!text) return "(untitled)";
-
-  // Get first line or first 50 characters
-  const firstLine = text.split("\n")[0];
-  return firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
-}
-
-/**
- * Extract content preview from block
- */
-function extractContent(block: any): string {
-  const text = safeText(block);
-  if (!text) return "";
-
-  // Return first 200 characters as preview
-  return text.length > 200 ? text.substring(0, 200) + "..." : text;
-}
-
-
-function findPropertyValueInList(list: any, propertyName: string): any | undefined {
-  if (!Array.isArray(list)) return undefined;
-  const target = String(propertyName ?? "").trim();
-  if (!target) return undefined;
-
-  const exact = list.find((p: any) => p && typeof p.name === "string" && p.name === target);
-  if (exact && "value" in exact) return exact.value;
-
-  const lowered = target.toLowerCase();
-  const ci = list.find((p: any) => p && typeof p.name === "string" && p.name.toLowerCase() === lowered);
-  if (ci && "value" in ci) return ci.value;
-
-  return undefined;
-}
-
-function extractPropertyValueFromBlock(block: any, propertyName: string): any | undefined {
-  const fromProps = findPropertyValueInList(block?.properties, propertyName);
-  if (fromProps !== undefined) return fromProps;
-
-  const refs = Array.isArray(block?.refs) ? block.refs : [];
-  for (const ref of refs) {
-    const fromRef = findPropertyValueInList(ref?.data, propertyName);
-    if (fromRef !== undefined) return fromRef;
+async function executeQueryWithFallback(
+  runQuery: (desc: any) => Promise<any[]>,
+  description: any,
+  tagName: string
+): Promise<any[]> {
+  try {
+    return await runQuery(description);
+  } catch (err) {
+    console.warn("[queryBlocksByTag] QueryDescription2 failed, retrying legacy:", err);
   }
 
-  const backRefs = Array.isArray(block?.backRefs) ? block.backRefs : [];
-  for (const ref of backRefs) {
-    const fromRef = findPropertyValueInList(ref?.data, propertyName);
-    if (fromRef !== undefined) return fromRef;
-  }
-
-  return undefined;
-}
-
-function buildPropertyValues(block: any, names: string[]): Record<string, any> | undefined {
-  const out: Record<string, any> = {};
-  const seen = new Set<string>();
-
-  for (const nameRaw of names) {
-    const name = String(nameRaw ?? "").trim();
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-
-    const value = extractPropertyValueFromBlock(block, name);
-    if (value !== undefined) out[name] = value;
-  }
-
-  return Object.keys(out).length ? out : undefined;
-}
-
-function pickBlockForPropertyExtraction(block: any, tree: any): any {
-  if (block && typeof block === "object") return block;
-  if (!tree) return block;
-
-  if (Array.isArray(tree)) {
-    const candidate = tree.find((item) => item && typeof item === "object");
-    return candidate ?? block;
-  }
-
-  if (tree && typeof tree === "object" && typeof (tree as any).block === "object") {
-    return (tree as any).block;
-  }
-
-  if (tree && typeof tree === "object") return tree;
-
-  return block;
-}
-
-/**
- * Extract all property values from a block, including properties from refs and backRefs.
- * This collects all tag properties (like priority, date, status) attached to the block.
- * @param block - The block object to extract properties from
- * @returns Record of property name to value, or undefined if no properties found
- */
-function extractAllProperties(block: any): Record<string, any> | undefined {
-  if (!block || typeof block !== "object") return undefined;
-
-  const out: Record<string, any> = {};
-  const seen = new Set<string>();
-
-  // Helper to add a property if not already seen
-  const addProperty = (prop: any) => {
-    if (!prop || typeof prop !== "object") return;
-    const name = prop.name;
-    if (typeof name !== "string" || !name.trim()) return;
-    if (seen.has(name)) return;
-    seen.add(name);
-    if ("value" in prop && prop.value !== undefined) {
-      out[name] = prop.value;
-    }
+  // Try legacy QueryDescription format
+  const tagQuery = description.q?.conditions?.[0];
+  const legacyDescription = {
+    ...description,
+    q: {
+      kind: 1,
+      conditions: [
+        {
+          kind: 4,
+          name: tagName,
+          properties: tagQuery?.properties,
+        },
+      ],
+    },
   };
 
-  // 1. Extract from direct properties
-  if (Array.isArray(block.properties)) {
-    for (const prop of block.properties) {
-      addProperty(prop);
-    }
+  try {
+    return await runQuery(legacyDescription);
+  } catch (legacyErr) {
+    console.warn("[queryBlocksByTag] Legacy format failed, trying direct tag:", legacyErr);
   }
 
-  // 2. Extract from refs (tag properties are usually stored here)
-  if (Array.isArray(block.refs)) {
-    for (const ref of block.refs) {
-      if (Array.isArray(ref?.data)) {
-        for (const prop of ref.data) {
-          addProperty(prop);
-        }
-      }
-    }
-  }
+  // Try direct tag query format
+  const directDescription = {
+    ...description,
+    q: {
+      kind: 4,
+      name: tagName,
+      properties: tagQuery?.properties,
+    },
+  };
 
-  // 3. Extract from backRefs
-  if (Array.isArray(block.backRefs)) {
-    for (const ref of block.backRefs) {
-      if (Array.isArray(ref?.data)) {
-        for (const prop of ref.data) {
-          addProperty(prop);
-        }
-      }
-    }
-  }
-
-  return Object.keys(out).length ? out : undefined;
+  return await runQuery(directDescription);
 }
