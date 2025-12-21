@@ -309,22 +309,31 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         updateMessage(assistantId, { content: "(empty response)" });
       }
 
-      // Handle tool calls
-      if (toolCalls.length > 0) {
-        updateMessage(assistantId, { tool_calls: toolCalls });
+      // Handle tool calls with multi-round support
+      const MAX_TOOL_ROUNDS = 3;
+      let toolRound = 0;
+      let currentToolCalls = toolCalls;
+      let currentAssistantId = assistantId;
+      let currentAssistantContent = currentContent;
+
+      while (currentToolCalls.length > 0 && toolRound < MAX_TOOL_ROUNDS) {
+        toolRound++;
+        console.log(`[AI] Tool calling round ${toolRound}/${MAX_TOOL_ROUNDS}`);
+
+        updateMessage(currentAssistantId, { tool_calls: currentToolCalls });
 
         // Execute tools
         const toolResultMessages: Message[] = [];
-        for (const toolCall of toolCalls) {
+        for (const toolCall of currentToolCalls) {
           const toolName = toolCall.function.name;
           let args: any = {};
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch {}
 
-          console.log(`[AI] Calling tool: ${toolName}`);
+          console.log(`[AI] [Round ${toolRound}] Calling tool: ${toolName}`);
           const result = await executeTool(toolName, args);
-          console.log(`[AI] Tool result: ${result.substring(0, 100)}${result.length > 100 ? "..." : ""}`);
+          console.log(`[AI] [Round ${toolRound}] Tool result: ${result.substring(0, 100)}${result.length > 100 ? "..." : ""}`);
 
           toolResultMessages.push({
             id: nowId(),
@@ -345,18 +354,19 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           userContent: content,
           systemPrompt: settings.systemPrompt,
           contextText,
-          assistantContent: currentContent,
-          toolCalls,
+          assistantContent: currentAssistantContent,
+          toolCalls: currentToolCalls,
           toolResults: toolResultMessages,
         });
 
-        // Create final assistant message
-        const finalAssistantId = nowId();
-        setStreamingMessageId(finalAssistantId);
-        setMessages((prev) => [...prev, { id: finalAssistantId, role: "assistant", content: "", createdAt: Date.now() }]);
+        // Create assistant message for next response
+        const nextAssistantId = nowId();
+        setStreamingMessageId(nextAssistantId);
+        setMessages((prev) => [...prev, { id: nextAssistantId, role: "assistant", content: "", createdAt: Date.now() }]);
         queueMicrotask(scrollToBottom);
 
-        let finalContent = "";
+        let nextContent = "";
+        let nextToolCalls: ToolCallInfo[] = [];
 
         try {
           for await (const chunk of streamChatWithRetry(
@@ -367,28 +377,47 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               temperature: settings.temperature,
               maxTokens: settings.maxTokens,
               signal: aborter.signal,
+              tools: TOOLS, // Enable tools for potential next round
             },
             standard,
             fallback,
-            () => console.log("[AI] Retrying with fallback format...")
+            () => console.log(`[AI] [Round ${toolRound}] Retrying with fallback format...`)
           )) {
             if (chunk.type === "content") {
-              finalContent += chunk.content;
-              updateMessage(finalAssistantId, { content: finalContent });
+              nextContent += chunk.content;
+              updateMessage(nextAssistantId, { content: nextContent });
+            } else if (chunk.type === "tool_calls") {
+              nextToolCalls = chunk.toolCalls;
             }
           }
         } catch (streamErr: any) {
-          console.error("[AI] Error during final response:", streamErr);
+          console.error(`[AI] [Round ${toolRound}] Error during response:`, streamErr);
           throw streamErr;
         }
 
-        if (finalContent.trim().length === 0) {
-          const toolFallback = toolResultMessages.map((m) => m.content).join("\n\n").trim();
-          updateMessage(finalAssistantId, { content: toolFallback || "(empty response from API)" });
-        }
-
         setStreamingMessageId(null);
-        console.log(`[AI] Final response complete (${finalContent.length} chars)`);
+
+        // Check if model wants to call more tools
+        if (nextToolCalls.length > 0 && toolRound < MAX_TOOL_ROUNDS) {
+          console.log(`[AI] Model requested ${nextToolCalls.length} more tool(s), continuing to round ${toolRound + 1}`);
+          currentToolCalls = nextToolCalls;
+          currentAssistantId = nextAssistantId;
+          currentAssistantContent = nextContent;
+          // Continue loop
+        } else {
+          // No more tool calls or reached max rounds
+          if (nextToolCalls.length > 0) {
+            console.warn(`[AI] Reached max tool rounds (${MAX_TOOL_ROUNDS}), stopping`);
+            const warning = nextContent ? `${nextContent}\n\n_[已达到最大工具调用轮数限制]_` : "_[已达到最大工具调用轮数限制]_";
+            updateMessage(nextAssistantId, { content: warning });
+          } else if (nextContent.trim().length === 0) {
+            const toolFallback = toolResultMessages.map((m) => m.content).join("\n\n").trim();
+            updateMessage(nextAssistantId, { content: toolFallback || "(empty response from API)" });
+          }
+
+          console.log(`[AI] Tool calling complete after ${toolRound} round(s) (${nextContent.length} chars)`);
+          break;
+        }
       }
     } catch (err: any) {
       const isAbort = String(err?.name ?? "") === "AbortError";
@@ -522,15 +551,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               {
                 style: {
                   marginTop: 8,
-                  padding: 8,
+                  padding: "10px 12px",
                   background: "var(--orca-color-bg-3)",
-                  borderRadius: 4,
+                  borderRadius: 6,
                   fontSize: "0.85em",
-                  opacity: 0.8,
+                  opacity: 0.9,
                   fontFamily: "monospace",
+                  borderLeft: "3px solid var(--orca-color-primary, #007bff)",
                 },
               },
-              `🔧 Calling tool: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
+              `🔧 ${m.tool_calls.length > 1 ? `调用 ${m.tool_calls.length} 个工具` : "调用工具"}: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
             )
         )
       )

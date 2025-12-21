@@ -141,6 +141,7 @@ export async function* streamChatWithRetry(
         temperature: options.temperature,
         maxTokens: options.maxTokens,
         signal: options.signal,
+        tools: options.tools,
       })) {
         clearTimeout(timeoutId);
 

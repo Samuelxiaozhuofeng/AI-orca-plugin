@@ -201,7 +201,7 @@ export async function queryBlocksByTag(
     const description = buildQueryDescription({
       tagName,
       properties: options.properties,
-      sort: options.sort ?? [{ field: "modified", direction: "DESC" }],
+      sort: options.sort ?? [{ field: "_modified", direction: "DESC" }],
       page: options.page,
       pageSize: options.pageSize,
       maxResults,
@@ -412,6 +412,136 @@ export async function queryBlocksAdvanced(
   } catch (error: any) {
     console.error("[queryBlocksAdvanced] Failed:", error);
     throw new Error(`Advanced query failed: ${error?.message ?? error ?? "unknown error"}`);
+  }
+}
+
+/**
+ * Property type information for tag schema
+ */
+export interface TagPropertySchema {
+  name: string;
+  type: number;
+  typeName: string;
+  options?: Array<{
+    label: string;
+    value: number;
+    color?: string;
+  }>;
+}
+
+/**
+ * Tag schema with property definitions
+ */
+export interface TagSchema {
+  tagName: string;
+  properties: TagPropertySchema[];
+}
+
+/**
+ * Property type constants based on Orca's official PropType enum
+ * Reference: plugin-docs/constants/db.md
+ */
+const PROPERTY_TYPE_NAMES: Record<number, string> = {
+  0: "json",          // PropType.JSON
+  1: "text",          // PropType.Text
+  2: "block-refs",    // PropType.BlockRefs
+  3: "number",        // PropType.Number
+  4: "boolean",       // PropType.Boolean
+  5: "date-time",     // PropType.DateTime
+  6: "text-choices",  // PropType.TextChoices
+};
+
+/**
+ * Get the schema (property definitions) for a specific tag
+ * This includes property names, types, and for choice properties, the option mappings
+ *
+ * @param tagName - The name of the tag (alias)
+ * @returns Tag schema with property definitions
+ *
+ * @example
+ * ```ts
+ * const schema = await getTagSchema("task");
+ * // Returns:
+ * // {
+ * //   tagName: "task",
+ * //   properties: [
+ * //     {
+ * //       name: "status",
+ * //       type: 4,
+ * //       typeName: "single-choice",
+ * //       options: [
+ * //         { label: "todo", value: 0 },
+ * //         { label: "in-progress", value: 1 },
+ * //         { label: "done", value: 2 }
+ * //       ]
+ * //     },
+ * //     {
+ * //       name: "priority",
+ * //       type: 1,
+ * //       typeName: "number"
+ * //     }
+ * //   ]
+ * // }
+ * ```
+ */
+export async function getTagSchema(tagName: string): Promise<TagSchema> {
+  console.log(`[getTagSchema] Getting schema for tag: "${tagName}"`);
+
+  try {
+    // Get the tag block by alias
+    const tagBlock = await orca.invokeBackend("get-block-by-alias", tagName);
+
+    if (!tagBlock) {
+      throw new Error(`Tag "${tagName}" not found`);
+    }
+
+    console.log(`[getTagSchema] Found tag block:`, tagBlock.id);
+
+    // Extract property definitions from the tag block
+    const properties: TagPropertySchema[] = [];
+
+    if (tagBlock.properties && Array.isArray(tagBlock.properties)) {
+      for (const prop of tagBlock.properties) {
+        const propertySchema: TagPropertySchema = {
+          name: prop.name,
+          type: prop.type,
+          typeName: PROPERTY_TYPE_NAMES[prop.type] || `unknown-type-${prop.type}`,
+        };
+
+        // For choice types (single-choice: 4, multi-choice: 5), extract options
+        if ((prop.type === 4 || prop.type === 5) && prop.typeArgs?.choices) {
+          propertySchema.options = [];
+
+          const choices = prop.typeArgs.choices;
+          if (Array.isArray(choices)) {
+            choices.forEach((choice: any, index: number) => {
+              // Choices can be strings or objects { n: string, c?: string }
+              const label = typeof choice === 'string' ? choice : choice.n || choice.name || '';
+              const color = typeof choice === 'object' ? choice.c || choice.color : undefined;
+
+              propertySchema.options!.push({
+                label,
+                value: index, // The value is the index in the choices array
+                color,
+              });
+            });
+          }
+        }
+
+        properties.push(propertySchema);
+      }
+    }
+
+    const schema: TagSchema = {
+      tagName,
+      properties,
+    };
+
+    console.log(`[getTagSchema] Extracted schema:`, JSON.stringify(schema, null, 2));
+    return schema;
+  } catch (error: any) {
+    console.error(`[getTagSchema] Failed to get schema for tag "${tagName}":`, error);
+    throw new Error(`Failed to get tag schema: ${error?.message ?? error ?? "unknown error"}`);
   }
 }
 

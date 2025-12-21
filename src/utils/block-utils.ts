@@ -154,22 +154,45 @@ export function flattenBlockTreeToLines(
 
 /**
  * Batch fetch block trees for an array of blocks
- * @param blocks - Array of block objects with id property
+ * @param blocks - Array of block objects with id property OR block IDs (numbers)
  * @returns Array of {block, tree} pairs
  */
 export async function fetchBlockTrees(blocks: any[]): Promise<{ block: any; tree: any }[]> {
   return Promise.all(
-    blocks.map(async (block: any) => {
+    blocks.map(async (blockOrId: any) => {
+      // Normalize: handle both block objects and plain block IDs
+      const blockId = typeof blockOrId === "number"
+        ? blockOrId
+        : (typeof blockOrId === "object" && blockOrId?.id != null)
+          ? blockOrId.id
+          : null;
+
+      if (blockId == null) {
+        console.warn("[fetchBlockTrees] Invalid block input:", blockOrId);
+        return { block: blockOrId, tree: null };
+      }
+
       try {
-        const result = await orca.invokeBackend("get-block-tree", block.id);
+        const result = await orca.invokeBackend("get-block-tree", blockId);
         const payload = unwrapBackendResult<any>(result);
         throwIfBackendError(payload, "get-block-tree");
+
+        // If input was just an ID, use the tree's root block as the block object
+        // Otherwise, prefer the original block object
+        const block = typeof blockOrId === "number"
+          ? (payload?.block ?? { id: blockId })
+          : blockOrId;
+
         return { block, tree: payload };
       } catch (err) {
         console.warn("[fetchBlockTrees] Failed to load block tree:", {
-          id: block?.id,
+          id: blockId,
           err,
         });
+        // Ensure block has an id even on error
+        const block = typeof blockOrId === "number"
+          ? { id: blockOrId }
+          : blockOrId;
         return { block, tree: null };
       }
     }),

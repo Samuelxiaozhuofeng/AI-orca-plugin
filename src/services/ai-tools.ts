@@ -11,6 +11,7 @@ import {
   searchTasks,
   searchJournalEntries,
   queryBlocksAdvanced,
+  getTagSchema,
 } from "./search-service";
 import { parsePropertyFilters } from "../utils/query-filter-parser";
 import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
@@ -213,6 +214,23 @@ export const TOOLS: OpenAITool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_tag_schema",
+      description: "Get the property schema (definitions) for a specific tag, including property names, types, and for choice-type properties (like status, priority with predefined options), the mapping between option labels and their internal values. **IMPORTANT**: Call this tool BEFORE querying with property filters if you're uncertain about option values. This prevents SQLITE_ERROR caused by using display text instead of internal IDs.",
+      parameters: {
+        type: "object",
+        properties: {
+          tagName: {
+            type: "string",
+            description: "The tag name to get schema for (e.g., 'task', 'project')",
+          },
+        },
+        required: ["tagName"],
+      },
+    },
+  },
 ];
 
 /**
@@ -370,6 +388,35 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return "Error: Unable to parse property filters. Use `properties` array or a string like \"priority == 6\".";
       }
 
+      // Enrich properties with type information from tag schema
+      if (properties.length > 0) {
+        try {
+          const schema = await getTagSchema(tagName);
+          properties = properties.map((prop: any) => {
+            // If type is already set, use it
+            if (prop.type !== undefined) {
+              return prop;
+            }
+            
+            // Look up the property in the schema
+            const schemaProp = schema.properties.find(p => p.name === prop.name);
+            if (schemaProp) {
+              return {
+                ...prop,
+                type: schemaProp.type,
+              };
+            }
+            
+            // Property not found in schema, return as-is
+            console.warn(`[queryBlocksByTag] Property "${prop.name}" not found in tag schema`);
+            return prop;
+          });
+        } catch (error) {
+          console.warn(`[queryBlocksByTag] Failed to fetch tag schema for type enrichment:`, error);
+          // Continue without type enrichment
+        }
+      }
+
       const results = await queryBlocksByTag(tagName, {
         properties,
         maxResults: Math.min(maxResults, 50),
@@ -500,6 +547,40 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       }).join("\n\n");
 
       return `Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
+    } else if (toolName === "get_tag_schema") {
+      // Get tag schema with property definitions
+      const tagName = args.tagName || args.tag;
+
+      if (!tagName) {
+        console.error("[Tool] Missing tag name parameter");
+        return "Error: Missing tag name parameter";
+      }
+
+      const schema = await getTagSchema(tagName);
+
+      if (schema.properties.length === 0) {
+        return `Tag "${tagName}" found but has no properties defined.`;
+      }
+
+      // Format schema as markdown
+      let result = `Schema for tag "${schema.tagName}":\n\n`;
+
+      schema.properties.forEach((prop, i) => {
+        result += `${i + 1}. **${prop.name}** (${prop.typeName}, type code: ${prop.type})\n`;
+
+        if (prop.options && prop.options.length > 0) {
+          result += `   Options:\n`;
+          prop.options.forEach((opt) => {
+            result += `   - "${opt.label}" → value: ${opt.value}\n`;
+          });
+        }
+      });
+
+      result += `\n**Usage tip**: When querying with property filters, use the numeric values shown above for choice properties. For example:\n`;
+      result += `- For single-choice properties, use: { name: "propertyName", op: "==", value: <numeric_value> }\n`;
+      result += `- For number/text properties, use the appropriate operator and value type.\n`;
+
+      return result;
     } else {
       console.error("[Tool] Unknown tool:", toolName);
       return `Unknown tool: ${toolName}`;
