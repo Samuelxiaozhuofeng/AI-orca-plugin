@@ -68,7 +68,8 @@ function transformToSearchResults(
         const t = safeText(block);
         if (t) lines.push(`- ${t}`);
       }
-      if (state.hitLimit) lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
+      if (state.hitLimit)
+        lines.push(`- …(maxBlocks=${state.maxBlocks} reached)`);
       fullContent = lines.join("\n").trim() || undefined;
     }
 
@@ -76,16 +77,17 @@ function transformToSearchResults(
     if (includeProperties) {
       const blockForProps = pickBlockForPropertyExtraction(block, tree);
       const allProps = extractAllProperties(blockForProps);
-      
+
       if (propNames.length) {
         const queryProps = buildPropertyValues(blockForProps, propNames);
-        propertyValues = allProps || queryProps
-          ? { ...(allProps ?? {}), ...(queryProps ?? {}) }
-          : undefined;
+        propertyValues =
+          allProps || queryProps
+            ? { ...(allProps ?? {}), ...(queryProps ?? {}) }
+            : undefined;
       } else {
         propertyValues = allProps;
       }
-      
+
       if (propertyValues && !Object.keys(propertyValues).length) {
         propertyValues = undefined;
       }
@@ -135,7 +137,9 @@ export async function searchBlocksByTag(
     return transformToSearchResults(trees, { includeProperties: true });
   } catch (error: any) {
     console.error(`Failed to search blocks by tag "${tagName}":`, error);
-    throw new Error(`Tag search failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Tag search failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -157,7 +161,10 @@ export async function searchBlocksByText(
       return [];
     }
 
-    const result = await orca.invokeBackend("search-blocks-by-text", searchText);
+    const result = await orca.invokeBackend(
+      "search-blocks-by-text",
+      searchText
+    );
     const blocks = unwrapBlocks(result);
 
     if (!Array.isArray(blocks)) {
@@ -170,7 +177,9 @@ export async function searchBlocksByText(
     return transformToSearchResults(trees, { includeProperties: false });
   } catch (error: any) {
     console.error(`Failed to search blocks by text "${searchText}":`, error);
-    throw new Error(`Text search failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Text search failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -182,10 +191,14 @@ export async function searchBlocksByText(
  */
 export async function queryBlocksByTag(
   tagName: string,
-  options: QueryBlocksByTagOptions = {},
+  options: QueryBlocksByTagOptions = {}
 ): Promise<SearchResult[]> {
   const maxResults = Math.min(Math.max(1, options.maxResults ?? 50), 50);
-  console.log("[queryBlocksByTag] Called with:", { tagName, options, maxResults });
+  console.log("[queryBlocksByTag] Called with:", {
+    tagName,
+    options,
+    maxResults,
+  });
 
   try {
     if (!tagName || typeof tagName !== "string") {
@@ -206,7 +219,10 @@ export async function queryBlocksByTag(
       pageSize: options.pageSize,
       maxResults,
     });
-    console.log("[queryBlocksByTag] Query description:", JSON.stringify(description));
+    console.log(
+      "[queryBlocksByTag] Query description:",
+      JSON.stringify(description)
+    );
 
     const runQuery = async (desc: any) => {
       const result = await orca.invokeBackend("query", desc);
@@ -229,15 +245,20 @@ export async function queryBlocksByTag(
 
     const propNames = Array.isArray(options.properties)
       ? options.properties
-        .map((p: any) => p?.name)
-        .filter((v: any) => typeof v === "string" && v.trim())
-        .map((v: string) => v.trim())
+          .map((p: any) => p?.name)
+          .filter((v: any) => typeof v === "string" && v.trim())
+          .map((v: string) => v.trim())
       : [];
 
-    return transformToSearchResults(trees, { includeProperties: true, propNames });
+    return transformToSearchResults(trees, {
+      includeProperties: true,
+      propNames,
+    });
   } catch (error: any) {
     console.error(`Failed to query blocks by tag "${tagName}":`, error);
-    throw new Error(`Tag query failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Tag query failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -252,7 +273,10 @@ async function executeQueryWithFallback(
   try {
     return await runQuery(description);
   } catch (err) {
-    console.warn("[queryBlocksByTag] QueryDescription2 failed, retrying legacy:", err);
+    console.warn(
+      "[queryBlocksByTag] QueryDescription2 failed, retrying legacy:",
+      err
+    );
   }
 
   // Try legacy QueryDescription format
@@ -274,7 +298,10 @@ async function executeQueryWithFallback(
   try {
     return await runQuery(legacyDescription);
   } catch (legacyErr) {
-    console.warn("[queryBlocksByTag] Legacy format failed, trying direct tag:", legacyErr);
+    console.warn(
+      "[queryBlocksByTag] Legacy format failed, trying direct tag:",
+      legacyErr
+    );
   }
 
   // Try direct tag query format
@@ -313,7 +340,10 @@ export async function searchTasks(
       ...options,
       maxResults,
     });
-    console.log("[searchTasks] Query description:", JSON.stringify(description));
+    console.log(
+      "[searchTasks] Query description:",
+      JSON.stringify(description)
+    );
 
     const result = await orca.invokeBackend("query", description);
     const payload = unwrapBackendResult<any>(result);
@@ -330,7 +360,9 @@ export async function searchTasks(
     return transformToSearchResults(trees, { includeProperties: false });
   } catch (error: any) {
     console.error("[searchTasks] Failed:", error);
-    throw new Error(`Task search failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Task search failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -347,7 +379,12 @@ export async function searchJournalEntries(
   options: Omit<JournalQueryOptions, "start" | "end"> = {}
 ): Promise<SearchResult[]> {
   const maxResults = Math.min(Math.max(1, options.maxResults ?? 50), 50);
-  console.log("[searchJournalEntries] Called with:", { start, end, options, maxResults });
+  console.log("[searchJournalEntries] Called with:", {
+    start,
+    end,
+    options,
+    maxResults,
+  });
 
   try {
     const description = buildJournalQuery({
@@ -356,7 +393,10 @@ export async function searchJournalEntries(
       ...options,
       maxResults,
     });
-    console.log("[searchJournalEntries] Query description:", JSON.stringify(description));
+    console.log(
+      "[searchJournalEntries] Query description:",
+      JSON.stringify(description)
+    );
 
     const result = await orca.invokeBackend("query", description);
     const payload = unwrapBackendResult<any>(result);
@@ -373,7 +413,9 @@ export async function searchJournalEntries(
     return transformToSearchResults(trees, { includeProperties: false });
   } catch (error: any) {
     console.error("[searchJournalEntries] Failed:", error);
-    throw new Error(`Journal search failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Journal search failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -394,7 +436,10 @@ export async function queryBlocksAdvanced(
       ...options,
       pageSize: maxResults,
     });
-    console.log("[queryBlocksAdvanced] Query description:", JSON.stringify(description));
+    console.log(
+      "[queryBlocksAdvanced] Query description:",
+      JSON.stringify(description)
+    );
 
     const result = await orca.invokeBackend("query", description);
     const payload = unwrapBackendResult<any>(result);
@@ -411,7 +456,9 @@ export async function queryBlocksAdvanced(
     return transformToSearchResults(trees, { includeProperties: true });
   } catch (error: any) {
     console.error("[queryBlocksAdvanced] Failed:", error);
-    throw new Error(`Advanced query failed: ${error?.message ?? error ?? "unknown error"}`);
+    throw new Error(
+      `Advanced query failed: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
 
@@ -442,13 +489,13 @@ export interface TagSchema {
  * Reference: plugin-docs/constants/db.md
  */
 const PROPERTY_TYPE_NAMES: Record<number, string> = {
-  0: "json",          // PropType.JSON
-  1: "text",          // PropType.Text
-  2: "block-refs",    // PropType.BlockRefs
-  3: "number",        // PropType.Number
-  4: "boolean",       // PropType.Boolean
-  5: "date-time",     // PropType.DateTime
-  6: "text-choices",  // PropType.TextChoices
+  0: "json", // PropType.JSON
+  1: "text", // PropType.Text
+  2: "block-refs", // PropType.BlockRefs
+  3: "number", // PropType.Number
+  4: "boolean", // PropType.Boolean
+  5: "date-time", // PropType.DateTime
+  6: "text-choices", // PropType.TextChoices
 };
 
 /**
@@ -505,19 +552,28 @@ export async function getTagSchema(tagName: string): Promise<TagSchema> {
         const propertySchema: TagPropertySchema = {
           name: prop.name,
           type: prop.type,
-          typeName: PROPERTY_TYPE_NAMES[prop.type] || `unknown-type-${prop.type}`,
+          typeName:
+            PROPERTY_TYPE_NAMES[prop.type] || `unknown-type-${prop.type}`,
         };
 
-        // For choice types (single-choice: 4, multi-choice: 5), extract options
-        if ((prop.type === 4 || prop.type === 5) && prop.typeArgs?.choices) {
+        // For TextChoices type (type 6), extract options
+        // Note: According to Orca API (plugin-docs/constants/db.md):
+        //   - Type 4 = Boolean, Type 5 = DateTime, Type 6 = TextChoices
+        if (prop.type === 6 && prop.typeArgs?.choices) {
           propertySchema.options = [];
 
           const choices = prop.typeArgs.choices;
           if (Array.isArray(choices)) {
             choices.forEach((choice: any, index: number) => {
               // Choices can be strings or objects { n: string, c?: string }
-              const label = typeof choice === 'string' ? choice : choice.n || choice.name || '';
-              const color = typeof choice === 'object' ? choice.c || choice.color : undefined;
+              const label =
+                typeof choice === "string"
+                  ? choice
+                  : choice.n || choice.name || "";
+              const color =
+                typeof choice === "object"
+                  ? choice.c || choice.color
+                  : undefined;
 
               propertySchema.options!.push({
                 label,
@@ -537,11 +593,18 @@ export async function getTagSchema(tagName: string): Promise<TagSchema> {
       properties,
     };
 
-    console.log(`[getTagSchema] Extracted schema:`, JSON.stringify(schema, null, 2));
+    console.log(
+      `[getTagSchema] Extracted schema:`,
+      JSON.stringify(schema, null, 2)
+    );
     return schema;
   } catch (error: any) {
-    console.error(`[getTagSchema] Failed to get schema for tag "${tagName}":`, error);
-    throw new Error(`Failed to get tag schema: ${error?.message ?? error ?? "unknown error"}`);
+    console.error(
+      `[getTagSchema] Failed to get schema for tag "${tagName}":`,
+      error
+    );
+    throw new Error(
+      `Failed to get tag schema: ${error?.message ?? error ?? "unknown error"}`
+    );
   }
 }
-
