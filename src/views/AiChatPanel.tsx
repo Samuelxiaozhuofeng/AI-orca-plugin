@@ -9,6 +9,8 @@ import { findViewPanelById } from "../utils/panel-tree";
 import ChatInput from "./ChatInput";
 import MarkdownMessage from "../components/MarkdownMessage";
 import ChatHistoryMenu from "./ChatHistoryMenu";
+import LoadingDots from "../components/LoadingDots";
+import { injectChatStyles } from "../styles/chat-animations";
 import {
   buildAiModelOptions,
   getAiChatSettings,
@@ -22,13 +24,14 @@ import {
   deleteSession,
   clearAllSessions,
   createNewSession,
-  shouldAutoSave,
   type SavedSession,
   type Message,
 } from "../services/session-service";
 import { sessionStore, updateSessionStore, markSessionSaved, clearSessionStore } from "../store/session-store";
 import { TOOLS, executeTool } from "../services/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
+import { buildChatMessages, buildMessagesWithToolResults } from "../services/message-builder";
+import { streamChatCompletion, streamChatWithRetry, mergeToolCalls, type ToolCallInfo } from "../services/chat-stream-handler";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -47,53 +50,43 @@ const { useSnapshot } = (window as any).Valtio as {
 };
 const { Button } = orca.components;
 
-// Inject keyframes styles
-const globalStyles = `
-@keyframes blink {
-    0%, 50% { opacity: 1; }
-    51%, 100% { opacity: 0; }
-}
-@keyframes loadingDots {
-    0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
-    40% { transform: scale(1); opacity: 1; }
-}
-@keyframes messageSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-`;
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────────
 
-const LoadingDots = () => {
-    const dotStyle = {
-        display: 'inline-block',
-        width: '6px',
-        height: '6px',
-        borderRadius: '50%',
-        background: 'var(--orca-color-text-3)',
-        margin: '0 3px',
-        animation: 'loadingDots 1.4s infinite ease-in-out',
-    };
+function smoothScrollToBottom(el: HTMLDivElement | null, duration = 300) {
+  if (!el) return;
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 50) {
+    el.scrollTop = el.scrollHeight;
+    return;
+  }
+  const start = el.scrollTop;
+  const target = el.scrollHeight - el.clientHeight;
+  if (target < start) {
+    el.scrollTop = target;
+    return;
+  }
+  const distance = target - start;
+  let startTime: number | null = null;
 
-    return createElement(
-        'div',
-        { style: { padding: '12px 16px', display: 'flex', alignItems: 'center', height: '24px' } },
-        createElement('span', { style: { ...dotStyle, animationDelay: '0s' } }),
-        createElement('span', { style: { ...dotStyle, animationDelay: '0.2s' } }),
-        createElement('span', { style: { ...dotStyle, animationDelay: '0.4s' } })
-    );
-};
+  function animation(currentTime: number) {
+    if (startTime === null) startTime = currentTime;
+    const progress = Math.min((currentTime - startTime) / duration, 1);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    el!.scrollTop = start + distance * ease;
+    if (progress < 1) requestAnimationFrame(animation);
+  }
+  requestAnimationFrame(animation);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Component
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function AiChatPanel({ panelId }: PanelProps) {
   const orcaSnap = useSnapshot(orca.state);
   const uiSnap = useSnapshot(uiStore);
   const [sending, setSending] = useState(false);
-  // Track which message is currently streaming to add typewriter cursor
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   // Session management state
@@ -119,7 +112,19 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load sessions on mount
+  const scrollToBottom = useCallback(() => {
+    smoothScrollToBottom(listRef.current);
+  }, []);
+
+  const updateMessage = useCallback((id: string, updates: Partial<Message>) => {
+    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+    queueMicrotask(scrollToBottom);
+  }, [scrollToBottom]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Session Management
+  // ─────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -127,7 +132,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     loadSessions().then((data) => {
       setSessions(data.sessions);
-      // If there's an active session, load it
       if (data.activeSessionId) {
         const active = data.sessions.find((s) => s.id === data.activeSessionId);
         if (active && active.messages.length > 0) {
@@ -136,7 +140,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             model: (active.model || "").trim() || defaultModel,
           });
           setMessages(active.messages);
-          // Restore context if available
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
           }
@@ -146,7 +149,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
   }, []);
 
-  // Save session helper
   const handleSaveSession = useCallback(async () => {
     const filteredMessages = messages.filter((m) => !m.localOnly);
     if (filteredMessages.length === 0) {
@@ -163,13 +165,29 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     await saveSession(sessionToSave);
     markSessionSaved();
-    // Refresh sessions list
     const data = await loadSessions();
     setSessions(data.sessions);
     orca.notify("success", "Session saved");
   }, [messages, currentSession]);
 
-  // Handle session selection from history
+  const handleNewSession = useCallback(() => {
+    const pluginName = getAiChatPluginName();
+    const settings = getAiChatSettings(pluginName);
+    const defaultModel = resolveAiModel(settings);
+
+    setCurrentSession({ ...createNewSession(), model: defaultModel });
+    setMessages([
+      {
+        id: nowId(),
+        role: "assistant",
+        content: "New chat started. How can I help you?",
+        createdAt: Date.now(),
+        localOnly: true,
+      },
+    ]);
+    contextStore.selected = [];
+  }, []);
+
   const handleSelectSession = useCallback(async (sessionId: string) => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -183,131 +201,42 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       model: (session.model || "").trim() || defaultModel,
     });
     setMessages(session.messages.length > 0 ? session.messages : []);
-    // Restore context
     contextStore.selected = session.contexts || [];
   }, [sessions]);
 
-  // Handle session deletion
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     await deleteSession(sessionId);
     const data = await loadSessions();
     setSessions(data.sessions);
-
-    // If deleted current session, create a new one
     if (currentSession.id === sessionId) {
       handleNewSession();
     }
-  }, [currentSession.id]);
+  }, [currentSession.id, handleNewSession]);
 
-  // Handle clear all sessions
   const handleClearAllSessions = useCallback(async () => {
     await clearAllSessions();
     setSessions([]);
     handleNewSession();
-  }, []);
-
-  // Handle new session
-  const handleNewSession = useCallback(() => {
-    const pluginName = getAiChatPluginName();
-    const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
-
-    const newSession = { ...createNewSession(), model: defaultModel };
-    setCurrentSession(newSession);
-    setMessages([
-      {
-        id: nowId(),
-        role: "assistant",
-        content: "New chat started. How can I help you?",
-        createdAt: Date.now(),
-        localOnly: true,
-      },
-    ]);
-    contextStore.selected = [];
-  }, []);
+  }, [handleNewSession]);
 
   // Sync state to session store for auto-save on close
   useEffect(() => {
-    // Only sync if there are non-localOnly messages
     const hasRealMessages = messages.some((m) => !m.localOnly);
     if (hasRealMessages) {
       updateSessionStore(currentSession, messages, [...contextStore.selected]);
     }
   }, [messages, currentSession]);
 
-  // Clear session store on unmount
-  useEffect(() => {
-    return () => {
-      clearSessionStore();
-    };
-  }, []);
+  useEffect(() => injectChatStyles(), []);
+  useEffect(() => () => { clearSessionStore(); }, []);
+  useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
-  // Inject styles on mount
-  useEffect(() => {
-    const styleEl = document.createElement('style');
-    styleEl.textContent = globalStyles;
-    document.head.appendChild(styleEl);
-    return () => {
-        document.head.removeChild(styleEl);
-    };
-  }, []);
-
-  function smoothScrollToBottom(duration = 300) {
-    const el = listRef.current;
-    if (!el) return;
-
-    // If close to bottom, snap to it
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 50) {
-        el.scrollTop = el.scrollHeight;
-        return;
-    }
-
-    const start = el.scrollTop;
-    const target = el.scrollHeight - el.clientHeight;
-    
-    // If target is less than start (e.g. content removed), just set it
-    if (target < start) {
-        el.scrollTop = target;
-        return;
-    }
-    
-    const distance = target - start;
-    let startTime: number | null = null;
-
-    function animation(currentTime: number) {
-        if (startTime === null) startTime = currentTime;
-        const timeElapsed = currentTime - startTime;
-        const progress = Math.min(timeElapsed / duration, 1);
-
-        // Ease out cubic
-        const ease = 1 - Math.pow(1 - progress, 3);
-
-        el!.scrollTop = start + distance * ease;
-
-        if (progress < 1) {
-            requestAnimationFrame(animation);
-        }
-    }
-
-    requestAnimationFrame(animation);
-  }
-
-  function scrollToBottom() {
-      // Use smooth scroll wrapper
-      smoothScrollToBottom();
-  }
-
-  async function buildContextForRequest(): Promise<string> {
-    const contexts = contextStore.selected;
-    if (!contexts.length) {
-      return "";
-    }
-    return await buildContextForSend(contexts);
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Chat Send Logic
+  // ─────────────────────────────────────────────────────────────────────────
 
   async function handleSend(content: string) {
-    if (!content) return;
-    if (sending) return;
+    if (!content || sending) return;
 
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -320,404 +249,157 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     setSending(true);
 
-    const userMsg: Message = {
-      id: nowId(),
-      role: "user",
-      content,
-      createdAt: Date.now(),
-    };
-
-    setMessages((prev: Message[]) => [...prev, userMsg]);
+    // Add user message
+    const userMsg: Message = { id: nowId(), role: "user", content, createdAt: Date.now() };
+    setMessages((prev) => [...prev, userMsg]);
     queueMicrotask(scrollToBottom);
 
     const aborter = new AbortController();
     abortRef.current = aborter;
 
     try {
+      // Build context
       let contextText = "";
       try {
-        contextText = await buildContextForRequest();
+        const contexts = contextStore.selected;
+        if (contexts.length) contextText = await buildContextForSend(contexts);
       } catch (err: any) {
         orca.notify("warn", `Context build failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
 
-      const systemParts: string[] = [];
-      if (settings.systemPrompt.trim()) systemParts.push(settings.systemPrompt.trim());
-      if (contextText.trim()) systemParts.push(`Context:\n${contextText.trim()}`);
+      // Build initial messages
+      const apiMessages = buildChatMessages({
+        messages,
+        userContent: content,
+        systemPrompt: settings.systemPrompt,
+        contextText,
+      });
 
-      // Build message history for the API
-      const buildMessages = (currentMessages?: Message[]): OpenAIChatMessage[] => {
-        const msgsToUse = currentMessages || messages;
-        const history = msgsToUse
-          .filter((m) => !m.localOnly)
-          .map((m) => {
-            const msg: OpenAIChatMessage = {
-              role: m.role as any,
-              content: m.content,
-            };
-            if (m.tool_calls) msg.tool_calls = m.tool_calls;
-            if (m.tool_call_id) {
-              msg.tool_call_id = m.tool_call_id;
-              msg.name = m.name;
-            }
-            return msg;
-          });
-
-        const requestMessages: OpenAIChatMessage[] = [
-          ...(systemParts.length
-            ? [{ role: "system" as const, content: systemParts.join("\n\n") }]
-            : []),
-          ...history,
-          { role: "user" as const, content },
-        ];
-
-        return requestMessages;
-      };
-
-      // Call AI with tools enabled
-      console.log("[AI] Sending user message:", content);
-
+      // Create assistant message placeholder
       const assistantId = nowId();
       setStreamingMessageId(assistantId);
-
-      setMessages((prev: Message[]) => [
-        ...prev,
-        {
-          id: assistantId,
-          role: "assistant",
-          content: "",
-          createdAt: Date.now(),
-        },
-      ]);
+      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", createdAt: Date.now() }]);
       queueMicrotask(scrollToBottom);
 
-      let gotAny = false;
-      let toolCalls: any[] = [];
+      // Stream initial response
       let currentContent = "";
+      let toolCalls: ToolCallInfo[] = [];
 
-      for await (const chunk of openAIChatCompletionsStream({
+      for await (const chunk of streamChatCompletion({
         apiUrl: settings.apiUrl,
         apiKey: settings.apiKey,
         model,
-        messages: buildMessages(),
+        messages: apiMessages,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
         signal: aborter.signal,
         tools: TOOLS,
       })) {
-        gotAny = true;
-
-        if (chunk.type === "content" && chunk.content) {
+        if (chunk.type === "content") {
           currentContent += chunk.content;
-          setMessages((prev: Message[]) =>
-            prev.map((m: Message) =>
-              m.id === assistantId ? { ...m, content: currentContent } : m,
-            ),
-          );
-          queueMicrotask(scrollToBottom);
-        } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
-          // Merge tool calls (streaming may send them in chunks)
-          for (const tc of chunk.tool_calls) {
-            const existing = toolCalls.find((t) => t.id === tc.id);
-            if (existing) {
-              if (tc.function?.arguments) {
-                existing.function.arguments = (existing.function.arguments || "") + tc.function.arguments;
-              }
-            } else {
-              toolCalls.push({
-                id: tc.id || nowId(),
-                type: tc.type || "function",
-                function: {
-                  name: tc.function?.name || "",
-                  arguments: tc.function?.arguments || "",
-                },
-              });
-            }
-          }
+          updateMessage(assistantId, { content: currentContent });
+        } else if (chunk.type === "tool_calls") {
+          toolCalls = chunk.toolCalls;
         }
       }
 
       setStreamingMessageId(null);
 
-      if (!gotAny) {
-        setMessages((prev: Message[]) =>
-          prev.map((m: Message) =>
-            m.id === assistantId && !m.content ? { ...m, content: "(empty response)" } : m,
-          ),
-        );
+      if (!currentContent && toolCalls.length === 0) {
+        updateMessage(assistantId, { content: "(empty response)" });
       }
 
-      // If there are tool calls, save them to the assistant message and execute them
+      // Handle tool calls
       if (toolCalls.length > 0) {
-        setMessages((prev: Message[]) =>
-          prev.map((m: Message) =>
-            m.id === assistantId ? { ...m, tool_calls: toolCalls } : m,
-          ),
-        );
+        updateMessage(assistantId, { tool_calls: toolCalls });
 
-        // Collect all tool results
+        // Execute tools
         const toolResultMessages: Message[] = [];
-
-        // Execute each tool call and collect results
         for (const toolCall of toolCalls) {
           const toolName = toolCall.function.name;
           let args: any = {};
-
-          console.log(`[AI] Calling tool: ${toolName}`, toolCall.function.arguments);
-
           try {
             args = JSON.parse(toolCall.function.arguments);
-          } catch (err) {
-            console.error("[AI] Failed to parse tool arguments:", err);
-          }
+          } catch {}
 
+          console.log(`[AI] Calling tool: ${toolName}`);
           const result = await executeTool(toolName, args);
-          console.log(`[AI] Tool result: ${result.substring(0, 100)}${result.length > 100 ? '...' : ''}`);
+          console.log(`[AI] Tool result: ${result.substring(0, 100)}${result.length > 100 ? "..." : ""}`);
 
-          // Create tool result message
-          const toolResultMsg: Message = {
+          toolResultMessages.push({
             id: nowId(),
             role: "tool",
             content: result,
             tool_call_id: toolCall.id,
             name: toolName,
             createdAt: Date.now(),
-          };
-
-          toolResultMessages.push(toolResultMsg);
+          });
         }
 
-        // Add all tool results to messages
-        setMessages((prev: Message[]) => [...prev, ...toolResultMessages]);
+        setMessages((prev) => [...prev, ...toolResultMessages]);
         queueMicrotask(scrollToBottom);
 
-        // Build the complete message history including tool results
-        // Option 1: Standard OpenAI format with tool role
-        const messagesWithToolsStandard: OpenAIChatMessage[] = [
-          ...(systemParts.length
-            ? [{ role: "system" as const, content: systemParts.join("\n\n") }]
-            : []),
-          ...messages.filter((m) => !m.localOnly).map((m) => {
-            const msg: OpenAIChatMessage = {
-              role: m.role as any,
-              content: m.content,
-            };
-            if (m.tool_calls) msg.tool_calls = m.tool_calls;
-            if (m.tool_call_id) {
-              msg.tool_call_id = m.tool_call_id;
-              msg.name = m.name;
-            }
-            return msg;
-          }),
-          { role: "user" as const, content },
-          {
-            role: "assistant" as const,
-            content: currentContent || null,  // Must be null if there are tool_calls
-            tool_calls: toolCalls,
-          },
-          ...toolResultMessages.map((msg) => ({
-            role: "tool" as const,
-            content: msg.content,
-            tool_call_id: msg.tool_call_id!,
-            name: msg.name!,
-          })),
-        ];
+        // Build messages with tool results
+        const { standard, fallback } = buildMessagesWithToolResults({
+          messages,
+          userContent: content,
+          systemPrompt: settings.systemPrompt,
+          contextText,
+          assistantContent: currentContent,
+          toolCalls,
+          toolResults: toolResultMessages,
+        });
 
-        // Option 2: Fallback format - convert tool results to user messages
-        // Some API servers don't support the "tool" role, so we provide a fallback
-        const messagesWithToolsFallback: OpenAIChatMessage[] = [
-          ...(systemParts.length
-            ? [{ role: "system" as const, content: systemParts.join("\n\n") }]
-            : []),
-          ...messages.filter((m) => !m.localOnly).map((m) => {
-            const msg: OpenAIChatMessage = {
-              role: m.role as any,
-              content: m.content,
-            };
-            // Don't include tool_calls in fallback mode
-            return msg;
-          }),
-          { role: "user" as const, content },
-          // Include tool results as a user message
-          {
-            role: "user" as const,
-            content: `Tool Results:\n${toolResultMessages.map(m => `[${m.name}]: ${m.content}`).join('\n\n')}`,
-          },
-        ];
-
-        // Try standard format first, fallback if it fails
-        let messagesWithTools = messagesWithToolsStandard;
-        let usedFallback = false;
-
-        // Call AI again with the tool results to get final response
-        console.log("[AI] Sending tool results back to AI...");
-
+        // Create final assistant message
         const finalAssistantId = nowId();
         setStreamingMessageId(finalAssistantId);
-
-        setMessages((prev: Message[]) => [
-          ...prev,
-          {
-            id: finalAssistantId,
-            role: "assistant",
-            content: "",
-            createdAt: Date.now(),
-          },
-        ]);
+        setMessages((prev) => [...prev, { id: finalAssistantId, role: "assistant", content: "", createdAt: Date.now() }]);
         queueMicrotask(scrollToBottom);
 
         let finalContent = "";
-        let chunkCount = 0;
+
         try {
-          // Create a timeout signal (30 seconds)
-          const timeoutController = new AbortController();
-          const timeoutId = setTimeout(() => {
-            console.warn("[handleSend] Request timeout after 30s, aborting...");
-            timeoutController.abort();
-          }, 30000);
-
-          // Combine with existing abort signal
-          const combinedSignal = aborter.signal;
-          if (timeoutController.signal.aborted || combinedSignal.aborted) {
-            throw new Error("Request aborted");
-          }
-
-          for await (const chunk of openAIChatCompletionsStream({
-            apiUrl: settings.apiUrl,
-            apiKey: settings.apiKey,
-            model,
-            messages: messagesWithTools,
-            temperature: settings.temperature,
-            maxTokens: settings.maxTokens,
-            signal: combinedSignal,
-            // Don't pass tools here - we want a text response, not more tool calls
-          })) {
-            clearTimeout(timeoutId); // Clear timeout on first chunk
-            chunkCount++;
-
-            if (chunk.type === "content" && chunk.content) {
-              finalContent += chunk.content;
-              setMessages((prev: Message[]) =>
-                prev.map((m: Message) =>
-                  m.id === finalAssistantId ? { ...m, content: finalContent } : m,
-                ),
-              );
-              queueMicrotask(scrollToBottom);
-            }
-          }
-
-          clearTimeout(timeoutId);
-        } catch (streamErr: any) {
-          console.error("[AI] Error during final response:", streamErr);
-
-          // If we haven't used fallback yet and error is not abort, try fallback format
-          if (!usedFallback && String(streamErr?.name) !== "AbortError") {
-            console.log("[AI] Retrying with fallback format...");
-            usedFallback = true;
-            messagesWithTools = messagesWithToolsFallback;
-
-            // Retry with fallback format
-            try {
-              chunkCount = 0;
-              finalContent = "";
-
-              for await (const chunk of openAIChatCompletionsStream({
-                apiUrl: settings.apiUrl,
-                apiKey: settings.apiKey,
-                model,
-                messages: messagesWithTools,
-                temperature: settings.temperature,
-                maxTokens: settings.maxTokens,
-                signal: aborter.signal,
-              })) {
-                chunkCount++;
-
-                if (chunk.type === "content" && chunk.content) {
-                  finalContent += chunk.content;
-                  setMessages((prev: Message[]) =>
-                    prev.map((m: Message) =>
-                      m.id === finalAssistantId ? { ...m, content: finalContent } : m,
-                    ),
-                  );
-                  queueMicrotask(scrollToBottom);
-                }
-              }
-              console.log("[AI] Fallback succeeded");
-            } catch (fallbackErr: any) {
-              console.error("[AI] Fallback also failed:", fallbackErr);
-              throw fallbackErr; // Re-throw to be caught by outer catch
-            }
-          } else {
-            throw streamErr; // Re-throw to be caught by outer catch
-          }
-        }
-
-        if (!usedFallback && finalContent.trim().length === 0) {
-          console.warn("[AI] Empty final response, retrying with fallback format...");
-          usedFallback = true;
-          messagesWithTools = messagesWithToolsFallback;
-
-          try {
-            chunkCount = 0;
-            finalContent = "";
-
-            for await (const chunk of openAIChatCompletionsStream({
+          for await (const chunk of streamChatWithRetry(
+            {
               apiUrl: settings.apiUrl,
               apiKey: settings.apiKey,
               model,
-              messages: messagesWithTools,
               temperature: settings.temperature,
               maxTokens: settings.maxTokens,
               signal: aborter.signal,
-            })) {
-              chunkCount++;
-
-              if (chunk.type === "content" && chunk.content) {
-                finalContent += chunk.content;
-                setMessages((prev: Message[]) =>
-                  prev.map((m: Message) =>
-                    m.id === finalAssistantId ? { ...m, content: finalContent } : m,
-                  ),
-                );
-                queueMicrotask(scrollToBottom);
-              }
+            },
+            standard,
+            fallback,
+            () => console.log("[AI] Retrying with fallback format...")
+          )) {
+            if (chunk.type === "content") {
+              finalContent += chunk.content;
+              updateMessage(finalAssistantId, { content: finalContent });
             }
-          } catch (fallbackErr: any) {
-            console.error("[AI] Fallback retry after empty response failed:", fallbackErr);
           }
+        } catch (streamErr: any) {
+          console.error("[AI] Error during final response:", streamErr);
+          throw streamErr;
         }
 
         if (finalContent.trim().length === 0) {
           const toolFallback = toolResultMessages.map((m) => m.content).join("\n\n").trim();
-          finalContent = toolFallback || "(empty response from API)";
-          setMessages((prev: Message[]) =>
-            prev.map((m: Message) =>
-              m.id === finalAssistantId ? { ...m, content: finalContent } : m,
-            ),
-          );
+          updateMessage(finalAssistantId, { content: toolFallback || "(empty response from API)" });
         }
 
         setStreamingMessageId(null);
-
-        const hasRenderableText = finalContent.trim().length > 0;
-        if (!hasRenderableText) console.warn("[AI] No response received from API");
-        else console.log(`[AI] Final response complete (${finalContent.length} chars)`);
-	      }
-	    } catch (err: any) {
-	      const isAbort = String(err?.name ?? "") === "AbortError";
+        console.log(`[AI] Final response complete (${finalContent.length} chars)`);
+      }
+    } catch (err: any) {
+      const isAbort = String(err?.name ?? "") === "AbortError";
       const msg = String(err?.message ?? err ?? "unknown error");
       if (!isAbort) orca.notify("error", msg);
 
-      // Find the last assistant message and update it with error
-      setMessages((prev: Message[]) => {
-        const lastAssistantIndex = prev.findIndex(
-          (m, i) => m.role === "assistant" && i === prev.length - 1
-        );
-        if (lastAssistantIndex >= 0) {
+      setMessages((prev) => {
+        const lastIdx = prev.findIndex((m, i) => m.role === "assistant" && i === prev.length - 1);
+        if (lastIdx >= 0) {
           return prev.map((m, i) =>
-            i === lastAssistantIndex
-              ? { ...m, content: m.content || (isAbort ? "(stopped)" : `(error) ${msg}`) }
-              : m
+            i === lastIdx ? { ...m, content: m.content || (isAbort ? "(stopped)" : `(error) ${msg}`) } : m
           );
         }
         return prev;
@@ -736,15 +418,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }
 
   function stop() {
-    if (!abortRef.current) return;
-    abortRef.current.abort();
+    if (abortRef.current) abortRef.current.abort();
   }
 
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) abortRef.current.abort();
-    };
-  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Derived State
+  // ─────────────────────────────────────────────────────────────────────────
 
   const rootBlockId: number | null = useMemo(() => {
     const vp = findViewPanelById(orcaSnap.panels, panelId);
@@ -767,7 +446,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const modelOptions = buildAiModelOptions(settingsForUi, [selectedModel]);
 
   const handleModelChange = useCallback((nextModel: string) => {
-    setCurrentSession((prev: SavedSession) => ({ ...prev, model: nextModel }));
+    setCurrentSession((prev) => ({ ...prev, model: nextModel }));
   }, []);
 
   const handleAddModelToSettings = useCallback(
@@ -784,21 +463,20 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         });
         orca.notify("success", `Added model: ${trimmed}`);
       } catch (err: any) {
-        const msg = String(err?.message ?? err ?? "unknown error");
-        orca.notify("error", `Failed to add model: ${msg}`);
+        orca.notify("error", `Failed to add model: ${String(err?.message ?? err ?? "unknown error")}`);
       }
     },
-    [pluginNameForUi],
+    [pluginNameForUi]
   );
 
-  // Construct message elements to properly handle loading state
-  const messageElements = messages.map((m: Message) => {
-      // Skip tool messages from display (they're internal)
-      if (m.role === "tool") {
-        return null;
-      }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────────────────
 
-      return createElement(
+  const messageElements = messages
+    .filter((m) => m.role !== "tool")
+    .map((m) =>
+      createElement(
         "div",
         {
           key: m.id,
@@ -817,86 +495,79 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               maxWidth: m.role === "user" ? "75%" : "90%",
               padding: m.role === "user" ? "12px 16px" : "16px 20px",
               borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-              background: m.role === "user"
-                  ? "var(--orca-color-primary, #007bff)"
-                  : "var(--orca-color-bg-2)",
+              background: m.role === "user" ? "var(--orca-color-primary, #007bff)" : "var(--orca-color-bg-2)",
               color: m.role === "user" ? "#fff" : "var(--orca-color-text-1)",
               border: m.role === "assistant" ? "1px solid var(--orca-color-border)" : "none",
               boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
               position: "relative",
             },
           },
-          // Use Markdown rendering for content
-          createElement(MarkdownMessage, {
-              content: m.content || "",
-              role: m.role,
-          }),
-          // Typewriter cursor for streaming message
-          (streamingMessageId === m.id) && createElement("span", {
+          createElement(MarkdownMessage, { content: m.content || "", role: m.role }),
+          streamingMessageId === m.id &&
+            createElement("span", {
               style: {
-                  display: "inline-block",
-                  width: "2px",
-                  height: "1.2em",
-                  background: "var(--orca-color-primary, #007bff)",
-                  marginLeft: "2px",
-                  verticalAlign: "text-bottom",
-                  animation: "blink 1s step-end infinite",
-              }
-          }),
-          // Show tool calls if present
-          m.tool_calls && m.tool_calls.length > 0
-            ? createElement(
-                "div",
-                {
-                  style: {
-                    marginTop: 8,
-                    padding: 8,
-                    background: "var(--orca-color-bg-3)",
-                    borderRadius: 4,
-                    fontSize: "0.85em",
-                    opacity: 0.8,
-                    fontFamily: "monospace",
-                  },
-                },
-                `🔧 Calling tool: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
-              )
-            : null,
-        ),
-      );
-    }).filter(Boolean);
-
-    // Add loading dots if sending but no response yet (or only tool responses so far)
-    const lastMsg = messages[messages.length - 1];
-    if (sending && lastMsg && lastMsg.role === "user") {
-        messageElements.push(
+                display: "inline-block",
+                width: "2px",
+                height: "1.2em",
+                background: "var(--orca-color-primary, #007bff)",
+                marginLeft: "2px",
+                verticalAlign: "text-bottom",
+                animation: "blink 1s step-end infinite",
+              },
+            }),
+          m.tool_calls &&
+            m.tool_calls.length > 0 &&
             createElement(
-                "div",
-                {
-                    key: "loading",
-                    style: {
-                        width: "100%",
-                        display: "flex",
-                        justifyContent: "flex-start",
-                        marginBottom: "16px",
-                        animation: "messageSlideIn 0.3s ease-out",
-                    },
+              "div",
+              {
+                style: {
+                  marginTop: 8,
+                  padding: 8,
+                  background: "var(--orca-color-bg-3)",
+                  borderRadius: 4,
+                  fontSize: "0.85em",
+                  opacity: 0.8,
+                  fontFamily: "monospace",
                 },
-                createElement(
-                    "div",
-                    {
-                        style: {
-                            padding: "0",
-                            borderRadius: "18px 18px 18px 4px",
-                            background: "var(--orca-color-bg-2)",
-                            border: "1px solid var(--orca-color-border)",
-                            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-                        }
-                    },
-                    createElement(LoadingDots)
-                )
+              },
+              `🔧 Calling tool: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
             )
-        );
-    }
+        )
+      )
+    );
+
+  // Add loading dots if waiting for response
+  const lastMsg = messages[messages.length - 1];
+  if (sending && lastMsg && lastMsg.role === "user") {
+    messageElements.push(
+      createElement(
+        "div",
+        {
+          key: "loading",
+          style: {
+            width: "100%",
+            display: "flex",
+            justifyContent: "flex-start",
+            marginBottom: "16px",
+            animation: "messageSlideIn 0.3s ease-out",
+          },
+        },
+        createElement(
+          "div",
+          {
+            style: {
+              padding: "0",
+              borderRadius: "18px 18px 18px 4px",
+              background: "var(--orca-color-bg-2)",
+              border: "1px solid var(--orca-color-border)",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            },
+          },
+          createElement(LoadingDots)
+        )
+      )
+    );
+  }
 
   return createElement(
     "div",
@@ -924,22 +595,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           zIndex: 10,
         },
       },
-      createElement(
-        "div",
-        { style: { fontWeight: 600, flex: 1, fontFamily: "var(--chat-font-sans)" } },
-        "AI Chat",
-      ),
-      // Save button
-      createElement(
-        Button,
-        {
-          variant: "plain",
-          onClick: handleSaveSession,
-          title: "Save session",
-        },
-        createElement("i", { className: "ti ti-device-floppy" }),
-      ),
-      // History menu
+      createElement("div", { style: { fontWeight: 600, flex: 1, fontFamily: "var(--chat-font-sans)" } }, "AI Chat"),
+      createElement(Button, { variant: "plain", onClick: handleSaveSession, title: "Save session" }, createElement("i", { className: "ti ti-device-floppy" })),
       createElement(ChatHistoryMenu, {
         sessions,
         activeSessionId: currentSession.id,
@@ -948,30 +605,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         onClearAll: handleClearAllSessions,
         onNewSession: handleNewSession,
       }),
-      createElement(
-        Button,
-        {
-          variant: "plain",
-          onClick: () => void orca.commands.invokeCommand("core.openSettings"),
-          title: "Settings",
-        },
-        createElement("i", { className: "ti ti-settings" }),
-      ),
-      createElement(
-        Button,
-        { variant: "plain", disabled: !sending, onClick: stop, title: "Stop generation" },
-        createElement("i", { className: "ti ti-player-stop" }),
-      ),
-      createElement(
-        Button,
-        { variant: "plain", onClick: clear, title: "Clear chat" },
-        createElement("i", { className: "ti ti-trash" }),
-      ),
-      createElement(
-        Button,
-        { variant: "plain", onClick: () => closeAiChatPanel(panelId), title: "Close" },
-        createElement("i", { className: "ti ti-x" }),
-      ),
+      createElement(Button, { variant: "plain", onClick: () => void orca.commands.invokeCommand("core.openSettings"), title: "Settings" }, createElement("i", { className: "ti ti-settings" })),
+      createElement(Button, { variant: "plain", disabled: !sending, onClick: stop, title: "Stop generation" }, createElement("i", { className: "ti ti-player-stop" })),
+      createElement(Button, { variant: "plain", onClick: clear, title: "Clear chat" }, createElement("i", { className: "ti ti-trash" })),
+      createElement(Button, { variant: "plain", onClick: () => closeAiChatPanel(panelId), title: "Close" }, createElement("i", { className: "ti ti-x" }))
     ),
     // Message List
     createElement(
@@ -988,7 +625,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           scrollBehavior: "smooth",
         },
       },
-      ...messageElements,
+      ...messageElements
     ),
     // Chat Input
     createElement(ChatInput, {
@@ -1000,6 +637,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       selectedModel,
       onModelChange: handleModelChange,
       onAddModel: handleAddModelToSettings,
-    }),
+    })
   );
 }
