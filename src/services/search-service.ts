@@ -401,7 +401,34 @@ export async function searchJournalEntries(
     const result = await orca.invokeBackend("query", description);
     const payload = unwrapBackendResult<any>(result);
     throwIfBackendError(payload, "query");
-    const blocks = unwrapBlocks(payload);
+    let blocks = unwrapBlocks(payload);
+
+    // Fallback: some Orca builds use opposite sign conventions for relative dates.
+    // If the initial query returns no results, try flipping the sign of relative offsets.
+    if (
+      (!Array.isArray(blocks) || blocks.length === 0) &&
+      start?.type === "relative" &&
+      end?.type === "relative" &&
+      (start.value !== 0 || end.value !== 0)
+    ) {
+      const flippedStart: QueryDateSpec = { ...start, value: -start.value };
+      const flippedEnd: QueryDateSpec = { ...end, value: -end.value };
+      const fallbackDescription = buildJournalQuery({
+        start: flippedStart,
+        end: flippedEnd,
+        ...options,
+        maxResults,
+      });
+      console.log(
+        "[searchJournalEntries] Fallback query description:",
+        JSON.stringify(fallbackDescription)
+      );
+
+      const fallbackResult = await orca.invokeBackend("query", fallbackDescription);
+      const fallbackPayload = unwrapBackendResult<any>(fallbackResult);
+      throwIfBackendError(fallbackPayload, "query");
+      blocks = unwrapBlocks(fallbackPayload);
+    }
 
     if (!Array.isArray(blocks)) {
       console.warn("[searchJournalEntries] Result is not an array:", blocks);
