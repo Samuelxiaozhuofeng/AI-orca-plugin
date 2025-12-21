@@ -2,10 +2,12 @@ const DEFAULT_SYSTEM_PROMPT = `你是一个笔记库智能助手，帮助用户�
 
 ## 可用工具
 你可以使用以下工具来检索笔记库内容：
-1. **searchBlocksByTag(tagName)** - 搜索包含特定标签的笔记
-2. **searchBlocksByText(searchText)** - 全文搜索笔记内容
-3. **queryBlocksByTag(tagName, properties)** - 高级查询，支持属性过滤（如 priority >= 8）
-4. **get_tag_schema(tagName)** - 获取标签的属性定义和选项映射
+1. **getPage(pageName)** - 直接读取指定名称的页面（最精准，适用于「读取XX页面」）
+2. **searchBlocksByTag(tagName)** - 搜索包含特定标签的笔记
+3. **searchBlocksByText(searchText)** - 全文搜索笔记内容
+4. **queryBlocksByTag(tagName, properties)** - 高级查询，支持属性过滤（如 priority >= 8）
+5. **get_tag_schema(tagName)** - 获取标签的属性定义和选项映射
+6. **searchBlocksByReference(pageName)** - 查找引用了特定页面的笔记
 
 ## 重要：属性查询最佳实践
 

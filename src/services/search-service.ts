@@ -536,6 +536,58 @@ export async function searchBlocksByReference(
 }
 
 /**
+ * Get a specific page by its name/alias and return its full content
+ * This is more precise than searching, as it directly retrieves the exact page
+ * @param pageName - The page name or alias (e.g., "项目方案", "Project A")
+ * @param includeChildren - Whether to include child blocks (default: true)
+ * @returns Page content as SearchResult, or throws if page not found
+ */
+export async function getPageByName(
+  pageName: string,
+  includeChildren: boolean = true
+): Promise<SearchResult> {
+  console.log("[getPageByName] Called with:", { pageName, includeChildren });
+
+  try {
+    if (!pageName || typeof pageName !== "string") {
+      console.error("[getPageByName] Invalid pageName:", pageName);
+      throw new Error("Invalid page name");
+    }
+
+    // Step 1: Get block by alias
+    const block = await orca.invokeBackend("get-block-by-alias", pageName);
+
+    if (!block) {
+      console.warn(`[getPageByName] Page "${pageName}" not found`);
+      throw new Error(`Page "${pageName}" not found`);
+    }
+
+    console.log(`[getPageByName] Found page: ${block.id}`);
+
+    // Step 2: Get block tree
+    let tree: any = null;
+    if (includeChildren) {
+      const result = await orca.invokeBackend("get-block-tree", block.id);
+      const payload = unwrapBackendResult<any>(result);
+      throwIfBackendError(payload, "get-block-tree");
+      tree = payload;
+    }
+
+    // Step 3: Transform to SearchResult
+    const results = transformToSearchResults([{ block, tree }], {
+      includeProperties: true,
+    });
+
+    return results[0];
+  } catch (error: any) {
+    console.error(`[getPageByName] Failed to get page "${pageName}":`, error);
+    throw new Error(
+      `Failed to get page: ${error?.message ?? error ?? "unknown error"}`
+    );
+  }
+}
+
+/**
  * Property type information for tag schema
  */
 export interface TagPropertySchema {

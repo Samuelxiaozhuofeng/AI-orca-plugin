@@ -14,6 +14,7 @@ import {
   searchBlocksByReference,
   getTagSchema,
   getCachedTagSchema,
+  getPageByName,
 } from "./search-service";
 import { parsePropertyFilters } from "../utils/query-filter-parser";
 import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
@@ -252,6 +253,27 @@ export const TOOLS: OpenAITool[] = [
           maxResults: {
             type: "number",
             description: "Maximum number of results to return (default: 50, max: 50)",
+          },
+        },
+        required: ["pageName"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getPage",
+      description: "直接读取指定名称的页面内容。当用户明确要求「读取/查看/打开某个页面」时使用此工具。比 searchBlocksByText 更精准，因为它直接通过页面名称获取，而不是搜索。适用场景：「读取名为XX的页面」、「查看[[XX]]的内容」、「打开XX笔记」",
+      parameters: {
+        type: "object",
+        properties: {
+          pageName: {
+            type: "string",
+            description: "要读取的页面名称或别名（e.g., \"项目方案\", \"Project A\", \"会议记录\"）",
+          },
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含子块内容（默认：true）。设为 false 只返回页面标题块",
           },
         },
         required: ["pageName"],
@@ -657,6 +679,46 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       }).join("\n\n");
 
       return `Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
+    } else if (toolName === "getPage") {
+      // Get page content by name
+      let pageName = args.pageName || args.page_name || args.page || args.name
+        || args.alias || args.title || args.pageTitle;
+      const includeChildren = args.includeChildren !== false; // default true
+
+      // Handle array parameters
+      if (Array.isArray(pageName)) {
+        pageName = pageName[0];
+      }
+
+      if (!pageName) {
+        console.error("[Tool] Missing page name parameter");
+        return "Error: Missing page name parameter. Please specify which page to read.";
+      }
+
+      console.log("[Tool] getPage:", { pageName, includeChildren });
+
+      try {
+        const result = await getPageByName(pageName, includeChildren);
+
+        const linkTitle = result.title.replace(/[\[\]]/g, "");
+        const body = result.fullContent ?? result.content;
+
+        return `# ${linkTitle}
+
+${body}
+
+---
+📄 [查看原页面](orca-block:${result.id})`;
+      } catch (error: any) {
+        // If page not found, provide helpful error message
+        if (error.message?.includes("not found")) {
+          return `Page "${pageName}" not found. Please check:
+1. The page name is correct (case-sensitive)
+2. The page exists in your notes
+3. Try using searchBlocksByText("${pageName}") to find similar pages`;
+        }
+        throw error;
+      }
     } else {
       console.error("[Tool] Unknown tool:", toolName);
       return `Unknown tool: ${toolName}`;
