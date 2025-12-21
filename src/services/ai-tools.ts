@@ -10,6 +10,8 @@ import {
   queryBlocksByTag,
   searchTasks,
   searchJournalEntries,
+  getTodayJournal,
+  getRecentJournals,
   queryBlocksAdvanced,
   searchBlocksByReference,
   getTagSchema,
@@ -158,11 +160,11 @@ export const TOOLS: OpenAITool[] = [
         properties: {
           startOffset: {
             type: "number",
-            description: "Start date as days offset from today (negative for past, e.g., -7 for 7 days ago, 0 for today)",
+            description: "Start date as days offset from today (negative for past, e.g., -7 for 7 days ago, 0 for today). Positive numbers are accepted and treated as days ago (e.g., 7 -> -7).",
           },
           endOffset: {
             type: "number",
-            description: "End date as days offset from today (negative for past, e.g., -1 for yesterday, 0 for today)",
+            description: "End date as days offset from today (negative for past, e.g., -1 for yesterday, 0 for today). Positive numbers are accepted and treated as days ago (e.g., 1 -> -1).",
           },
           maxResults: {
             type: "number",
@@ -170,6 +172,46 @@ export const TOOLS: OpenAITool[] = [
           },
         },
         required: ["startOffset", "endOffset"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getTodayJournal",
+      description: "获取今天的 Journal（日记）页面内容，用于快速总结今日记录。优先使用此工具，而不是通过查询/搜索间接定位。",
+      parameters: {
+        type: "object",
+        properties: {
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含子块内容（默认：true）。设为 false 只返回 Journal 根块",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getRecentJournals",
+      description: "获取最近 N 天（默认 7 天，包含今天）的 Journal 内容，用于总结近一周/近几天的记录。",
+      parameters: {
+        type: "object",
+        properties: {
+          days: {
+            type: "number",
+            description: "要获取的天数（默认：7）。例如：7=近一周，3=近三天，0=仅今天。",
+          },
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含子块内容（默认：true）。设为 false 只返回 Journal 根块列表",
+          },
+          maxResults: {
+            type: "number",
+            description: "最多返回多少条 Journal（默认：20，最大：50）。通常 7 天最多 7 条。",
+          },
+        },
       },
     },
   },
@@ -305,6 +347,24 @@ function formatPropValue(value: any): string {
  */
 export async function executeTool(toolName: string, args: any): Promise<string> {
   try {
+    const toFiniteNumber = (value: any): number | undefined => {
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+      if (typeof value === "string" && value.trim()) {
+        const n = Number(value);
+        if (Number.isFinite(n)) return n;
+      }
+      return undefined;
+    };
+
+    // Orca's relative journal dates typically use negative values for past (e.g., -7 = 7 days ago).
+    // Accept both conventions from models/users: 7 => -7, -7 => -7.
+    const normalizeJournalOffset = (value: any, fallback: number): number => {
+      const n = toFiniteNumber(value);
+      const v = Number.isFinite(n as number) ? Math.trunc(n as number) : fallback;
+      if (v === 0) return 0;
+      return v > 0 ? -v : v;
+    };
+
     if (toolName === "searchBlocksByTag") {
       // Support multiple parameter names: tagName, tag, query
       let tagName = args.tagName || args.tag_name || args.tag || args.query;
@@ -524,15 +584,24 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       return `Found ${results.length} ${statusDesc}task(s):\n${summary}`;
     } else if (toolName === "searchJournalEntries") {
       // Search for journal entries in date range
-      const startOffset = typeof args.startOffset === "number"
-        ? args.startOffset
-        : (typeof args.start_offset === "number" ? args.start_offset : -7);
-      const endOffset = typeof args.endOffset === "number"
-        ? args.endOffset
-        : (typeof args.end_offset === "number" ? args.end_offset : 0);
+      let startOffset = normalizeJournalOffset(args.startOffset ?? args.start_offset, -7);
+      let endOffset = normalizeJournalOffset(args.endOffset ?? args.end_offset, 0);
       const maxResults = args.maxResults || 50;
 
-      console.log("[Tool] searchJournalEntries:", { startOffset, endOffset, maxResults });
+      if (startOffset > endOffset) {
+        [startOffset, endOffset] = [endOffset, startOffset];
+      }
+
+      const startDaysAgo = Math.abs(startOffset);
+      const endDaysAgo = Math.abs(endOffset);
+
+      console.log("[Tool] searchJournalEntries:", {
+        startOffset,
+        endOffset,
+        startDaysAgo,
+        endDaysAgo,
+        maxResults,
+      });
 
       const start: QueryDateSpec = { type: "relative", value: startOffset, unit: "d" };
       const end: QueryDateSpec = { type: "relative", value: endOffset, unit: "d" };
@@ -540,7 +609,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       const results = await searchJournalEntries(start, end, { maxResults: Math.min(maxResults, 50) });
 
       if (results.length === 0) {
-        return `No journal entries found from ${startOffset} to ${endOffset} days.`;
+        return `No journal entries found from ${startDaysAgo} to ${endDaysAgo} days ago.`;
       }
 
       const summary = results.map((r, i) => {
@@ -549,7 +618,62 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
       }).join("\n\n");
 
-      return `Found ${results.length} journal entries from ${startOffset} to ${endOffset} days:\n${summary}`;
+      return `Found ${results.length} journal entries from ${startDaysAgo} to ${endDaysAgo} days ago:\n${summary}`;
+    } else if (toolName === "getTodayJournal") {
+      const includeChildren = args.includeChildren !== false; // default true
+
+      console.log("[Tool] getTodayJournal:", { includeChildren });
+
+      const result = await getTodayJournal(includeChildren);
+      const linkTitle = result.title.replace(/[\[\]]/g, "");
+      const body = result.fullContent ?? result.content;
+
+      return `# ${linkTitle}
+
+${body}
+
+---
+📄 [查看原页面](orca-block:${result.id})`;
+    } else if (toolName === "getRecentJournals") {
+      let days = args.days ?? args.day ?? args.rangeDays ?? args.lastDays ?? args.n;
+      const includeChildren = args.includeChildren !== false; // default true
+      const maxResults = args.maxResults ?? 20;
+
+      if (Array.isArray(days)) {
+        days = days[0];
+      }
+
+      const normalizedDays = Number.isFinite(Number(days))
+        ? Math.abs(Math.trunc(Number(days)))
+        : 7;
+      const normalizedMaxResults = Math.min(
+        Math.max(1, Number.isFinite(Number(maxResults)) ? Math.trunc(Number(maxResults)) : 20),
+        50
+      );
+
+      console.log("[Tool] getRecentJournals:", {
+        days: normalizedDays,
+        includeChildren,
+        maxResults: normalizedMaxResults,
+      });
+
+      const results = await getRecentJournals(
+        normalizedDays,
+        includeChildren,
+        normalizedMaxResults
+      );
+
+      if (results.length === 0) {
+        return `No journal entries found in the last ${normalizedDays} day(s).`;
+      }
+
+      const summary = results.map((r, i) => {
+        const linkTitle = r.title.replace(/[\[\]]/g, "");
+        const body = r.fullContent ?? r.content;
+        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
+      }).join("\n\n");
+
+      return `Found ${results.length} journal entries in the last ${normalizedDays} day(s):\n${summary}`;
     } else if (toolName === "query_blocks") {
       // Advanced query with multiple conditions
       const conditions = args.conditions;
@@ -572,10 +696,15 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           case "task":
             return { type: "task" as const, completed: c.completed };
           case "journal":
+            let startOffset = normalizeJournalOffset(c.startOffset, -7);
+            let endOffset = normalizeJournalOffset(c.endOffset, 0);
+            if (startOffset > endOffset) {
+              [startOffset, endOffset] = [endOffset, startOffset];
+            }
             return {
               type: "journal" as const,
-              start: { type: "relative" as const, value: c.startOffset ?? -7, unit: "d" as const },
-              end: { type: "relative" as const, value: c.endOffset ?? 0, unit: "d" as const },
+              start: { type: "relative" as const, value: startOffset, unit: "d" as const },
+              end: { type: "relative" as const, value: endOffset, unit: "d" as const },
             };
           case "ref":
             return { type: "ref" as const, blockId: c.blockId || 0 };

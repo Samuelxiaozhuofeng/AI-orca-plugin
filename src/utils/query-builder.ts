@@ -196,11 +196,15 @@ export function conditionToQueryItem(condition: QueryCondition): QueryItem2 {
       } as QueryTask;
 
     case "journal":
+      const start = toQueryJournalDate(condition.start);
+      const end = toQueryJournalDate(condition.end);
       return {
         kind: 3,
-        start: toQueryJournalDate(condition.start),
-        end: toQueryJournalDate(condition.end),
-      } as QueryJournal2;
+        start,
+        end,
+        from: start,
+        to: end,
+      } as any;
 
     case "ref":
       return {
@@ -243,10 +247,14 @@ export function buildTaskQuery(options: TaskQueryOptions = {}): QueryDescription
 
   // Add date range if specified (using CHAIN_AND for ancestor matching)
   if (options.dateRange) {
-    const journalQuery: QueryJournal2 = {
+    const start = toQueryJournalDate(options.dateRange.start);
+    const end = toQueryJournalDate(options.dateRange.end);
+    const journalQuery: any = {
       kind: 3,
-      start: toQueryJournalDate(options.dateRange.start),
-      end: toQueryJournalDate(options.dateRange.end),
+      start,
+      end,
+      from: start,
+      to: end,
     };
     // Wrap in CHAIN_AND to match tasks inside journal entries
     const chainGroup: QueryGroup2 = {
@@ -271,10 +279,14 @@ export function buildTaskQuery(options: TaskQueryOptions = {}): QueryDescription
  * Build a journal entries query
  */
 export function buildJournalQuery(options: JournalQueryOptions): QueryDescription2 {
-  const journalQuery: QueryJournal2 = {
+  const start = toQueryJournalDate(options.start);
+  const end = toQueryJournalDate(options.end);
+  const journalQuery: any = {
     kind: 3,
-    start: toQueryJournalDate(options.start),
-    end: toQueryJournalDate(options.end),
+    start,
+    end,
+    from: start,
+    to: end,
   };
 
   const group: QueryGroup2 = {

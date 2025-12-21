@@ -409,7 +409,10 @@ export async function searchJournalEntries(
     }
 
     const limitedBlocks = blocks.slice(0, maxResults);
-    const trees = await fetchBlockTrees(limitedBlocks);
+    const trees =
+      options.includeChildren === false
+        ? limitedBlocks.map((block) => ({ block, tree: null }))
+        : await fetchBlockTrees(limitedBlocks);
     return transformToSearchResults(trees, { includeProperties: false });
   } catch (error: any) {
     console.error("[searchJournalEntries] Failed:", error);
@@ -417,6 +420,80 @@ export async function searchJournalEntries(
       `Journal search failed: ${error?.message ?? error ?? "unknown error"}`
     );
   }
+}
+
+/**
+ * Get today's journal (daily note) content.
+ * Prefer this over querying when user asks to summarize today's journal.
+ * @param includeChildren - Whether to include child blocks (default: true)
+ * @returns Today's journal content as SearchResult
+ */
+export async function getTodayJournal(
+  includeChildren: boolean = true
+): Promise<SearchResult> {
+  console.log("[getTodayJournal] Called with:", { includeChildren });
+
+  try {
+    const result = await orca.invokeBackend("get-journal-block", new Date());
+    const payload = unwrapBackendResult<any>(result);
+    throwIfBackendError(payload, "get-journal-block");
+    const block = payload;
+
+    if (!block) {
+      console.warn("[getTodayJournal] Today's journal not found");
+      throw new Error("Today's journal not found");
+    }
+
+    let tree: any = null;
+    if (includeChildren) {
+      const treeResult = await orca.invokeBackend("get-block-tree", block.id);
+      const treePayload = unwrapBackendResult<any>(treeResult);
+      throwIfBackendError(treePayload, "get-block-tree");
+      tree = treePayload;
+    }
+
+    const results = transformToSearchResults([{ block, tree }], {
+      includeProperties: false,
+    });
+    return results[0];
+  } catch (error: any) {
+    console.error("[getTodayJournal] Failed:", error);
+    throw new Error(
+      `Failed to get today's journal: ${error?.message ?? error ?? "unknown error"}`
+    );
+  }
+}
+
+/**
+ * Get recent journals in the past N days (including today).
+ * @param days - Number of days ago to include (default: 7)
+ * @param includeChildren - Whether to include child blocks (default: true)
+ * @param maxResults - Maximum number of journal entries to return (default: 20, max: 50)
+ * @returns Array of journal entries as SearchResult[]
+ */
+export async function getRecentJournals(
+  days: number = 7,
+  includeChildren: boolean = true,
+  maxResults: number = 20
+): Promise<SearchResult[]> {
+  const normalizedDays = Number.isFinite(days) ? Math.abs(Math.trunc(days)) : 7;
+  const normalizedMaxResults = Math.min(
+    Math.max(1, Number.isFinite(maxResults) ? Math.trunc(maxResults) : 20),
+    50
+  );
+  console.log("[getRecentJournals] Called with:", {
+    days: normalizedDays,
+    includeChildren,
+    maxResults: normalizedMaxResults,
+  });
+
+  const start: QueryDateSpec = { type: "relative", value: -normalizedDays, unit: "d" };
+  const end: QueryDateSpec = { type: "relative", value: 0, unit: "d" };
+
+  return await searchJournalEntries(start, end, {
+    includeChildren,
+    maxResults: normalizedMaxResults,
+  });
 }
 
 /**

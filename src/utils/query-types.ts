@@ -50,6 +50,7 @@ export interface QueryBlocksByTagOptions {
 /**
  * Date specification for queries (relative or absolute)
  * @example Relative: { type: "relative", value: -7, unit: "d" } = 7 days ago
+ * @example Relative: { type: "relative", value: 0, unit: "d" } = today
  * @example Absolute: { type: "absolute", value: 1703145600000 } = timestamp
  */
 export interface QueryDateSpec {
@@ -127,4 +128,3 @@ export interface AdvancedQueryOptions {
   /** Block ID to exclude from results */
   excludeId?: number;
 }
-
