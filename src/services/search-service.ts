@@ -195,11 +195,13 @@ export async function searchBlocksByTag(
         fullContent = lines.join("\n").trim() || undefined;
       }
 
+      const blockForProps = pickBlockForPropertyExtraction(block, tree);
       return {
         id: block.id,
         title: extractTitle(block),
         content: extractContent(block),
         fullContent,
+        propertyValues: extractAllProperties(blockForProps),
         created: block.created ? new Date(block.created) : undefined,
         modified: block.modified ? new Date(block.modified) : undefined,
         tags: block.aliases || [],
@@ -439,14 +441,23 @@ export async function queryBlocksByTag(
         fullContent = lines.join("\n").trim() || undefined;
       }
 
+      const blockForProps = pickBlockForPropertyExtraction(block, tree);
+      // Always extract all properties, merging with any specific ones from the query
+      const allProps = extractAllProperties(blockForProps);
+      const queryProps = propNames.length
+        ? buildPropertyValues(blockForProps, propNames)
+        : undefined;
+      // Merge: allProps as base, queryProps may override (though they should be same values)
+      const propertyValues = allProps || queryProps
+        ? { ...(allProps ?? {}), ...(queryProps ?? {}) }
+        : undefined;
+
       return {
         id: block.id,
         title: extractTitle(block),
         content: extractContent(block),
         fullContent,
-        propertyValues: propNames.length
-          ? buildPropertyValues(pickBlockForPropertyExtraction(block, tree), propNames)
-          : undefined,
+        propertyValues: Object.keys(propertyValues ?? {}).length ? propertyValues : undefined,
         created: block.created ? new Date(block.created) : undefined,
         modified: block.modified ? new Date(block.modified) : undefined,
         tags: block.aliases || [],
@@ -564,4 +575,60 @@ function pickBlockForPropertyExtraction(block: any, tree: any): any {
   if (tree && typeof tree === "object") return tree;
 
   return block;
+}
+
+/**
+ * Extract all property values from a block, including properties from refs and backRefs.
+ * This collects all tag properties (like priority, date, status) attached to the block.
+ * @param block - The block object to extract properties from
+ * @returns Record of property name to value, or undefined if no properties found
+ */
+function extractAllProperties(block: any): Record<string, any> | undefined {
+  if (!block || typeof block !== "object") return undefined;
+
+  const out: Record<string, any> = {};
+  const seen = new Set<string>();
+
+  // Helper to add a property if not already seen
+  const addProperty = (prop: any) => {
+    if (!prop || typeof prop !== "object") return;
+    const name = prop.name;
+    if (typeof name !== "string" || !name.trim()) return;
+    if (seen.has(name)) return;
+    seen.add(name);
+    if ("value" in prop && prop.value !== undefined) {
+      out[name] = prop.value;
+    }
+  };
+
+  // 1. Extract from direct properties
+  if (Array.isArray(block.properties)) {
+    for (const prop of block.properties) {
+      addProperty(prop);
+    }
+  }
+
+  // 2. Extract from refs (tag properties are usually stored here)
+  if (Array.isArray(block.refs)) {
+    for (const ref of block.refs) {
+      if (Array.isArray(ref?.data)) {
+        for (const prop of ref.data) {
+          addProperty(prop);
+        }
+      }
+    }
+  }
+
+  // 3. Extract from backRefs
+  if (Array.isArray(block.backRefs)) {
+    for (const ref of block.backRefs) {
+      if (Array.isArray(ref?.data)) {
+        for (const prop of ref.data) {
+          addProperty(prop);
+        }
+      }
+    }
+  }
+
+  return Object.keys(out).length ? out : undefined;
 }

@@ -515,6 +515,26 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           properties = [...properties, ...parsePropertyFilters(propertyFiltersInput)];
         }
 
+        // Handle flat parameter format: { property, operator, value }
+        // Some AI models send single property filter as flat args instead of properties array
+        if (properties.length === 0 && args.property && args.operator) {
+          const opMap: Record<string, string> = {
+            ">=": ">=", ">": ">", "<=": "<=", "<": "<",
+            "==": "==", "=": "==", "!=": "!=", "<>": "!=",
+            "is null": "is null", "isnull": "is null", "null": "is null",
+            "not null": "not null", "notnull": "not null", "not_null": "not null",
+            "includes": "includes", "contains": "includes",
+            "not includes": "not includes", "not_includes": "not includes",
+          };
+          const normalizedOp = opMap[String(args.operator).toLowerCase()] ?? args.operator;
+          properties = [{
+            name: args.property,
+            op: normalizedOp,
+            value: args.value,
+          }];
+          console.log("[queryBlocksByTag] Converted flat args to properties:", properties);
+        }
+
         if (queryText && queryText.trim()) {
           if (tagName) {
             const trimmedTag = String(tagName).trim();
