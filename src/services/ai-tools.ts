@@ -20,6 +20,8 @@ import {
 } from "./search-service";
 import { parsePropertyFilters } from "../utils/query-filter-parser";
 import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
+import { formatBlockResult, addLinkPreservationNote } from "../utils/block-link-enhancer";
+
 
 /**
  * AI Tool definitions for OpenAI function calling
@@ -412,14 +414,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `No notes found with tag "${tagName}".`;
       }
 
-      // Format with clickable block links
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      // Format with clickable block links using utility
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} note(s) with tag "${tagName}":\n${summary}`;
+      return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}":\n${summary}`;
     } else if (toolName === "searchBlocksByText") {
       // Support multiple parameter names: searchText, text, query, queries
       let searchText = args.searchText || args.search_text || args.text || args.query || args.queries;
@@ -442,14 +441,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `No notes found containing "${searchText}".`;
       }
 
-      // Format with clickable block links
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      // Format with clickable block links using utility
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
+      return `${preservationNote}Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
     } else if (toolName === "queryBlocksByTag") {
       // Advanced query with property filters
       let tagName = typeof args.tagName === "string"
@@ -569,7 +565,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `No notes found with tag "${tagName}"${filterDesc}.`;
       }
 
-      // Format with clickable block links
+      // Format with clickable block links using utility
+      const preservationNote = addLinkPreservationNote(results.length);
       const summary = results.map((r, i) => {
         const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
         const body = r.fullContent ?? r.content;
@@ -585,7 +582,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       const filterDesc = properties.length > 0
         ? ` (filtered by: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')})`
         : '';
-      return `Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
+      return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
     } else if (toolName === "searchTasks") {
       // Search for task blocks
       const completed = typeof args.completed === "boolean" ? args.completed : undefined;
@@ -600,14 +597,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `No ${statusDesc} tasks found.`;
       }
 
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
       const statusDesc = completed === true ? "completed " : completed === false ? "incomplete " : "";
-      return `Found ${results.length} ${statusDesc}task(s):\n${summary}`;
+      return `${preservationNote}Found ${results.length} ${statusDesc}task(s):\n${summary}`;
     } else if (toolName === "searchJournalEntries") {
       // Search for journal entries in date range
       let startOffset = normalizeJournalOffset(args.startOffset ?? args.start_offset, -7);
@@ -638,13 +632,10 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return `No journal entries found from ${startDaysAgo} to ${endDaysAgo} days ago.`;
       }
 
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} journal entries from ${startDaysAgo} to ${endDaysAgo} days ago:\n${summary}`;
+      return `${preservationNote}Found ${results.length} journal entries from ${startDaysAgo} to ${endDaysAgo} days ago:\n${summary}`;
     } else if (toolName === "getTodayJournal") {
       const includeChildren = args.includeChildren !== false; // default true
 
@@ -693,13 +684,10 @@ ${body}
         return `No journal entries found in the last ${normalizedDays} day(s).`;
       }
 
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, "");
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} journal entries in the last ${normalizedDays} day(s):\n${summary}`;
+      return `${preservationNote}Found ${results.length} journal entries in the last ${normalizedDays} day(s):\n${summary}`;
     } else if (toolName === "query_blocks") {
       // Advanced query with multiple conditions
       const conditions = args.conditions;
@@ -753,13 +741,10 @@ ${body}
         return `No blocks found matching the ${combineMode.toUpperCase()} query.`;
       }
 
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
+      return `${preservationNote}Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
     } else if (toolName === "get_tag_schema") {
       // Get tag schema with property definitions
       let tagName = args.tagName || args.tag_name || args.tag;
@@ -827,13 +812,10 @@ ${body}
         return `No blocks found referencing "[[${pageName}]]". This page may have no backlinks, or the page name may not exist.`;
       }
 
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');
-        const body = r.fullContent ?? r.content;
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})\n${body}`;
-      }).join("\n\n");
+      const preservationNote = addLinkPreservationNote(results.length);
+      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
 
-      return `Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
+      return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
     } else if (toolName === "getPage") {
       // Get page content by name
       let pageName = args.pageName || args.page_name || args.page || args.name

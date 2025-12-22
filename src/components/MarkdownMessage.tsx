@@ -138,6 +138,26 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
       const isBlockLink = node.url.startsWith("orca-block:");
       if (isBlockLink) {
         const blockId = parseInt(node.url.replace("orca-block:", ""), 10);
+        
+        // Navigation handler with error handling and feedback
+        const handleBlockNavigation = (e: any) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Validate block ID
+          if (isNaN(blockId) || blockId <= 0) {
+            console.error("[MarkdownMessage] Invalid block ID:", blockId);
+            return;
+          }
+          
+          try {
+            // Open in last panel (non-current panel)
+            orca.nav.openInLastPanel("block", { blockId });
+          } catch (error) {
+            console.error("[MarkdownMessage] Navigation failed:", error);
+          }
+        };
+        
         return createElement(
           "span",
           {
@@ -145,7 +165,25 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
             style: {
               display: "inline-flex",
               alignItems: "center",
-              gap: "4px",
+              gap: "6px",
+              cursor: "pointer",
+              padding: "4px 8px",
+              borderRadius: "6px",
+              transition: "all 0.2s ease",
+              background: "transparent",
+              border: "1px solid transparent",
+            },
+            title: `Jump to block #${blockId}`,
+            onClick: handleBlockNavigation,
+            onMouseEnter: (e: any) => {
+              e.currentTarget.style.background = "rgba(0, 123, 255, 0.08)";
+              e.currentTarget.style.borderColor = "rgba(0, 123, 255, 0.2)";
+              e.currentTarget.style.transform = "translateX(2px)";
+            },
+            onMouseLeave: (e: any) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.borderColor = "transparent";
+              e.currentTarget.style.transform = "translateX(0)";
             },
           },
           // Link text
@@ -155,11 +193,12 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
               style: {
                 color: "var(--orca-color-primary, #007bff)",
                 fontWeight: 500,
+                flex: 1,
               },
             },
             ...node.children.map((child, i) => renderInlineNode(child, i)),
           ),
-          // Jump arrow button
+          // Jump arrow icon
           createElement(
             "span",
             {
@@ -167,31 +206,20 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                width: "20px",
-                height: "20px",
-                borderRadius: "4px",
+                width: "18px",
+                height: "18px",
+                borderRadius: "3px",
                 background: "var(--orca-color-primary, #007bff)",
                 color: "#fff",
-                cursor: "pointer",
-                fontSize: "12px",
-                transition: "transform 0.15s ease, background 0.15s ease",
+                fontSize: "11px",
                 flexShrink: 0,
-              },
-              title: "Jump to this block",
-              onClick: (e: any) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!isNaN(blockId)) {
-                  orca.nav.openInLastPanel("block", { blockId });
-                }
+                transition: "transform 0.2s ease",
               },
               onMouseEnter: (e: any) => {
-                e.currentTarget.style.transform = "scale(1.1)";
-                e.currentTarget.style.background = "var(--orca-color-primary-hover, #0056b3)";
+                e.currentTarget.style.transform = "translateX(2px)";
               },
               onMouseLeave: (e: any) => {
-                e.currentTarget.style.transform = "scale(1)";
-                e.currentTarget.style.background = "var(--orca-color-primary, #007bff)";
+                e.currentTarget.style.transform = "translateX(0)";
               },
             },
             createElement("i", { className: "ti ti-arrow-right" }),
@@ -218,6 +246,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
         },
         ...node.children.map((child, i) => renderInlineNode(child, i)),
       );
+
 
     default:
       return null;
