@@ -1,4 +1,21 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode } from "../utils/markdown-renderer";
+import {
+  codeBlockContainerStyle,
+  codeBlockHeaderStyle,
+  codeBlockPreStyle,
+  inlineCodeStyle,
+  markdownContainerStyle,
+  blockQuoteStyle,
+  headingStyle,
+  linkStyle,
+  blockLinkContainerStyle,
+  blockLinkTextStyle,
+  blockLinkArrowStyle,
+  boldStyle,
+  listStyle,
+  listItemStyle,
+  paragraphStyle,
+} from "../styles/ai-chat-styles";
 
 const React = window.React as any;
 const { createElement, useMemo, useState } = React;
@@ -26,30 +43,13 @@ function CodeBlock({ language, content }: { language?: string; content: string }
   return createElement(
     "div",
     {
-      style: {
-        marginTop: "12px",
-        marginBottom: "12px",
-        borderRadius: "8px",
-        border: "1px solid var(--orca-color-border)",
-        overflow: "hidden",
-        background: "var(--orca-color-bg-3)",
-      },
+      style: codeBlockContainerStyle,
     },
     // Header
     createElement(
       "div",
       {
-        style: {
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "6px 12px",
-          background: "rgba(0,0,0,0.03)",
-          borderBottom: "1px solid var(--orca-color-border)",
-          fontSize: "12px",
-          color: "var(--orca-color-text-2)",
-          userSelect: "none",
-        },
+        style: codeBlockHeaderStyle,
       },
       createElement(
         "span",
@@ -70,15 +70,7 @@ function CodeBlock({ language, content }: { language?: string; content: string }
     createElement(
       "pre",
       {
-        style: {
-          margin: 0,
-          padding: "12px",
-          overflowX: "auto",
-          fontFamily: '"JetBrains Mono", Consolas, monospace',
-          fontSize: "13px",
-          lineHeight: "1.5",
-          color: "var(--orca-color-text-1)",
-        },
+        style: codeBlockPreStyle,
       },
       content,
     ),
@@ -98,12 +90,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
         "strong",
         {
           key,
-          style: {
-            fontWeight: "bold",
-            background: "linear-gradient(to bottom, transparent 60%, rgba(255,235,59,0.5) 0)",
-            padding: "0 2px",
-            color: "inherit",
-          },
+          style: boldStyle,
         },
         ...node.children.map((child, i) => renderInlineNode(child, i)),
       );
@@ -120,15 +107,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
         "code",
         {
           key,
-          style: {
-            fontFamily: '"JetBrains Mono", Consolas, monospace',
-            background: "var(--orca-color-bg-3)",
-            padding: "2px 6px",
-            borderRadius: "4px",
-            fontSize: "0.9em",
-            border: "1px solid var(--orca-color-border)",
-            color: "var(--orca-color-text-1)",
-          },
+          style: inlineCodeStyle,
         },
         node.content,
       );
@@ -162,17 +141,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
           "span",
           {
             key,
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              cursor: "pointer",
-              padding: "4px 8px",
-              borderRadius: "6px",
-              transition: "all 0.2s ease",
-              background: "transparent",
-              border: "1px solid transparent",
-            },
+            style: blockLinkContainerStyle,
             title: `Jump to block #${blockId}`,
             onClick: handleBlockNavigation,
             onMouseEnter: (e: any) => {
@@ -190,11 +159,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
           createElement(
             "span",
             {
-              style: {
-                color: "var(--orca-color-primary, #007bff)",
-                fontWeight: 500,
-                flex: 1,
-              },
+              style: blockLinkTextStyle,
             },
             ...node.children.map((child, i) => renderInlineNode(child, i)),
           ),
@@ -202,19 +167,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
           createElement(
             "span",
             {
-              style: {
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "18px",
-                height: "18px",
-                borderRadius: "3px",
-                background: "var(--orca-color-primary, #007bff)",
-                color: "#fff",
-                fontSize: "11px",
-                flexShrink: 0,
-                transition: "transform 0.2s ease",
-              },
+              style: blockLinkArrowStyle,
               onMouseEnter: (e: any) => {
                 e.currentTarget.style.transform = "translateX(2px)";
               },
@@ -235,11 +188,7 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
           target: "_blank",
           rel: "noopener noreferrer",
           title: node.url,
-          style: {
-            color: "var(--orca-color-primary, #007bff)",
-            textDecoration: "underline",
-            cursor: "pointer",
-          },
+          style: linkStyle,
           onClick: (e: any) => {
             // Allow default behavior for external links
           },
@@ -261,18 +210,7 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
         HeadingTag,
         {
           key,
-          style: {
-            marginTop: node.level === 1 ? "24px" : "20px",
-            marginBottom: "12px",
-            fontWeight: "bold",
-            fontSize: node.level === 1 ? "24px" : node.level === 2 ? "20px" : "18px",
-            lineHeight: "1.4",
-            borderLeft: "4px solid var(--orca-color-primary, #007bff)",
-            paddingLeft: "12px",
-            background: "linear-gradient(to right, rgba(0,123,255,0.05), transparent)",
-            borderRadius: "0 8px 8px 0",
-            color: "inherit",
-          },
+          style: headingStyle(node.level),
         },
         ...node.children.map((child, i) => renderInlineNode(child, i)),
       );
@@ -283,12 +221,7 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
         "p",
         {
           key,
-          style: {
-            marginTop: "8px",
-            marginBottom: "8px",
-            lineHeight: "1.8",
-            color: "inherit",
-          },
+          style: paragraphStyle,
         },
         ...node.children.map((child, i) => renderInlineNode(child, i)),
       );
@@ -299,22 +232,14 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
         ListTag,
         {
           key,
-          style: {
-            marginTop: "12px",
-            marginBottom: "12px",
-            paddingLeft: "24px",
-          },
+          style: listStyle,
         },
         ...node.items.map((item, itemIndex) =>
           createElement(
             "li",
             {
               key: itemIndex,
-              style: {
-                marginTop: "6px",
-                lineHeight: "1.8",
-                color: "inherit",
-              },
+              style: listItemStyle,
             },
             ...item.map((child, i) => renderInlineNode(child, i)),
           ),
@@ -327,16 +252,7 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
         "blockquote",
         {
           key,
-          style: {
-            borderLeft: "4px solid var(--orca-color-border)",
-            marginLeft: 0,
-            marginTop: "12px",
-            marginBottom: "12px",
-            background: "var(--orca-color-bg-2)",
-            padding: "12px 16px",
-            borderRadius: "8px",
-            color: "var(--orca-color-text-2)",
-          },
+          style: blockQuoteStyle,
         },
         ...node.children.map((child, i) => renderBlockNode(child, i)),
       );
@@ -356,20 +272,10 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
 export default function MarkdownMessage({ content, role }: Props) {
   const nodes = useMemo(() => parseMarkdown(content), [content]);
 
-  const fontFamily =
-    role === "assistant"
-      ? '"Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif'
-      : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-
   return createElement(
     "div",
     {
-      style: {
-        fontFamily,
-        fontSize: "16px",
-        color: role === "user" ? "#fff" : "var(--orca-color-text-1)",
-        lineHeight: "1.6",
-      },
+      style: markdownContainerStyle(role),
     },
     ...nodes.map((node: MarkdownNode, index: number) => renderBlockNode(node, index)),
   );

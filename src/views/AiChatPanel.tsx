@@ -31,6 +31,18 @@ import { TOOLS, executeTool } from "../services/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/chat-stream-handler";
+import {
+  panelContainerStyle,
+  headerStyle,
+  headerTitleStyle,
+  messageListStyle,
+  messageRowStyle,
+  messageBubbleStyle,
+  cursorStyle,
+  toolCallStyle,
+  loadingContainerStyle,
+  loadingBubbleStyle,
+} from "../styles/ai-chat-styles";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -549,56 +561,24 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         "div",
         {
           key: m.id,
-          style: {
-            width: "100%",
-            display: "flex",
-            justifyContent: m.role === "user" ? "flex-end" : "flex-start",
-            marginBottom: "16px",
-            animation: "messageSlideIn 0.3s ease-out",
-          },
+          style: messageRowStyle(m.role),
         },
         createElement(
           "div",
           {
-            style: {
-              maxWidth: m.role === "user" ? "75%" : "90%",
-              padding: m.role === "user" ? "12px 16px" : "16px 20px",
-              borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-              background: m.role === "user" ? "var(--orca-color-primary, #007bff)" : "var(--orca-color-bg-2)",
-              color: m.role === "user" ? "#fff" : "var(--orca-color-text-1)",
-              border: m.role === "assistant" ? "1px solid var(--orca-color-border)" : "none",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-              position: "relative",
-            },
+            style: messageBubbleStyle(m.role),
           },
           createElement(MarkdownMessage, { content: m.content || "", role: m.role }),
           streamingMessageId === m.id &&
             createElement("span", {
-              style: {
-                display: "inline-block",
-                width: "2px",
-                height: "1.2em",
-                background: "var(--orca-color-primary, #007bff)",
-                marginLeft: "2px",
-                verticalAlign: "text-bottom",
-                animation: "blink 1s step-end infinite",
-              },
+              style: cursorStyle,
             }),
           m.tool_calls &&
             m.tool_calls.length > 0 &&
             createElement(
               "div",
               {
-                style: {
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  background: "var(--orca-color-bg-3)",
-                  borderRadius: 6,
-                  fontSize: "0.85em",
-                  opacity: 0.9,
-                  fontFamily: "monospace",
-                  borderLeft: "3px solid var(--orca-color-primary, #007bff)",
-                },
+                style: toolCallStyle,
               },
               `🔧 ${m.tool_calls.length > 1 ? `调用 ${m.tool_calls.length} 个工具` : "调用工具"}: ${m.tool_calls.map((tc) => tc.function.name).join(", ")}`
             )
@@ -614,24 +594,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         "div",
         {
           key: "loading",
-          style: {
-            width: "100%",
-            display: "flex",
-            justifyContent: "flex-start",
-            marginBottom: "16px",
-            animation: "messageSlideIn 0.3s ease-out",
-          },
+          style: loadingContainerStyle,
         },
         createElement(
           "div",
           {
-            style: {
-              padding: "0",
-              borderRadius: "18px 18px 18px 4px",
-              background: "var(--orca-color-bg-2)",
-              border: "1px solid var(--orca-color-border)",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-            },
+            style: loadingBubbleStyle,
           },
           createElement(LoadingDots)
         )
@@ -642,30 +610,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   return createElement(
     "div",
     {
-      style: {
-        height: "100%",
-        width: "100%",
-        display: "flex",
-        flexDirection: "column",
-        background: "var(--orca-color-bg-1)",
-        color: "var(--orca-color-text-1)",
-      },
+      style: panelContainerStyle,
     },
     // Header
     createElement(
       "div",
       {
-        style: {
-          padding: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          borderBottom: "1px solid var(--orca-color-border)",
-          background: "var(--orca-color-bg-1)",
-          zIndex: 10,
-        },
+        style: headerStyle,
       },
-      createElement("div", { style: { fontWeight: 600, flex: 1, fontFamily: "var(--chat-font-sans)" } }, "AI Chat"),
+      createElement("div", { style: headerTitleStyle }, "AI Chat"),
       createElement(Button, { variant: "plain", onClick: handleSaveSession, title: "Save session" }, createElement("i", { className: "ti ti-device-floppy" })),
       createElement(ChatHistoryMenu, {
         sessions,
@@ -685,15 +638,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       "div",
       {
         ref: listRef as any,
-        style: {
-          flex: 1,
-          overflow: "auto",
-          padding: "20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          scrollBehavior: "smooth",
-        },
+        style: messageListStyle,
       },
       ...messageElements
     ),
