@@ -131,6 +131,7 @@ export const codeBlockPreStyle: React.CSSProperties = {
   margin: 0,
   padding: "12px",
   overflowX: "auto",
+  userSelect: "text", // 允许选择/复制 Markdown 内容
   fontFamily: '"JetBrains Mono", Consolas, monospace',
   fontSize: "13px",
   lineHeight: "1.5",
@@ -154,6 +155,7 @@ export const markdownContainerStyle = (role: string): React.CSSProperties => ({
   fontSize: "16px",
   color: role === "user" ? "var(--orca-color-text-inverse, #fff)" : "var(--orca-color-text-1)",
   lineHeight: "1.6",
+  userSelect: "text", // 允许选择/复制 Markdown 内容
 });
 
 export const blockQuoteStyle: React.CSSProperties = {
@@ -165,6 +167,7 @@ export const blockQuoteStyle: React.CSSProperties = {
   padding: "12px 16px",
   borderRadius: "8px",
   color: "var(--orca-color-text-2)",
+  userSelect: "text", // 允许选择/复制 Markdown 内容
 };
 
 export const headingStyle = (level: number): React.CSSProperties => ({
@@ -234,13 +237,18 @@ export const listItemStyle: React.CSSProperties = {
   marginTop: "6px",
   lineHeight: "1.8",
   color: "inherit",
+  userSelect: "text", // 允许选择/复制 Markdown 内容
 };
+
+// 兼容/别名：列表项内容保持可选择，便于复制粘贴。
+export const listItemStyle2: React.CSSProperties = listItemStyle;
 
 export const paragraphStyle: React.CSSProperties = {
   marginTop: "8px",
   marginBottom: "8px",
   lineHeight: "1.8",
   color: "inherit",
+  userSelect: "text", // 允许选择/复制 Markdown 内容
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
