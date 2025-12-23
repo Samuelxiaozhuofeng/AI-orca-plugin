@@ -21,6 +21,7 @@ import {
 import { parsePropertyFilters } from "../utils/query-filter-parser";
 import type { QueryDateSpec, QueryCondition, QueryCombineMode } from "../utils/query-types";
 import { formatBlockResult, addLinkPreservationNote } from "../utils/block-link-enhancer";
+import { uiStore } from "../store/ui-store";
 
 
 /**
@@ -355,6 +356,41 @@ export const TOOLS: OpenAITool[] = [
     },
   },
 ];
+
+/**
+ * 获取块的根页面 ID（向上追溯到 parent === null 的块）
+ * @param blockId - 要查询的块 ID
+ * @returns 根块 ID，如果查找失败返回 undefined
+ */
+async function getRootBlockId(blockId: number): Promise<number | undefined> {
+  try {
+    let currentBlock: any = orca.state.blocks[blockId];
+
+    // 如果 state 中没有，从后端获取
+    if (!currentBlock) {
+      currentBlock = await orca.invokeBackend("get-block", blockId);
+      if (!currentBlock) return undefined;
+    }
+
+    // 向上追溯到根块
+    while (currentBlock && currentBlock.parent !== null) {
+      const parentId: number = currentBlock.parent;
+      let parentBlock: any = orca.state.blocks[parentId];
+
+      if (!parentBlock) {
+        parentBlock = await orca.invokeBackend("get-block", parentId);
+        if (!parentBlock) break; // 无法继续追溯
+      }
+
+      currentBlock = parentBlock;
+    }
+
+    return currentBlock ? currentBlock.id : undefined;
+  } catch (error) {
+    console.warn(`[getRootBlockId] Failed to get root block for ${blockId}:`, error);
+    return undefined;
+  }
+}
 
 /**
  * Format a property value for display
@@ -911,10 +947,57 @@ ${body}
       // Prepare content fragments
       const contentFragments = [{ t: "t", v: content }];
 
-      // Navigate in a non-AI panel to avoid disrupting the chat
-      // openInLastPanel creates a side panel if needed
-      orca.nav.openInLastPanel("block", { blockId: refBlockId });
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // === 智能导航：仅在必要时跳转 ===
+      // 1. 获取目标块的根页面 ID
+      const targetRootBlockId = await getRootBlockId(refBlockId);
+
+      // 2. 获取当前活动面板的根页面 ID（排除 AI chat panel）
+      let currentRootBlockId: number | undefined = undefined;
+      let targetPanelId: string | undefined = undefined;
+
+      try {
+        const activePanelId = orca.state.activePanel;
+        const aiChatPanelId = uiStore.aiChatPanelId;
+
+        // 如果当前活动面板是 AI chat panel，使用 openInLastPanel 的逻辑
+        // 否则使用当前活动面板
+        if (activePanelId === aiChatPanelId) {
+          // AI chat panel 处于活跃状态，需要在另一个 panel 操作
+          targetPanelId = undefined; // 让 openInLastPanel 自动选择
+        } else {
+          // 非 AI chat panel，可以直接使用
+          targetPanelId = activePanelId;
+          const activePanel = orca.nav.findViewPanel(activePanelId, orca.state.panels);
+
+          if (activePanel && activePanel.view === "block" && activePanel.viewArgs?.blockId) {
+            const currentBlockId = activePanel.viewArgs.blockId;
+            currentRootBlockId = await getRootBlockId(currentBlockId);
+          }
+        }
+      } catch (error) {
+        console.warn("[createBlock] Failed to get current panel's root block:", error);
+      }
+
+      // 3. 智能导航决策
+      const needsNavigation = !targetRootBlockId || !currentRootBlockId || (targetRootBlockId !== currentRootBlockId);
+
+      if (needsNavigation) {
+        // 需要导航
+        if (targetPanelId) {
+          // 有明确的目标 panel，使用 replace
+          console.log(`[createBlock] Navigating to block ${refBlockId} in panel ${targetPanelId} (root: ${targetRootBlockId})`);
+          orca.nav.replace("block", { blockId: refBlockId }, targetPanelId);
+        } else {
+          // 当前在 AI chat panel，使用 openInLastPanel 在另一个 panel 打开
+          console.log(`[createBlock] Opening block ${refBlockId} in last panel (root: ${targetRootBlockId})`);
+          orca.nav.openInLastPanel("block", { blockId: refBlockId });
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } else {
+        // 已经在目标页面，无需导航
+        console.log(`[createBlock] Already on target page (root: ${targetRootBlockId}), skipping navigation`);
+      }
+      // === 智能导航结束 ===
 
       // Insert block using editor command
       try {
