@@ -131,7 +131,8 @@ export function flattenBlockTreeToLines(
   const node = tree?.block && typeof tree.block === "object" ? tree.block : tree;
   const text = safeText(node);
   if (text) {
-    out.push(`${"  ".repeat(depth)}- ${text}`);
+    // Include block ID in the line so AI can identify it without separate search
+    out.push(`${"  ".repeat(depth)}- ${text} (block #${node.id})`);
     state.blocks += 1;
   }
 

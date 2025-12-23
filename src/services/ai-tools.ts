@@ -308,7 +308,7 @@ export const TOOLS: OpenAITool[] = [
     type: "function",
     function: {
       name: "getPage",
-      description: "直接读取指定名称的页面内容。当用户明确要求「读取/查看/打开某个页面」时使用此工具。比 searchBlocksByText 更精准，因为它直接通过页面名称获取，而不是搜索。适用场景：「读取名为XX的页面」、「查看[[XX]]的内容」、「打开XX笔记」",
+      description: "直接读取指定名称的页面内容。返回的内容中每一行都会包含 (block #ID) 格式的块 ID，你可以直接使用这些 ID 作为 createBlock 的 refBlockId。比 searchBlocksByText 更精准。适用场景：「读取名为XX的页面」、「查看[[XX]]的内容」、「打开XX笔记」",
       parameters: {
         type: "object",
         properties: {
