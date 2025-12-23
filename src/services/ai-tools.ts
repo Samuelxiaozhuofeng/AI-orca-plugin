@@ -868,11 +868,9 @@ ${body}
 
       // If pageName is provided but no refBlockId, get the page's root block
       if (!refBlockId && pageName) {
-        console.log(`[Tool] createBlock: fetching page "${pageName}" to get root block...`);
         try {
           const pageResult = await getPageByName(pageName, false);
           refBlockId = pageResult.id;
-          console.log(`[Tool] createBlock: found page "${pageName}" with root block ${refBlockId}`);
         } catch (error: any) {
           return `Error: Page "${pageName}" not found. Please check the page name or use refBlockId instead.`;
         }
@@ -882,9 +880,9 @@ ${body}
         return "Error: Missing reference. Please provide either refBlockId (number) or pageName (string).";
       }
 
-      const allowedPositions = new Set(["before", "after", "firstChild", "lastChild"]);
-      const rawPosition = typeof args.position === "string" ? args.position : "lastChild";
-      const position = allowedPositions.has(rawPosition) ? rawPosition : "lastChild";
+      const position = (typeof args.position === "string" && 
+                        ["before", "after", "firstChild", "lastChild"].includes(args.position))
+                        ? args.position : "lastChild";
 
       const content =
         typeof args.content === "string"
@@ -895,20 +893,15 @@ ${body}
         return "Error: Content cannot be empty.";
       }
 
-
-
-      // Get reference block - try state first, then backend API (MCP-like approach)
+      // Get reference block - try state first, then backend API
       let refBlock = orca.state.blocks[refBlockId];
 
       if (!refBlock) {
-
         try {
-          // Fetch block from backend API (similar to MCP approach)
           refBlock = await orca.invokeBackend("get-block", refBlockId);
           if (!refBlock) {
             return `Error: Block ${refBlockId} not found in repository`;
           }
-
         } catch (error: any) {
           console.error(`[Tool] Failed to fetch block ${refBlockId}:`, error);
           return `Error: Failed to fetch block ${refBlockId}: ${error?.message || error}`;
@@ -916,25 +909,16 @@ ${body}
       }
 
       // Prepare content fragments
-      // Note: For now, we treat content as plain text. Future enhancement could parse Markdown.
       const contentFragments = [{ t: "t", v: content }];
 
-      // Navigate to the target block's page to establish panel context
-      // IMPORTANT: Navigate in a non-AI panel to avoid disrupting the chat
-      
-      // Use openInLastPanel which intelligently handles panel selection:
-      // - If there's a non-AI panel available, it uses that
-      // - If only AI panel exists, it creates a new panel
-      // - This keeps the AI chat panel undisturbed
+      // Navigate in a non-AI panel to avoid disrupting the chat
+      // openInLastPanel creates a side panel if needed
       orca.nav.openInLastPanel("block", { blockId: refBlockId });
-      
-      // Allow a small delay for the UI to update and establish context
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Insert block using editor command (wrapped in invokeGroup to ensure proper execution context)
+      // Insert block using editor command
       try {
         let newBlockId: any;
-        
         await orca.commands.invokeGroup(async () => {
           newBlockId = await orca.commands.invokeEditorCommand(
             "core.editor.insertBlock",
@@ -947,16 +931,16 @@ ${body}
           topGroup: true,
           undoable: true
         });
-        if (typeof newBlockId === "number") {
-          const positionDesc = position === "before" ? "before" :
-                              position === "after" ? "after" :
-                              position === "firstChild" ? "as first child of" :
-                              "as last child of";
-          return `Created new block: [${newBlockId}](orca-block:${newBlockId}) (${positionDesc} block ${refBlockId})`;
-        }
-
-
-        return `Created new block (ID type: ${typeof newBlockId}, value: ${newBlockId}).`;
+        
+        const positionDescriptions: Record<string, string> = {
+          before: "before",
+          after: "after",
+          firstChild: "as first child of",
+          lastChild: "as last child of"
+        };
+        const positionDesc = positionDescriptions[position] || "as last child of";
+        
+        return `Created new block: [${newBlockId}](orca-block:${newBlockId}) (${positionDesc} block ${refBlockId})`;
       } catch (error: any) {
         console.error("[Tool] Failed to create block:", error);
         return `Error: Failed to create block: ${error?.message || error}`;
