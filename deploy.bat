@@ -43,18 +43,37 @@ if "%ERRORLEVEL%"=="0" (
 )
 echo.
 
-:: 3. 删除目标文件夹（如果存在）
-echo [3/5] 删除旧的 dist 文件夹...
+:: 3. 删除目标文件夹和缓存（如果存在）
+echo [3/6] 删除旧的 dist 文件夹和缓存...
 if exist "%TARGET_PATH%" (
     rd /s /q "%TARGET_PATH%"
     echo [√] 旧文件夹已删除
 ) else (
     echo [√] 目标位置无旧文件
 )
+
+:: 清除可能的应用缓存
+set "ORCA_CACHE_PATH=%USERPROFILE%\Documents\orca\.cache"
+if exist "%ORCA_CACHE_PATH%" (
+    echo [!] 清除应用缓存...
+    rd /s /q "%ORCA_CACHE_PATH%" 2>nul
+    echo [√] 应用缓存已清除
+)
+
+:: 清除 Electron 缓存（如果存在）
+set "ELECTRON_CACHE=%APPDATA%\orca"
+if exist "%ELECTRON_CACHE%\Cache" (
+    echo [!] 清除 Electron 缓存...
+    rd /s /q "%ELECTRON_CACHE%\Cache" 2>nul
+    rd /s /q "%ELECTRON_CACHE%\Code Cache" 2>nul
+    rd /s /q "%ELECTRON_CACHE%\GPUCache" 2>nul
+    echo [√] Electron 缓存已清除
+)
+
 echo.
 
 :: 4. 复制新的 dist 文件夹
-echo [4/5] 复制新的 dist 文件夹...
+echo [4/6] 复制新的 dist 文件夹...
 xcopy "%SOURCE_PATH%" "%TARGET_PATH%\" /E /I /Y >nul
 if %ERRORLEVEL% equ 0 (
     echo [√] 文件复制完成
@@ -67,7 +86,7 @@ if %ERRORLEVEL% equ 0 (
 echo.
 
 :: 5. 启动 Orca Note
-echo [5/5] 启动 Orca Note...
+echo [5/6] 启动 Orca Note...
 if exist "%ORCA_EXE%" (
     start "" "%ORCA_EXE%"
     echo [√] Orca Note 已启动
@@ -77,6 +96,12 @@ if exist "%ORCA_EXE%" (
     pause
     exit /b 1
 )
+echo.
+
+:: 6. 等待应用完全启动
+echo [6/6] 等待应用启动...
+timeout /t 3 /nobreak >nul
+echo [√] 应用已启动，缓存已清除
 echo.
 
 color 0A

@@ -25,3 +25,5 @@ dist-ssr
 .claude-session
 .codex-session
 .gemini-session
+DEPLOY-GUIDE.md
+deploy.bat
