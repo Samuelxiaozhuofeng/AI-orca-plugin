@@ -302,6 +302,23 @@ function parseInlineMarkdown(text: string, depth = 0): MarkdownInlineNode[] {
       }
     }
 
+    // Block reference: "block #123", "Block 123", "块 #123", "笔记 #123", "(block #123)"
+    // Convert to clickable orca-block links at AST level (safe from code block pollution)
+    const blockRefMatch = text.slice(i).match(/^(?:\(?\s*)(?:block|Block|块|笔记)\s*#?(\d+)(?:\s*\)?)/);
+    if (blockRefMatch) {
+      const blockId = parseInt(blockRefMatch[1], 10);
+      if (blockId > 0) {
+        flushBuffer();
+        nodes.push({
+          type: "link",
+          url: `orca-block:${blockId}`,
+          children: [{ type: "text", content: blockRefMatch[0].trim() }],
+        });
+        i += blockRefMatch[0].length;
+        continue;
+      }
+    }
+
     buffer += ch;
     i += 1;
   }
