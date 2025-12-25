@@ -23,6 +23,79 @@ export const chatAnimations = `
         transform: translateY(0);
     }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Tool Status Animations (Gemini-reviewed motion design)
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Create Tools - Micro Sparkle Animation (✨) */
+@keyframes sparkle {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+/* Search Tools - Pulse Animation (🔍) - Radar scan effect */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.8;
+        transform: scale(1.08);
+    }
+}
+
+/* Query Tools - Simplified Flip Animation (📖) - Subtle tilt */
+@keyframes flip {
+    0% {
+        transform: rotateY(0deg);
+    }
+    50% {
+        transform: rotateY(20deg);
+    }
+    100% {
+        transform: rotateY(0deg);
+    }
+}
+
+/* Fallback Shimmer Animation (if flip has performance issues) */
+@keyframes shimmer {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+
+/* Animation Classes */
+.tool-animation-sparkle {
+    display: inline-block;
+    animation: sparkle 1.8s ease-in-out infinite;
+    will-change: transform, opacity;
+}
+
+.tool-animation-pulse {
+    display: inline-block;
+    animation: pulse 1.5s ease-in-out infinite;
+    will-change: transform, opacity;
+}
+
+.tool-animation-flip {
+    display: inline-block;
+    animation: flip 2s ease-in-out infinite;
+    will-change: transform;
+}
+
+.tool-animation-shimmer {
+    display: inline-block;
+    animation: shimmer 1.5s ease-in-out infinite;
+    will-change: opacity;
+}
 `;
 
 let styleElement: HTMLStyleElement | null = null;
