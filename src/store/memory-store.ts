@@ -56,11 +56,13 @@ export interface PortraitTag {
 
 /**
  * Portrait info item - single piece of information within a category
+ * Supports multiple values per key
  */
 export interface PortraitInfoItem {
   id: string;
-  label: string;  // e.g., "姓名", "身高"
-  value: string;  // e.g., "张三", "183cm"
+  label: string; // e.g., "姓名", "身高"
+  value: string; // Primary value, e.g., "张三", "183cm"
+  values?: string[]; // Additional values for multi-value support
 }
 
 /**
@@ -69,7 +71,7 @@ export interface PortraitInfoItem {
 export interface PortraitCategory {
   id: string;
   title: string;
-  items: PortraitInfoItem[];  // Changed from content string to items array
+  items: PortraitInfoItem[]; // Changed from content string to items array
 }
 
 /**
@@ -682,6 +684,304 @@ export function deletePortraitTag(userId: string, tagId: string): boolean {
 }
 
 /**
+ * Reorder info items within a category
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemIds - Array of item IDs in new order
+ * @returns true if reorder succeeded, false otherwise
+ */
+export function reorderPortraitInfoItems(
+  userId: string,
+  categoryId: string,
+  itemIds: string[]
+): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+
+  // Verify all item IDs exist
+  const itemMap = new Map(category.items.map(item => [item.id, item]));
+  const reorderedItems: PortraitInfoItem[] = [];
+
+  for (const itemId of itemIds) {
+    const item = itemMap.get(itemId);
+    if (!item) {
+      return false; // Invalid item ID
+    }
+    reorderedItems.push(item);
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: reorderedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Add a value to an info item's values array
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param value - Value to add
+ * @returns true if add succeeded, false otherwise
+ */
+export function addPortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  value: string
+): boolean {
+  if (!value || value.trim().length === 0) {
+    return false;
+  }
+
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const currentValues = item.values || [];
+
+  // Check for duplicate
+  const trimmedValue = value.trim();
+  if (currentValues.includes(trimmedValue) || item.value === trimmedValue) {
+    return false;
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+  updatedItems[itemIndex] = {
+    ...item,
+    values: [...currentValues, trimmedValue],
+  };
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Remove a value from an info item's values array
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param valueIndex - Index of value to remove
+ * @returns true if remove succeeded, false otherwise
+ */
+export function removePortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  valueIndex: number
+): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const currentValues = item.values || [];
+
+  if (valueIndex < 0 || valueIndex >= currentValues.length) {
+    return false;
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+  updatedItems[itemIndex] = {
+    ...item,
+    values: currentValues.filter((_, i) => i !== valueIndex),
+  };
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Update a specific value in an info item
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param valueIndex - Index of value to update (0 = primary value, >0 = additional values)
+ * @param newValue - New value string
+ * @returns true if update succeeded, false otherwise
+ */
+export function updatePortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  valueIndex: number,
+  newValue: string
+): boolean {
+  if (!newValue || newValue.trim().length === 0) {
+    return false;
+  }
+
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const trimmedValue = newValue.trim();
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+
+  if (valueIndex === 0) {
+    // Update primary value
+    updatedItems[itemIndex] = {
+      ...item,
+      value: trimmedValue,
+    };
+  } else {
+    // Update additional value
+    const currentValues = item.values || [];
+    const actualIndex = valueIndex - 1;
+    if (actualIndex < 0 || actualIndex >= currentValues.length) {
+      return false;
+    }
+    const newValues = [...currentValues];
+    newValues[actualIndex] = trimmedValue;
+    updatedItems[itemIndex] = {
+      ...item,
+      values: newValues,
+    };
+  }
+
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Reorder categories in a user's portrait
+ * @param userId - User ID
+ * @param categoryIds - Array of category IDs in new order
+ * @returns true if reorder succeeded, false otherwise
+ */
+export function reorderPortraitCategories(userId: string, categoryIds: string[]): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+
+  // Verify all category IDs exist
+  const categoryMap = new Map(portrait.categories.map(c => [c.id, c]));
+  const reorderedCategories: PortraitCategory[] = [];
+
+  for (const categoryId of categoryIds) {
+    const category = categoryMap.get(categoryId);
+    if (!category) {
+      return false; // Invalid category ID
+    }
+    reorderedCategories.push(category);
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: reorderedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
  * Update a single info item in a category
  * @param userId - User ID
  * @param categoryId - Category ID
@@ -1151,9 +1451,12 @@ export function getPortraitText(): string {
     // Add categories
     for (const category of portrait.categories) {
       if (category.items.length > 0) {
-        const itemsStr = category.items.map(item => 
-          item.label ? `${item.label}:${item.value}` : item.value
-        ).join(' | ');
+        const itemsStr = category.items.map(item => {
+          const allValues = item.values && item.values.length > 0
+            ? [item.value, ...item.values].join(', ')
+            : item.value;
+          return item.label ? `${item.label}:${allValues}` : allValues;
+        }).join(' | ');
         lines.push(`${category.title}: ${itemsStr}`);
       }
     }
@@ -1315,6 +1618,11 @@ export const memoryStore = {
   updatePortraitCategory,
   updatePortraitInfoItem,
   deletePortraitInfoItem,
+  reorderPortraitInfoItems,
+  addPortraitInfoItemValue,
+  removePortraitInfoItemValue,
+  updatePortraitInfoItemValue,
+  reorderPortraitCategories,
 
   // Injection Mode
   setInjectionMode,

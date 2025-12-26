@@ -565,6 +565,36 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
     setShowTagEmojiPicker(false);
   }, []);
 
+  // InfoItem reorder and value management handlers
+  const handleReorderInfoItems = useCallback((categoryId: string, itemIds: string[]) => {
+    if (activeUser) {
+      memoryStore.reorderPortraitInfoItems(activeUser.id, categoryId, itemIds);
+    }
+  }, [activeUser]);
+
+  const handleAddInfoItemValue = useCallback((categoryId: string, itemId: string, value: string) => {
+    if (activeUser) {
+      memoryStore.addPortraitInfoItemValue(activeUser.id, categoryId, itemId, value);
+    }
+  }, [activeUser]);
+
+  const handleRemoveInfoItemValue = useCallback((categoryId: string, itemId: string, valueIndex: number) => {
+    if (activeUser) {
+      memoryStore.removePortraitInfoItemValue(activeUser.id, categoryId, itemId, valueIndex);
+    }
+  }, [activeUser]);
+
+  const handleUpdateInfoItemValue = useCallback((categoryId: string, itemId: string, valueIndex: number, newValue: string) => {
+    if (activeUser) {
+      memoryStore.updatePortraitInfoItemValue(activeUser.id, categoryId, itemId, valueIndex, newValue);
+    }
+  }, [activeUser]);
+
+  const handleReorderCategories = useCallback((categoryIds: string[]) => {
+    if (activeUser) {
+      memoryStore.reorderPortraitCategories(activeUser.id, categoryIds);
+    }
+  }, [activeUser]);
 
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -870,6 +900,11 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         onEditCategoryTitle: handleEditCategoryTitle,
         onDeleteCategory: handleDeleteCategory,
         onAddInfoItem: handleAddInfoItem,
+        onReorderInfoItems: handleReorderInfoItems,
+        onAddInfoItemValue: handleAddInfoItemValue,
+        onRemoveInfoItemValue: handleRemoveInfoItemValue,
+        onUpdateInfoItemValue: handleUpdateInfoItemValue,
+        onReorderCategories: handleReorderCategories,
       }),
       // Memory Card
       createElement(MemoryCard, {
