@@ -90,33 +90,41 @@ export const containerStyle = {
 
 // Model selector menu styles
 export const menuContainerStyle = {
-  width: 520,
-  padding: 12,
+  // width removed to let content define width (minWidth ensures it's not too narrow)
+  minWidth: 540,
+  padding: 16,
   background: "var(--orca-color-bg-1)",
 };
 
 export const menuFlexStyle = {
   display: "flex",
-  gap: 12,
+  gap: 16,
 };
 
 export const modelListPanelStyle = {
   flex: 1,
   minWidth: 0,
+  // Restore paddingRight to ensure input doesn't touch the border
+  paddingRight: 16,
   borderRight: "1px solid var(--orca-color-border)",
-  paddingRight: 12,
+  display: "flex",
+  flexDirection: "column" as const,
 };
 
 export const modelListScrollStyle = {
-  marginTop: 8,
-  maxHeight: 280,
-  overflow: "auto" as const,
-  paddingRight: 4,
+  flex: 1,
+  maxHeight: 300,
+  overflowY: "auto" as const,
+  width: "100%",
 };
 
 export const addModelPanelStyle = {
-  width: 220,
-  flexShrink: 0,
+  flex: 1,
+  minWidth: 240,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 12,
+  boxSizing: "border-box" as const,
 };
 
 export const addModelTitleStyle = {

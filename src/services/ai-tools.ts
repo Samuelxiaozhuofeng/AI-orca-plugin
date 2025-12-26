@@ -583,449 +583,290 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
     };
 
     if (toolName === "searchBlocksByTag") {
-      // Support multiple parameter names: tagName, tag, query
-      let tagName = args.tagName || args.tag_name || args.tag || args.query;
-      const maxResults = args.maxResults || 50;
-
-      // Handle array parameters (AI sometimes sends ["tag"] instead of "tag")
-      if (Array.isArray(tagName)) {
-        tagName = tagName[0];
-      }
-
-      if (!tagName) {
-        console.error("[Tool] Missing tag name parameter");
-        return "Error: Missing tag name parameter";
-      }
-
-      const results = await searchBlocksByTag(tagName, Math.min(maxResults, 50));
-
-      if (results.length === 0) {
-        return `No notes found with tag "${tagName}".`;
-      }
-
-      // Format with clickable block links using utility
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}":\n${summary}`;
-    } else if (toolName === "searchBlocksByText") {
-      // Support multiple parameter names: searchText, text, query, queries
-      let searchText = args.searchText || args.search_text || args.text || args.query || args.queries;
-
-      // Handle array parameters (AI sometimes sends ["text"] instead of "text")
-      if (Array.isArray(searchText)) {
-        searchText = searchText[0];
-      }
-
-      const maxResults = args.maxResults || 50;
-
-      if (!searchText || typeof searchText !== "string") {
-        console.error("[Tool] Missing or invalid search text parameter");
-        return "Error: Missing search text parameter";
-      }
-
-      const results = await searchBlocksByText(searchText, Math.min(maxResults, 50));
-
-      if (results.length === 0) {
-        return `No notes found containing "${searchText}".`;
-      }
-
-      // Format with clickable block links using utility
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
-    } else if (toolName === "queryBlocksByTag") {
-      // Advanced query with property filters
-      let tagName = typeof args.tagName === "string"
-        ? args.tagName
-        : (typeof args.tag_name === "string" ? args.tag_name : (typeof args.tag === "string" ? args.tag : undefined));
-
-      const queryText = typeof args.query === "string" ? args.query : undefined;
-      const propertyFiltersInput = args.property_filters
-        ?? args.propertyFilters
-        ?? args.propertyFilter
-        ?? args.property_filter
-        ?? args.filters
-        ?? args.filter;
-      let properties: any[] = [];
-
-      if (Array.isArray(args.properties)) {
-        properties = args.properties;
-      } else if (args.properties && typeof args.properties === "object") {
-        properties = [args.properties];
-      } else if (typeof args.properties === "string") {
-        properties = parsePropertyFilters(args.properties);
-      }
-
-      if (propertyFiltersInput !== undefined) {
-        properties = [...properties, ...parsePropertyFilters(propertyFiltersInput)];
-      }
-
-      // Handle flat parameter format: { property, operator, value }
-      // Some AI models send single property filter as flat args instead of properties array
-      if (properties.length === 0 && args.property && args.operator) {
-        const opMap: Record<string, string> = {
-          ">=": ">=", ">": ">", "<=": "<=", "<": "<",
-          "==": "==", "=": "==", "!=": "!=", "<>": "!=",
-          "is null": "is null", "isnull": "is null", "null": "is null",
-          "not null": "not null", "notnull": "not null", "not_null": "not null",
-          "includes": "includes", "contains": "includes",
-          "not includes": "not includes", "not_includes": "not includes",
-        };
-        const normalizedOp = opMap[String(args.operator).toLowerCase()] ?? args.operator;
-        properties = [{
-          name: args.property,
-          op: normalizedOp,
-          value: args.value,
-        }];
-        console.log("[queryBlocksByTag] Converted flat args to properties:", properties);
-      }
-
-      if (queryText && queryText.trim()) {
-        if (tagName) {
-          const trimmedTag = String(tagName).trim();
-          const trimmedQuery = queryText.trim();
-          if (trimmedQuery !== trimmedTag) {
-            const parsedFromQuery = parsePropertyFilters(trimmedQuery);
-            if (parsedFromQuery.length === 0) {
-              return "Error: Unable to parse property filters from `query`. Use `properties` array or a string like \"priority == 6\".";
-            }
-            properties = [...properties, ...parsedFromQuery];
-          }
-        } else {
-          const parsedFromQuery = parsePropertyFilters(queryText);
-          if (parsedFromQuery.length > 0) {
-            properties = [...properties, ...parsedFromQuery];
-          } else {
-            tagName = queryText;
-          }
-        }
-      }
-      const maxResults = args.maxResults || 50;
-
-      if (!tagName) {
-        console.error("[Tool] Missing tag name parameter");
-        return "Error: Missing tag name parameter";
-      }
-
-      if (propertyFiltersInput !== undefined && properties.length === 0) {
-        return "Error: Unable to parse property filters. Use `properties` array or a string like \"priority == 6\".";
-      }
-
-      // Enrich properties with type information from tag schema (using cached version)
-      if (properties.length > 0) {
-        try {
-          const schema = await getCachedTagSchema(tagName);
-          properties = properties.map((prop: any) => {
-            // If type is already set, use it
-            if (prop.type !== undefined) {
-              return prop;
-            }
-            
-            // Look up the property in the schema
-            const schemaProp = schema.properties.find(p => p.name === prop.name);
-            if (schemaProp) {
-              return {
-                ...prop,
-                type: schemaProp.type,
-              };
-            }
-            
-            // Property not found in schema, return as-is
-            console.warn(`[queryBlocksByTag] Property "${prop.name}" not found in tag schema`);
-            return prop;
-          });
-        } catch (error) {
-          console.warn(`[queryBlocksByTag] Failed to fetch tag schema for type enrichment:`, error);
-          // Continue without type enrichment
-        }
-      }
-
-      const results = await queryBlocksByTag(tagName, {
-        properties,
-        maxResults: Math.min(maxResults, 50),
-      });
-
-      if (results.length === 0) {
-        const filterDesc = properties.length > 0
-          ? ` with filters: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')}`
-          : '';
-        return `No notes found with tag "${tagName}"${filterDesc}.`;
-      }
-
-      // Format with clickable block links using utility
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => {
-        const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
-        const body = r.fullContent ?? r.content;
-        const propValues = (r as any).propertyValues && typeof (r as any).propertyValues === "object"
-          ? (r as any).propertyValues
-          : null;
-        const propSuffix = propValues && Object.keys(propValues).length > 0
-          ? ` (${Object.entries(propValues).map(([k, v]) => `${k}=${formatPropValue(v)}`).join(", ")})`
-          : "";
-        return `${i + 1}. [${linkTitle}](orca-block:${r.id})${propSuffix}\n${body}`;
-      }).join("\n\n");
-
-      const filterDesc = properties.length > 0
-        ? ` (filtered by: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')})`
-        : '';
-      return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
-    } else if (toolName === "searchTasks") {
-      // Search for task blocks
-      const completed = typeof args.completed === "boolean" ? args.completed : undefined;
-      const maxResults = args.maxResults || 50;
-
-      console.log("[Tool] searchTasks:", { completed, maxResults });
-
-      const results = await searchTasks(completed, { maxResults: Math.min(maxResults, 50) });
-
-      if (results.length === 0) {
-        const statusDesc = completed === true ? "completed" : completed === false ? "incomplete" : "";
-        return `No ${statusDesc} tasks found.`;
-      }
-
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      const statusDesc = completed === true ? "completed " : completed === false ? "incomplete " : "";
-      return `${preservationNote}Found ${results.length} ${statusDesc}task(s):\n${summary}`;
-    } else if (toolName === "searchJournalEntries") {
-      // Search for journal entries in date range
-      let startOffset = normalizeJournalOffset(args.startOffset ?? args.start_offset, -7);
-      let endOffset = normalizeJournalOffset(args.endOffset ?? args.end_offset, 0);
-      const maxResults = args.maxResults || 50;
-
-      if (startOffset > endOffset) {
-        [startOffset, endOffset] = [endOffset, startOffset];
-      }
-
-      const startDaysAgo = Math.abs(startOffset);
-      const endDaysAgo = Math.abs(endOffset);
-
-      console.log("[Tool] searchJournalEntries:", {
-        startOffset,
-        endOffset,
-        startDaysAgo,
-        endDaysAgo,
-        maxResults,
-      });
-
-      const start: QueryDateSpec = { type: "relative", value: startOffset, unit: "d" };
-      const end: QueryDateSpec = { type: "relative", value: endOffset, unit: "d" };
-
-      const results = await searchJournalEntries(start, end, { maxResults: Math.min(maxResults, 50) });
-
-      if (results.length === 0) {
-        return `No journal entries found from ${startDaysAgo} to ${endDaysAgo} days ago.`;
-      }
-
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} journal entries from ${startDaysAgo} to ${endDaysAgo} days ago:\n${summary}`;
-    } else if (toolName === "getTodayJournal") {
-      const includeChildren = args.includeChildren !== false; // default true
-
-      console.log("[Tool] getTodayJournal:", { includeChildren });
-
-      const result = await getTodayJournal(includeChildren);
-      const linkTitle = result.title.replace(/[\[\]]/g, "");
-      const body = result.fullContent ?? result.content;
-
-      return `# ${linkTitle}
-
-${body}
-
----
-📄 [查看原页面](orca-block:${result.id})`;
-    } else if (toolName === "getRecentJournals") {
-      let days = args.days ?? args.day ?? args.rangeDays ?? args.lastDays ?? args.n;
-      const includeChildren = args.includeChildren !== false; // default true
-      const maxResults = args.maxResults ?? 20;
-
-      if (Array.isArray(days)) {
-        days = days[0];
-      }
-
-      const normalizedDays = Number.isFinite(Number(days))
-        ? Math.abs(Math.trunc(Number(days)))
-        : 7;
-      const normalizedMaxResults = Math.min(
-        Math.max(1, Number.isFinite(Number(maxResults)) ? Math.trunc(Number(maxResults)) : 20),
-        50
-      );
-
-      console.log("[Tool] getRecentJournals:", {
-        days: normalizedDays,
-        includeChildren,
-        maxResults: normalizedMaxResults,
-      });
-
-      const results = await getRecentJournals(
-        normalizedDays,
-        includeChildren,
-        normalizedMaxResults
-      );
-
-      if (results.length === 0) {
-        return `No journal entries found in the last ${normalizedDays} day(s).`;
-      }
-
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} journal entries in the last ${normalizedDays} day(s):\n${summary}`;
-    } else if (toolName === "query_blocks") {
-      // Advanced query with multiple conditions
-      const conditions = args.conditions;
-      const combineMode = args.combineMode || "and";
-      const maxResults = args.maxResults || 50;
-
-      if (!Array.isArray(conditions) || conditions.length === 0) {
-        return "Error: At least one condition is required for query_blocks.";
-      }
-
-      console.log("[Tool] query_blocks:", { conditions, combineMode, maxResults });
-
-      // Convert AI-friendly conditions to internal format
-      const convertedConditions: QueryCondition[] = conditions.map((c: any) => {
-        switch (c.type) {
-          case "tag":
-            return { type: "tag" as const, name: c.name || "" };
-          case "text":
-            return { type: "text" as const, text: c.text || "" };
-          case "task":
-            return { type: "task" as const, completed: c.completed };
-          case "journal":
-            let startOffset = normalizeJournalOffset(c.startOffset, -7);
-            let endOffset = normalizeJournalOffset(c.endOffset, 0);
-            if (startOffset > endOffset) {
-              [startOffset, endOffset] = [endOffset, startOffset];
-            }
-            return {
-              type: "journal" as const,
-              start: { type: "relative" as const, value: startOffset, unit: "d" as const },
-              end: { type: "relative" as const, value: endOffset, unit: "d" as const },
-            };
-          case "ref":
-            return { type: "ref" as const, blockId: c.blockId || 0 };
-          case "block":
-            return { type: "block" as const, hasTags: c.hasTags };
-          case "blockMatch":
-            return { type: "blockMatch" as const, blockId: c.blockId || 0 };
-          default:
-            return { type: "tag" as const, name: "" };
-        }
-      });
-
-      const results = await queryBlocksAdvanced({
-        conditions: convertedConditions,
-        combineMode: combineMode as QueryCombineMode,
-        pageSize: Math.min(maxResults, 50),
-      });
-
-      if (results.length === 0) {
-        return `No blocks found matching the ${combineMode.toUpperCase()} query.`;
-      }
-
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
-    } else if (toolName === "get_tag_schema") {
-      // Get tag schema with property definitions
-      let tagName = args.tagName || args.tag_name || args.tag;
-
-      // Handle array parameters
-      if (Array.isArray(tagName)) {
-        tagName = tagName[0];
-      }
-
-      if (!tagName) {
-        console.error("[Tool] Missing tag name parameter");
-        return "Error: Missing tag name parameter";
-      }
-
-      const schema = await getTagSchema(tagName);
-
-      if (schema.properties.length === 0) {
-        return `Tag "${tagName}" found but has no properties defined.`;
-      }
-
-      // Format schema as markdown
-      let result = `Schema for tag "${schema.tagName}":\n\n`;
-
-      schema.properties.forEach((prop, i) => {
-        result += `${i + 1}. **${prop.name}** (${prop.typeName}, type code: ${prop.type})\n`;
-
-        if (prop.options && prop.options.length > 0) {
-          result += `   Options:\n`;
-          prop.options.forEach((opt) => {
-            result += `   - "${opt.label}" → value: ${opt.value}\n`;
-          });
-        }
-      });
-
-      result += `\n**Usage tip**: When querying with property filters, use the numeric values shown above for choice properties. For example:\n`;
-      result += `- For single-choice properties, use: { name: "propertyName", op: "==", value: <numeric_value> }\n`;
-      result += `- For number/text properties, use the appropriate operator and value type.\n`;
-
-      return result;
-    } else if (toolName === "searchBlocksByReference") {
-      // Search for blocks that reference a specific page
-      // Support many parameter name variations that AI models might use
-      let pageName = args.pageName || args.page_name || args.page || args.alias || args.name 
-        || args.query || args.reference || args.target || args.text || args.blockName
-        || args.searchText || args.pageTitle || args.title || args.reference_page_name;
-      const maxResults = args.maxResults || 50;
-
-      console.log("[Tool] searchBlocksByReference args received:", JSON.stringify(args));
-
-      // Handle array parameters (AI sometimes sends ["name"] instead of "name")
-      if (Array.isArray(pageName)) {
-        pageName = pageName[0];
-      }
-
-      if (!pageName) {
-        console.error("[Tool] Missing page name parameter. Args:", args);
-        return "Error: Missing page name parameter. Please specify which page to find references to.";
-      }
-
-      console.log("[Tool] searchBlocksByReference:", { pageName, maxResults });
-
-      const results = await searchBlocksByReference(pageName, Math.min(maxResults, 50));
-
-      if (results.length === 0) {
-        return `No blocks found referencing "[[${pageName}]]". This page may have no backlinks, or the page name may not exist.`;
-      }
-
-      const preservationNote = addLinkPreservationNote(results.length);
-      const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
-
-      return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
-    } else if (toolName === "getPage") {
-      // Get page content by name
-      let pageName = args.pageName || args.page_name || args.page || args.name
-        || args.alias || args.title || args.pageTitle;
-      const includeChildren = args.includeChildren !== false; // default true
-
-      // Handle array parameters
-      if (Array.isArray(pageName)) {
-        pageName = pageName[0];
-      }
-
-      if (!pageName) {
-        console.error("[Tool] Missing page name parameter");
-        return "Error: Missing page name parameter. Please specify which page to read.";
-      }
-
-      console.log("[Tool] getPage:", { pageName, includeChildren });
-
       try {
-        const result = await getPageByName(pageName, includeChildren);
+        // Support multiple parameter names: tagName, tag, query
+        let tagName = args.tagName || args.tag_name || args.tag || args.query;
+        const maxResults = args.maxResults || 50;
 
+        // Handle array parameters (AI sometimes sends ["tag"] instead of "tag")
+        if (Array.isArray(tagName)) {
+          tagName = tagName[0];
+        }
+
+        if (!tagName) {
+          console.error("[Tool] Missing tag name parameter");
+          return "Error: Missing tag name parameter";
+        }
+
+        console.log(`[Tool] searchBlocksByTag: "${tagName}" (max: ${maxResults})`);
+        const results = await searchBlocksByTag(tagName, Math.min(maxResults, 50));
+        console.log(`[Tool] searchBlocksByTag found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No notes found with tag "${tagName}".`;
+        }
+
+        // Format with clickable block links using utility
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}":\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in searchBlocksByTag:`, err);
+        return `Error searching for tag "${args.tagName}": ${err.message}`;
+      }
+    } else if (toolName === "searchBlocksByText") {
+      try {
+        // Support multiple parameter names: searchText, text, query, queries
+        let searchText = args.searchText || args.search_text || args.text || args.query || args.queries;
+
+        // Handle array parameters (AI sometimes sends ["text"] instead of "text")
+        if (Array.isArray(searchText)) {
+          searchText = searchText[0];
+        }
+
+        const maxResults = args.maxResults || 50;
+
+        if (!searchText || typeof searchText !== "string") {
+          console.error("[Tool] Missing or invalid search text parameter");
+          return "Error: Missing search text parameter";
+        }
+
+        console.log(`[Tool] searchBlocksByText: "${searchText}" (max: ${maxResults})`);
+        const results = await searchBlocksByText(searchText, Math.min(maxResults, 50));
+        console.log(`[Tool] searchBlocksByText found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No notes found containing "${searchText}".`;
+        }
+
+        // Format with clickable block links using utility
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} note(s) containing "${searchText}":\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in searchBlocksByText:`, err);
+        return `Error searching for text "${args.searchText}": ${err.message}`;
+      }
+    } else if (toolName === "queryBlocksByTag") {
+      try {
+        // Advanced query with property filters
+        let tagName = typeof args.tagName === "string"
+          ? args.tagName
+          : (typeof args.tag_name === "string" ? args.tag_name : (typeof args.tag === "string" ? args.tag : undefined));
+
+        const queryText = typeof args.query === "string" ? args.query : undefined;
+        const propertyFiltersInput = args.property_filters
+          ?? args.propertyFilters
+          ?? args.propertyFilter
+          ?? args.property_filter
+          ?? args.filters
+          ?? args.filter;
+        let properties: any[] = [];
+
+        if (Array.isArray(args.properties)) {
+          properties = args.properties;
+        } else if (args.properties && typeof args.properties === "object") {
+          properties = [args.properties];
+        } else if (typeof args.properties === "string") {
+          properties = parsePropertyFilters(args.properties);
+        }
+
+        if (propertyFiltersInput !== undefined) {
+          properties = [...properties, ...parsePropertyFilters(propertyFiltersInput)];
+        }
+
+        // Handle flat parameter format: { property, operator, value }
+        // Some AI models send single property filter as flat args instead of properties array
+        if (properties.length === 0 && args.property && args.operator) {
+          const opMap: Record<string, string> = {
+            ">=": ">=", ">": ">", "<=": "<=", "<": "<",
+            "==": "==", "=": "==", "!=": "!=", "<>": "!=",
+            "is null": "is null", "isnull": "is null", "null": "is null",
+            "not null": "not null", "notnull": "not null", "not_null": "not null",
+            "includes": "includes", "contains": "includes",
+            "not includes": "not includes", "not_includes": "not includes",
+          };
+          const normalizedOp = opMap[String(args.operator).toLowerCase()] ?? args.operator;
+          properties = [{
+            name: args.property,
+            op: normalizedOp,
+            value: args.value,
+          }];
+          console.log("[queryBlocksByTag] Converted flat args to properties:", properties);
+        }
+
+        if (queryText && queryText.trim()) {
+          if (tagName) {
+            const trimmedTag = String(tagName).trim();
+            const trimmedQuery = queryText.trim();
+            if (trimmedQuery !== trimmedTag) {
+              const parsedFromQuery = parsePropertyFilters(trimmedQuery);
+              if (parsedFromQuery.length === 0) {
+                return "Error: Unable to parse property filters from `query`. Use `properties` array or a string like \"priority == 6\".";
+              }
+              properties = [...properties, ...parsedFromQuery];
+            }
+          } else {
+            const parsedFromQuery = parsePropertyFilters(queryText);
+            if (parsedFromQuery.length > 0) {
+              properties = [...properties, ...parsedFromQuery];
+            } else {
+              tagName = queryText;
+            }
+          }
+        }
+        const maxResults = args.maxResults || 50;
+
+        if (!tagName) {
+          console.error("[Tool] Missing tag name parameter");
+          return "Error: Missing tag name parameter";
+        }
+
+        if (propertyFiltersInput !== undefined && properties.length === 0) {
+          return "Error: Unable to parse property filters. Use `properties` array or a string like \"priority == 6\".";
+        }
+
+        // Enrich properties with type information from tag schema (using cached version)
+        if (properties.length > 0) {
+          try {
+            const schema = await getCachedTagSchema(tagName);
+            properties = properties.map((prop: any) => {
+              // If type is already set, use it
+              if (prop.type !== undefined) {
+                return prop;
+              }
+              
+              // Look up the property in the schema
+              const schemaProp = schema.properties.find(p => p.name === prop.name);
+              if (schemaProp) {
+                return {
+                  ...prop,
+                  type: schemaProp.type,
+                };
+              }
+              
+              // Property not found in schema, return as-is
+              console.warn(`[queryBlocksByTag] Property "${prop.name}" not found in tag schema`);
+              return prop;
+            });
+          } catch (error) {
+            console.warn(`[queryBlocksByTag] Failed to fetch tag schema for type enrichment:`, error);
+            // Continue without type enrichment
+          }
+        }
+
+        console.log(`[Tool] queryBlocksByTag: "${tagName}" properties=${JSON.stringify(properties)} (max: ${maxResults})`);
+        const results = await queryBlocksByTag(tagName, {
+          properties,
+          maxResults: Math.min(maxResults, 50),
+        });
+        console.log(`[Tool] queryBlocksByTag found ${results.length} results`);
+
+        if (results.length === 0) {
+          const filterDesc = properties.length > 0
+            ? ` with filters: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')}`
+            : '';
+          return `No notes found with tag "${tagName}"${filterDesc}.`;
+        }
+
+        // Format with clickable block links using utility
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => {
+          const linkTitle = r.title.replace(/[\[\]]/g, '');  // Escape brackets
+          const body = r.fullContent ?? r.content;
+          const propValues = (r as any).propertyValues && typeof (r as any).propertyValues === "object"
+            ? (r as any).propertyValues
+            : null;
+          const propSuffix = propValues && Object.keys(propValues).length > 0
+            ? ` (${Object.entries(propValues).map(([k, v]) => `${k}=${formatPropValue(v)}`).join(", ")})`
+            : "";
+          return `${i + 1}. [${linkTitle}](orca-block:${r.id})${propSuffix}\n${body}`;
+        }).join("\n\n");
+
+        const filterDesc = properties.length > 0
+          ? ` (filtered by: ${properties.map((p: any) => `${p.name} ${p.op} ${p.value ?? ''}`).join(', ')})`
+          : '';
+        return `${preservationNote}Found ${results.length} note(s) with tag "${tagName}"${filterDesc}:\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in queryBlocksByTag:`, err);
+        return `Error querying tag "${args.tagName}": ${err.message}`;
+      }
+    } else if (toolName === "searchTasks") {
+      try {
+        // Search for task blocks
+        const completed = typeof args.completed === "boolean" ? args.completed : undefined;
+        const maxResults = args.maxResults || 50;
+
+        console.log("[Tool] searchTasks:", { completed, maxResults });
+
+        const results = await searchTasks(completed, { maxResults: Math.min(maxResults, 50) });
+        console.log(`[Tool] searchTasks found ${results.length} results`);
+
+        if (results.length === 0) {
+          const statusDesc = completed === true ? "completed" : completed === false ? "incomplete" : "";
+          return `No ${statusDesc} tasks found.`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        const statusDesc = completed === true ? "completed " : completed === false ? "incomplete " : "";
+        return `${preservationNote}Found ${results.length} ${statusDesc}task(s):\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in searchTasks:`, err);
+        return `Error searching tasks: ${err.message}`;
+      }
+    } else if (toolName === "searchJournalEntries") {
+      try {
+        // Search for journal entries in date range
+        let startOffset = normalizeJournalOffset(args.startOffset ?? args.start_offset, -7);
+        let endOffset = normalizeJournalOffset(args.endOffset ?? args.end_offset, 0);
+        const maxResults = args.maxResults || 50;
+
+        if (startOffset > endOffset) {
+          [startOffset, endOffset] = [endOffset, startOffset];
+        }
+
+        const startDaysAgo = Math.abs(startOffset);
+        const endDaysAgo = Math.abs(endOffset);
+
+        console.log("[Tool] searchJournalEntries:", {
+          startOffset,
+          endOffset,
+          startDaysAgo,
+          endDaysAgo,
+          maxResults,
+        });
+
+        const start: QueryDateSpec = { type: "relative", value: startOffset, unit: "d" };
+        const end: QueryDateSpec = { type: "relative", value: endOffset, unit: "d" };
+
+        const results = await searchJournalEntries(start, end, { maxResults: Math.min(maxResults, 50) });
+        console.log(`[Tool] searchJournalEntries found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No journal entries found from ${startDaysAgo} to ${endDaysAgo} days ago.`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} journal entries from ${startDaysAgo} to ${endDaysAgo} days ago:\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in searchJournalEntries:`, err);
+        return `Error searching journal entries: ${err.message}`;
+      }
+    } else if (toolName === "getTodayJournal") {
+      try {
+        const includeChildren = args.includeChildren !== false; // default true
+
+        console.log("[Tool] getTodayJournal:", { includeChildren });
+
+        const result = await getTodayJournal(includeChildren);
+        console.log(`[Tool] getTodayJournal found result: ${result.id}`);
+        
         const linkTitle = result.title.replace(/[\[\]]/g, "");
         const body = result.fullContent ?? result.content;
 
@@ -1035,202 +876,444 @@ ${body}
 
 ---
 📄 [查看原页面](orca-block:${result.id})`;
-      } catch (error: any) {
-        // If page not found, provide helpful error message
-        if (error.message?.includes("not found")) {
-          return `Page "${pageName}" not found. Please check:
+      } catch (err: any) {
+        console.error(`[Tool] Error in getTodayJournal:`, err);
+        return `Error getting today's journal: ${err.message}`;
+      }
+    } else if (toolName === "getRecentJournals") {
+      try {
+        let days = args.days ?? args.day ?? args.rangeDays ?? args.lastDays ?? args.n;
+        const includeChildren = args.includeChildren !== false; // default true
+        const maxResults = args.maxResults ?? 20;
+
+        if (Array.isArray(days)) {
+          days = days[0];
+        }
+
+        const normalizedDays = Number.isFinite(Number(days))
+          ? Math.abs(Math.trunc(Number(days)))
+          : 7;
+        const normalizedMaxResults = Math.min(
+          Math.max(1, Number.isFinite(Number(maxResults)) ? Math.trunc(Number(maxResults)) : 20),
+          50
+        );
+
+        console.log("[Tool] getRecentJournals:", {
+          days: normalizedDays,
+          includeChildren,
+          maxResults: normalizedMaxResults,
+        });
+
+        const results = await getRecentJournals(
+          normalizedDays,
+          includeChildren,
+          normalizedMaxResults
+        );
+        console.log(`[Tool] getRecentJournals found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No journal entries found in the last ${normalizedDays} day(s).`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} journal entries in the last ${normalizedDays} day(s):\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in getRecentJournals:`, err);
+        return `Error getting recent journals: ${err.message}`;
+      }
+    } else if (toolName === "query_blocks") {
+      try {
+        // Advanced query with multiple conditions
+        const conditions = args.conditions;
+        const combineMode = args.combineMode || "and";
+        const maxResults = args.maxResults || 50;
+
+        if (!Array.isArray(conditions) || conditions.length === 0) {
+          return "Error: At least one condition is required for query_blocks.";
+        }
+
+        console.log("[Tool] query_blocks:", { conditions, combineMode, maxResults });
+
+        // Convert AI-friendly conditions to internal format
+        const convertedConditions: QueryCondition[] = conditions.map((c: any) => {
+          switch (c.type) {
+            case "tag":
+              return { type: "tag" as const, name: c.name || "" };
+            case "text":
+              return { type: "text" as const, text: c.text || "" };
+            case "task":
+              return { type: "task" as const, completed: c.completed };
+            case "journal":
+              let startOffset = normalizeJournalOffset(c.startOffset, -7);
+              let endOffset = normalizeJournalOffset(c.endOffset, 0);
+              if (startOffset > endOffset) {
+                [startOffset, endOffset] = [endOffset, startOffset];
+              }
+              return {
+                type: "journal" as const,
+                start: { type: "relative" as const, value: startOffset, unit: "d" as const },
+                end: { type: "relative" as const, value: endOffset, unit: "d" as const },
+              };
+            case "ref":
+              return { type: "ref" as const, blockId: c.blockId || 0 };
+            case "block":
+              return { type: "block" as const, hasTags: c.hasTags };
+            case "blockMatch":
+              return { type: "blockMatch" as const, blockId: c.blockId || 0 };
+            default:
+              return { type: "tag" as const, name: "" };
+          }
+        });
+
+        const results = await queryBlocksAdvanced({
+          conditions: convertedConditions,
+          combineMode: combineMode as QueryCombineMode,
+          pageSize: Math.min(maxResults, 50),
+        });
+        console.log(`[Tool] query_blocks found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No blocks found matching the ${combineMode.toUpperCase()} query.`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in query_blocks:`, err);
+        return `Error executing complex query: ${err.message}`;
+      }
+    } else if (toolName === "get_tag_schema") {
+      try {
+        // Get tag schema with property definitions
+        let tagName = args.tagName || args.tag_name || args.tag;
+
+        // Handle array parameters
+        if (Array.isArray(tagName)) {
+          tagName = tagName[0];
+        }
+
+        if (!tagName) {
+          console.error("[Tool] Missing tag name parameter");
+          return "Error: Missing tag name parameter";
+        }
+
+        console.log(`[Tool] get_tag_schema: "${tagName}"`);
+        const schema = await getTagSchema(tagName);
+        console.log(`[Tool] get_tag_schema found ${schema.properties.length} properties`);
+
+        if (schema.properties.length === 0) {
+          return `Tag "${tagName}" found but has no properties defined.`;
+        }
+
+        // Format schema as markdown
+        let result = `Schema for tag "${schema.tagName}":\n\n`;
+
+        schema.properties.forEach((prop, i) => {
+          result += `${i + 1}. **${prop.name}** (${prop.typeName}, type code: ${prop.type})\n`;
+
+          if (prop.options && prop.options.length > 0) {
+            result += `   Options:\n`;
+            prop.options.forEach((opt) => {
+              result += `   - "${opt.label}" → value: ${opt.value}\n`;
+            });
+          }
+        });
+
+        result += `\n**Usage tip**: When querying with property filters, use the numeric values shown above for choice properties. For example:\n`;
+        result += `- For single-choice properties, use: { name: "propertyName", op: "==", value: <numeric_value> }\n`;
+        result += `- For number/text properties, use the appropriate operator and value type.\n`;
+
+        return result;
+      } catch (err: any) {
+        console.error(`[Tool] Error in get_tag_schema:`, err);
+        return `Error getting schema for tag "${args.tagName}": ${err.message}`;
+      }
+    } else if (toolName === "searchBlocksByReference") {
+      try {
+        // Search for blocks that reference a specific page
+        // Support many parameter name variations that AI models might use
+        let pageName = args.pageName || args.page_name || args.page || args.alias || args.name 
+          || args.query || args.reference || args.target || args.text || args.blockName
+          || args.searchText || args.pageTitle || args.title || args.reference_page_name;
+        const maxResults = args.maxResults || 50;
+
+        console.log("[Tool] searchBlocksByReference args received:", JSON.stringify(args));
+
+        // Handle array parameters (AI sometimes sends ["name"] instead of "name")
+        if (Array.isArray(pageName)) {
+          pageName = pageName[0];
+        }
+
+        if (!pageName) {
+          console.error("[Tool] Missing page name parameter. Args:", args);
+          return "Error: Missing page name parameter. Please specify which page to find references to.";
+        }
+
+        console.log("[Tool] searchBlocksByReference:", { pageName, maxResults });
+
+        const results = await searchBlocksByReference(pageName, Math.min(maxResults, 50));
+        console.log(`[Tool] searchBlocksByReference found ${results.length} results`);
+
+        if (results.length === 0) {
+          return `No blocks found referencing "[[${pageName}]]". This page may have no backlinks, or the page name may not exist.`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r, i) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in searchBlocksByReference:`, err);
+        return `Error searching references to "${args.pageName}": ${err.message}`;
+      }
+    } else if (toolName === "getPage") {
+      try {
+        // Get page content by name
+        let pageName = args.pageName || args.page_name || args.page || args.name
+          || args.alias || args.title || args.pageTitle;
+        const includeChildren = args.includeChildren !== false; // default true
+
+        // Handle array parameters
+        if (Array.isArray(pageName)) {
+          pageName = pageName[0];
+        }
+
+        if (!pageName) {
+          console.error("[Tool] Missing page name parameter");
+          return "Error: Missing page name parameter. Please specify which page to read.";
+        }
+
+        console.log("[Tool] getPage:", { pageName, includeChildren });
+
+        try {
+          const result = await getPageByName(pageName, includeChildren);
+          console.log(`[Tool] getPage found result: ${result.id}`);
+
+          const linkTitle = result.title.replace(/[\[\]]/g, "");
+          const body = result.fullContent ?? result.content;
+
+          return `# ${linkTitle}
+
+${body}
+
+---
+📄 [查看原页面](orca-block:${result.id})`;
+        } catch (error: any) {
+          // If page not found, provide helpful error message
+          if (error.message?.includes("not found")) {
+            return `Page "${pageName}" not found. Please check:
 1. The page name is correct (case-sensitive)
 2. The page exists in your notes
 3. Try using searchBlocksByText("${pageName}") to find similar pages`;
+          }
+          throw error;
         }
-        throw error;
+      } catch (err: any) {
+        console.error(`[Tool] Error in getPage:`, err);
+        return `Error getting page "${args.pageName}": ${err.message}`;
       }
     } else if (toolName === "createBlock") {
-      // Parse and validate parameters - support multiple field name variations
+      try {
+        console.log("[Tool] createBlock called with args:", JSON.stringify(args));
 
-      // Extract refBlockId - support "orca-block:274" format
-      let refBlockIdRaw = args.refBlockId ?? args.ref_block_id ?? args.blockId ?? args.block_id;
+        // Parse and validate parameters - support multiple field name variations
+        
+        // Extract refBlockId - support "orca-block:274" format
+        let refBlockIdRaw = args.refBlockId ?? args.ref_block_id ?? args.blockId ?? args.block_id;
 
-      // If refBlockId is a string like "orca-block:274", extract the number
-      if (typeof refBlockIdRaw === "string") {
-        const match = refBlockIdRaw.match(/^orca-block:(\d+)$/);
-        if (match) {
-          refBlockIdRaw = parseInt(match[1], 10);
-        }
-      }
-
-      let refBlockId = toFiniteNumber(refBlockIdRaw);
-
-      const pageName = typeof args.pageName === "string" ? args.pageName :
-                       (typeof args.page_name === "string" ? args.page_name :
-                       (typeof args.page === "string" ? args.page :
-                       (typeof args.title === "string" ? args.title : undefined)));
-
-      // If pageName is provided but no refBlockId, get the page's root block
-      if (!refBlockId && pageName) {
-        try {
-          const pageResult = await getPageByName(pageName, false);
-          refBlockId = pageResult.id;
-        } catch (error: any) {
-          return `Error: Page "${pageName}" not found. Please check the page name or use refBlockId instead.`;
-        }
-      }
-
-      if (refBlockId === undefined) {
-        // Provide helpful error message with context
-        let helpfulHint = "";
-
-        // Try to suggest current context
-        if (uiStore.lastRootBlockId) {
-          helpfulHint = `\n\nHint: You can use the current page's root block: refBlockId=${uiStore.lastRootBlockId}`;
+        // If refBlockId is a string like "orca-block:274", extract the number
+        if (typeof refBlockIdRaw === "string") {
+          const match = refBlockIdRaw.match(/^orca-block:(\d+)$/);
+          if (match) {
+            refBlockIdRaw = parseInt(match[1], 10);
+          }
         }
 
-        // Show available parameter aliases
-        const aliases = `
+        let refBlockId = toFiniteNumber(refBlockIdRaw);
+
+        const pageName = typeof args.pageName === "string" ? args.pageName : 
+                         (typeof args.page_name === "string" ? args.page_name : 
+                         (typeof args.page === "string" ? args.page : 
+                         (typeof args.title === "string" ? args.title : undefined)));
+
+        // If pageName is provided but no refBlockId, get the page's root block
+        if (!refBlockId && pageName) {
+          try {
+            const pageResult = await getPageByName(pageName, false);
+            refBlockId = pageResult.id;
+            console.log(`[Tool] createBlock: Resolved page "${pageName}" to root block ${refBlockId}`);
+          } catch (error: any) {
+             console.warn(`[Tool] createBlock: Failed to resolve page "${pageName}"`);
+             return `Error: Page "${pageName}" not found. Please check the page name or use refBlockId instead.`;
+          }
+        }
+
+        if (refBlockId === undefined) {
+          // Provide helpful error message with context
+          let helpfulHint = "";
+          
+          // Try to suggest current context
+          if (uiStore.lastRootBlockId) {
+            helpfulHint = `\n\nHint: You can use the current page's root block: refBlockId=${uiStore.lastRootBlockId}`;
+          }
+
+          // Show available parameter aliases
+          const aliases = `
 Supported parameter names:
 - refBlockId, ref_block_id, blockId, or block_id (number)
 - pageName, page_name, page, or title (string)`;
 
-        return `Error: Missing reference. Please provide either refBlockId (number) or pageName (string).${aliases}${helpfulHint}`;
-      }
+          return `Error: Missing reference. Please provide either refBlockId (number) or pageName (string).${aliases}${helpfulHint}`;
+        }
 
-      const position = (typeof args.position === "string" &&
-                        ["before", "after", "firstChild", "lastChild"].includes(args.position))
-                        ? args.position
-                        : (typeof args.location === "string" &&
-                          ["before", "after", "firstChild", "lastChild"].includes(args.location))
-                        ? args.location
-                        : (args.position === "asChild" || args.location === "asChild")
-                        ? "lastChild"
-                        : "lastChild";
+        const position = (typeof args.position === "string" && 
+                          ["before", "after", "firstChild", "lastChild"].includes(args.position)) 
+                          ? args.position 
+                          : (typeof args.location === "string" && 
+                            ["before", "after", "firstChild", "lastChild"].includes(args.location))
+                          ? args.location
+                          : (args.position === "asChild" || args.location === "asChild")
+                          ? "lastChild"
+                          : "lastChild";
 
-      const content =
-        typeof args.content === "string"
-          ? args.content
-          : (typeof args.text === "string" ? args.text : "");
+        const content = 
+          typeof args.content === "string" 
+            ? args.content 
+            : (typeof args.text === "string" ? args.text : "");
 
-      if (!content || content.trim().length === 0) {
-        return "Error: Content cannot be empty.";
-      }
+        if (!content || content.trim().length === 0) {
+          return "Error: Content cannot be empty.";
+        }
 
-      // Get reference block - try state first, then backend API
-      let refBlock = orca.state.blocks[refBlockId];
+        console.log(`[Tool] createBlock: refBlockId=${refBlockId}, position=${position}`);
 
-      if (!refBlock) {
+        // Get reference block - try state first, then backend API
+        let refBlock = orca.state.blocks[refBlockId];
+        
+        if (!refBlock) {
+          try {
+            refBlock = await orca.invokeBackend("get-block", refBlockId);
+            if (!refBlock) {
+              return `Error: Block ${refBlockId} not found in repository`;
+            }
+          } catch (error: any) {
+            console.error(`[Tool] Failed to fetch block ${refBlockId}:`, error);
+            return `Error: Failed to fetch block ${refBlockId}: ${error?.message || error}`;
+          }
+        }
+
+
+        // === 智能导航：仅在必要时跳转 ===
+        // 1. 获取目标块的根页面 ID
+        const targetRootBlockId = await getRootBlockId(refBlockId);
+        
+        // 2. 获取当前活动面板的根页面 ID（排除 AI chat panel）
+        let currentRootBlockId: number | undefined = undefined;
+        let targetPanelId: string | undefined = undefined;
+
         try {
-          refBlock = await orca.invokeBackend("get-block", refBlockId);
-          if (!refBlock) {
-            return `Error: Block ${refBlockId} not found in repository`;
+          const activePanelId = orca.state.activePanel;
+          const aiChatPanelId = uiStore.aiChatPanelId;
+
+          // 如果当前活动面板是 AI chat panel，使用 openInLastPanel 的逻辑
+          // 否则使用当前活动面板
+          if (activePanelId === aiChatPanelId) {
+            // AI chat panel 处于活跃状态，需要在另一个 panel 操作
+            targetPanelId = undefined; // 让 openInLastPanel 自动选择
+          } else {
+            // 非 AI chat panel，可以直接使用
+            targetPanelId = activePanelId;
+            const activePanel = orca.nav.findViewPanel(activePanelId, orca.state.panels);
+            
+            if (activePanel && activePanel.view === "block" && activePanel.viewArgs?.blockId) {
+              const currentBlockId = activePanel.viewArgs.blockId;
+              currentRootBlockId = await getRootBlockId(currentBlockId);
+            }
           }
+        } catch (error) {
+          console.warn("[createBlock] Failed to get current panel's root block:", error);
+        }
+
+        // 3. 智能导航决策
+        const needsNavigation = !targetRootBlockId || !currentRootBlockId || (targetRootBlockId !== currentRootBlockId);
+
+        if (needsNavigation) {
+          // 需要导航
+          if (targetPanelId) {
+            // 有明确的目标 panel，使用 replace
+            console.log(`[createBlock] Navigating to block ${refBlockId} in panel ${targetPanelId} (root: ${targetRootBlockId})`);
+            orca.nav.replace("block", { blockId: refBlockId }, targetPanelId);
+          } else {
+            // 当前在 AI chat panel，使用 openInLastPanel 在另一个 panel 打开
+            console.log(`[createBlock] Opening block ${refBlockId} in last panel (root: ${targetRootBlockId})`);
+            orca.nav.openInLastPanel("block", { blockId: refBlockId });
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } else {
+          // 已经在目标页面，无需导航
+          console.log(`[createBlock] Already on target page (root: ${targetRootBlockId}), skipping navigation`);
+        }
+        // === 智能导航结束 ===
+
+        // Insert block using editor command
+        try {
+          let newBlockIds: any;
+          await orca.commands.invokeGroup(async () => {
+            newBlockIds = await orca.commands.invokeEditorCommand(
+              "core.editor.batchInsertText",
+              null,                    // cursor (not needed for programmatic insert)
+              refBlock,                // reference block
+              position,                // position
+              content,                 // text content (Markdown will be parsed)
+              false,                   // skipMarkdown = false (enable Markdown parsing)
+              false,                   // skipTags = false (preserve tag extraction)
+            );
+          }, {
+            topGroup: true,
+            undoable: true
+          });
+
+          // batchInsertText returns DbId[], take the first block ID
+          const newBlockId = Array.isArray(newBlockIds) ? newBlockIds[0] : newBlockIds;
+          
+          const positionDescriptions: Record<string, string> = {
+            before: "before",
+            after: "after",
+            firstChild: "as first child of",
+            lastChild: "as last child of"
+          };
+          const positionDesc = positionDescriptions[position] || "as last child of";
+          
+          console.log(`[Tool] createBlock success: newBlockId=${newBlockId}`);
+          return `Created new block: [${newBlockId}](orca-block:${newBlockId}) (${positionDesc} block ${refBlockId})`;
         } catch (error: any) {
-          console.error(`[Tool] Failed to fetch block ${refBlockId}:`, error);
-          return `Error: Failed to fetch block ${refBlockId}: ${error?.message || error}`;
+          console.error("[Tool] Failed to create block (editor command):", error);
+          throw error; // Re-throw to be caught by the outer catch
         }
-      }
-
-
-      // === 智能导航：仅在必要时跳转 ===
-      // 1. 获取目标块的根页面 ID
-      const targetRootBlockId = await getRootBlockId(refBlockId);
-
-      // 2. 获取当前活动面板的根页面 ID（排除 AI chat panel）
-      let currentRootBlockId: number | undefined = undefined;
-      let targetPanelId: string | undefined = undefined;
-
-      try {
-        const activePanelId = orca.state.activePanel;
-        const aiChatPanelId = uiStore.aiChatPanelId;
-
-        // 如果当前活动面板是 AI chat panel，使用 openInLastPanel 的逻辑
-        // 否则使用当前活动面板
-        if (activePanelId === aiChatPanelId) {
-          // AI chat panel 处于活跃状态，需要在另一个 panel 操作
-          targetPanelId = undefined; // 让 openInLastPanel 自动选择
-        } else {
-          // 非 AI chat panel，可以直接使用
-          targetPanelId = activePanelId;
-          const activePanel = orca.nav.findViewPanel(activePanelId, orca.state.panels);
-
-          if (activePanel && activePanel.view === "block" && activePanel.viewArgs?.blockId) {
-            const currentBlockId = activePanel.viewArgs.blockId;
-            currentRootBlockId = await getRootBlockId(currentBlockId);
-          }
-        }
-      } catch (error) {
-        console.warn("[createBlock] Failed to get current panel's root block:", error);
-      }
-
-      // 3. 智能导航决策
-      const needsNavigation = !targetRootBlockId || !currentRootBlockId || (targetRootBlockId !== currentRootBlockId);
-
-      if (needsNavigation) {
-        // 需要导航
-        if (targetPanelId) {
-          // 有明确的目标 panel，使用 replace
-          console.log(`[createBlock] Navigating to block ${refBlockId} in panel ${targetPanelId} (root: ${targetRootBlockId})`);
-          orca.nav.replace("block", { blockId: refBlockId }, targetPanelId);
-        } else {
-          // 当前在 AI chat panel，使用 openInLastPanel 在另一个 panel 打开
-          console.log(`[createBlock] Opening block ${refBlockId} in last panel (root: ${targetRootBlockId})`);
-          orca.nav.openInLastPanel("block", { blockId: refBlockId });
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } else {
-        // 已经在目标页面，无需导航
-        console.log(`[createBlock] Already on target page (root: ${targetRootBlockId}), skipping navigation`);
-      }
-      // === 智能导航结束 ===
-
-      // Insert block using editor command
-      try {
-        let newBlockIds: any;
-        await orca.commands.invokeGroup(async () => {
-          newBlockIds = await orca.commands.invokeEditorCommand(
-            "core.editor.batchInsertText",
-            null,                    // cursor (not needed for programmatic insert)
-            refBlock,                // reference block
-            position,                // position
-            content,                 // text content (Markdown will be parsed)
-            false,                   // skipMarkdown = false (enable Markdown parsing)
-            false,                   // skipTags = false (preserve tag extraction)
-          );
-        }, {
-          topGroup: true,
-          undoable: true
-        });
-
-        // batchInsertText returns DbId[], take the first block ID
-        const newBlockId = Array.isArray(newBlockIds) ? newBlockIds[0] : newBlockIds;
-        
-        const positionDescriptions: Record<string, string> = {
-          before: "before",
-          after: "after",
-          firstChild: "as first child of",
-          lastChild: "as last child of"
-        };
-        const positionDesc = positionDescriptions[position] || "as last child of";
-        
-        return `Created new block: [${newBlockId}](orca-block:${newBlockId}) (${positionDesc} block ${refBlockId})`;
-      } catch (error: any) {
-        console.error("[Tool] Failed to create block:", error);
-        return `Error: Failed to create block: ${error?.message || error}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in createBlock:`, err);
+        return `Error creating block: ${err.message}`;
       }
     } else if (toolName === "createPage") {
-      // Create page alias for a block
-      const blockId = toFiniteNumber(args.blockId || args.block_id || args.id);
-      const pageName = args.pageName || args.page_name || args.name || args.alias;
-
-      if (!blockId) {
-        console.error("[Tool] Missing blockId parameter. Args:", args);
-        return "Error: Missing blockId parameter. Please specify the block ID to convert to a page.";
-      }
-
-      if (!pageName || typeof pageName !== "string" || !pageName.trim()) {
-        console.error("[Tool] Missing or invalid pageName parameter. Args:", args);
-        return "Error: Missing or invalid pageName parameter. Please specify a valid page name.";
-      }
-
       try {
+        // Create page alias for a block
+        const blockId = toFiniteNumber(args.blockId || args.block_id || args.id);
+        const pageName = args.pageName || args.page_name || args.name || args.alias;
+
+        if (!blockId) {
+          console.error("[Tool] Missing blockId parameter. Args:", args);
+          return "Error: Missing blockId parameter. Please specify the block ID to convert to a page.";
+        }
+
+        if (!pageName || typeof pageName !== "string" || !pageName.trim()) {
+          console.error("[Tool] Missing or invalid pageName parameter. Args:", args);
+          return "Error: Missing or invalid pageName parameter. Please specify a valid page name.";
+        }
+
         console.log(`[Tool] createPage: blockId=${blockId}, pageName=${pageName}`);
 
         await orca.commands.invokeEditorCommand(
@@ -1242,27 +1325,27 @@ Supported parameter names:
         );
 
         return `Created page: [[${pageName}]] for block [${blockId}](orca-block:${blockId})`;
-      } catch (error: any) {
-        console.error("[Tool] Failed to create page:", error);
-        return `Error: Failed to create page: ${error?.message || error}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in createPage:`, err);
+        return `Error creating page "${args.pageName}": ${err.message}`;
       }
     } else if (toolName === "insertTag") {
-      // Insert tag to a block
-      const blockId = toFiniteNumber(args.blockId || args.block_id || args.id);
-      const tagName = args.tagName || args.tag_name || args.tag || args.name;
-      const properties = args.properties || args.props;
-
-      if (!blockId) {
-        console.error("[Tool] Missing blockId parameter. Args:", args);
-        return "Error: Missing blockId parameter. Please specify the block ID to add tag to.";
-      }
-
-      if (!tagName || typeof tagName !== "string" || !tagName.trim()) {
-        console.error("[Tool] Missing or invalid tagName parameter. Args:", args);
-        return "Error: Missing or invalid tagName parameter. Please specify a valid tag name.";
-      }
-
       try {
+        // Insert tag to a block
+        const blockId = toFiniteNumber(args.blockId || args.block_id || args.id);
+        const tagName = args.tagName || args.tag_name || args.tag || args.name;
+        const properties = args.properties || args.props;
+
+        if (!blockId) {
+          console.error("[Tool] Missing blockId parameter. Args:", args);
+          return "Error: Missing blockId parameter. Please specify the block ID to add tag to.";
+        }
+
+        if (!tagName || typeof tagName !== "string" || !tagName.trim()) {
+          console.error("[Tool] Missing or invalid tagName parameter. Args:", args);
+          return "Error: Missing or invalid tagName parameter. Please specify a valid tag name.";
+        }
+
         console.log(`[Tool] insertTag: blockId=${blockId}, tagName=${tagName}, properties=${JSON.stringify(properties)}`);
 
         // Convert properties array to the format expected by insertTag
@@ -1331,9 +1414,9 @@ Supported parameter names:
           : "";
 
         return `Added tag #${tagName} to block [${blockId}](orca-block:${blockId})${propsDesc}`;
-      } catch (error: any) {
-        console.error("[Tool] Failed to insert tag:", error);
-        return `Error: Failed to insert tag: ${error?.message || error}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in insertTag:`, err);
+        return `Error inserting tag "${args.tagName}": ${err.message}`;
       }
     } else if (toolName === "searchSkills") {
       // Search for user-defined skills

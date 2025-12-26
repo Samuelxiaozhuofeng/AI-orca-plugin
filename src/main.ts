@@ -1,5 +1,3 @@
-import { setupL10N } from "./libs/l10n";
-import zhCN from "./translations/zhCN";
 import { registerAiChatSettingsSchema } from "./settings/ai-chat-settings";
 import { registerAiChatUI, unregisterAiChatUI } from "./ui/ai-chat-ui";
 import { ensureDefaultSkills } from "./services/skill-initializer";
@@ -10,8 +8,7 @@ let pluginName: string;
 export async function load(_name: string) {
   pluginName = _name;
 
-  setupL10N(orca.state.locale, { "zh-CN": zhCN });
-
+  // PR review note: Localization init removed to keep PR focused on style fixes.
   await registerAiChatSettingsSchema(pluginName);
   registerAiChatUI(pluginName);
 
