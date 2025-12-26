@@ -22,62 +22,50 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-This is an **Orca Note AI Chat Plugin** - a plugin for Orca Note (a block-based note-taking application) that adds AI chat functionality. The plugin has UI + context building, and now supports OpenAI-compatible chat (including streaming + Stop).
+**Orca Note AI Chat Plugin** - Adds AI chat functionality to Orca Note (block-based note-taking app). Supports OpenAI-compatible chat with streaming.
 
 ## Build Commands
 
 ```bash
-# Development with hot reload
-npm run dev
-
-# Production build
-npm run build
-
-# Preview production build
-npm run preview
+npm run dev      # Development with hot reload
+npm run build    # Production build → dist/main.js
+npm run preview  # Preview production build
 ```
-
-The build outputs to `dist/main.js` as a single-file plugin.
 
 ## Architecture
 
 ### Plugin Lifecycle
 
 - **Entry**: `src/main.ts` exports `load(name)` and `unload()` functions
-- **Load sequence**: L10N setup → Settings schema registration → UI registration
-- **Unload sequence**: Close panels → Unregister sidetools/menus/panels
+- **Load**: L10N setup → Settings registration → UI registration
+- **Unload**: Close panels → Unregister sidetools/menus/panels
 
 ### Core Modules
 
-| Module               | Location                           | Purpose                                                                                                               |
-| -------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| UI Shell             | `src/ui/ai-chat-ui.ts`             | Panel registration, sidetool, toggle/open/close logic                                                                 |
-| Chat Panel           | `src/views/AiChatPanel.tsx`        | Main chat UI with two-column layout (chat + context)                                                                  |
-| Context Pane         | `src/views/AiChatContextPane.tsx`  | Right column for selected context display                                                                             |
-| Context Store        | `src/store/context-store.ts`       | Valtio proxy store for selected blocks/pages/tags                                                                     |
-| Context Builder      | `src/services/context-builder.ts`  | Builds text preview from ContextRef items                                                                             |
-| OpenAI Client        | `src/services/openai-client.ts`    | OpenAI-compatible chat completions (SSE streaming)                                                                    |
-| Settings             | `src/settings/ai-chat-settings.ts` | OpenAI-compatible API settings schema                                                                                 |
-| Context Menu         | `src/ui/ai-chat-context-menu.ts`   | Block/tag right-click menu entries                                                                                    |
-| **Search Service**   | `src/services/search-service.ts`   | AI tool functions: searchBlocksByTag, searchBlocksByText, **queryBlocksByTag** (advanced query with property filters) |
-| **Query Builder**    | `src/utils/query-builder.ts`       | Builds QueryDescription2 for complex queries                                                                          |
-| **Query Converters** | `src/utils/query-converters.ts`    | Type conversion and operator mapping for query parameters                                                             |
-| **Query Types**      | `src/utils/query-types.ts`         | TypeScript type definitions for query system                                                                          |
+| Module          | Location                          | Purpose                                      |
+| --------------- | --------------------------------- | -------------------------------------------- |
+| UI Shell        | `src/ui/ai-chat-ui.ts`            | Panel registration, sidetool, toggle logic   |
+| Chat Panel      | `src/views/AiChatPanel.tsx`       | Main chat UI (two-column: chat + context)    |
+| Context Store   | `src/store/context-store.ts`      | Valtio store for selected blocks/pages/tags  |
+| Context Builder | `src/services/context-builder.ts` | Builds text preview from ContextRef items    |
+| OpenAI Client   | `src/services/openai-client.ts`   | OpenAI-compatible chat (SSE streaming)       |
+| Search Service  | `src/services/search-service.ts`  | AI tools: search/query blocks                |
+| Query Builder   | `src/utils/query-builder.ts`      | Builds QueryDescription2 for complex queries |
+| Skill System    | `src/services/skill-service.ts`   | User-defined Skills via `#skill` tag         |
 
 ### State Management
 
-Uses **Valtio** (available via `window.Valtio`) for reactive state:
+**Valtio** (via `window.Valtio`):
 
 - `uiStore`: Panel ID tracking, last root block ID
-- `contextStore`: Selected context items, preview text, building state
+- `contextStore`: Selected context items, preview text
+- `skillStore`: Active skill, available skills
 
 ### React Pattern
 
-React is accessed via `window.React` (host provides it). Components use `createElement` directly without JSX in `.tsx` files because the plugin doesn't bundle React.
+React via `window.React` (host-provided, not bundled):
 
 ```typescript
 const { createElement, useState } = window.React as any;
@@ -87,65 +75,24 @@ const { Button } = orca.components;
 
 ### Orca Plugin API
 
-The global `orca` object provides all plugin APIs. Key patterns:
+Global `orca` object:
 
-- `orca.state.*` - Reactive application state (panels, blocks, locale)
-- `orca.invokeBackend(type, ...args)` - Backend calls (get-block-tree, get-blocks, etc.)
-- `orca.components.*` - UI components (Button, CompositionTextArea, Menu, etc.)
-- `orca.panels.registerPanel()` - Register custom panel views
-- `orca.editorSidetools.registerEditorSidetool()` - Add sidebar tools
-- `orca.nav.addTo()` / `orca.nav.close()` - Panel navigation
+- `orca.state.*` - Reactive app state
+- `orca.invokeBackend(type, ...args)` - Backend calls
+- `orca.components.*` - UI components
+- `orca.panels.registerPanel()` - Register panels
+- `orca.nav.addTo()` / `orca.nav.close()` - Navigation
 
-### Context System (Current Focus)
-
-Context types (`ContextRef`):
-
-- `block`: Single block by ID
-- `page`: Entire page by root block ID
-- `tag`: All blocks with a specific tag
-
-Context flow:
-
-1. User selects blocks/pages via right-click menu → `ai-chat-context-menu.ts`
-2. `contextStore.selected` updated → triggers reactivity
-3. `context-builder.ts` builds text preview using backend APIs
-4. Preview displayed in `AiChatContextPane.tsx`
-
-## File Naming Conventions
-
-- UI registration/coordination: `src/ui/*.ts`
-- React components: `src/views/*.tsx`
-- State stores: `src/store/*-store.ts`
-- Business logic services: `src/services/*.ts`
-- Settings schemas: `src/settings/*.ts`
-- Type definitions: `src/orca.d.ts`
-
-## Development Notes
-
-### Styling
-
-- Use only `--orca-color-*` CSS variables for theme compatibility
-- Prefer `orca.components` over custom components
-- Inline styles in `createElement` calls
-
-### Backend API Calls
+### Backend API Examples
 
 ```typescript
-// Get block tree (includes children structure)
+// Get block tree
 const tree = await orca.invokeBackend("get-block-tree", blockId);
 
-// Get multiple blocks by IDs
-const blocks = await orca.invokeBackend("get-blocks", blockIds);
-
-// Get blocks with specific tags
-const taggedBlocks = await orca.invokeBackend("get-blocks-with-tags", [
-  tagName,
-]);
-
-// Search blocks by text (returns [aliasMatches, contentMatches])
+// Search by text (returns [aliasMatches, contentMatches])
 const result = await orca.invokeBackend("search-blocks-by-text", searchText);
 
-// Advanced query with property filters (NEW in v1.1.0)
+// Advanced query with property filters
 const queryResult = await orca.invokeBackend("query", {
   q: {
     kind: 100, // SELF_AND
@@ -153,9 +100,7 @@ const queryResult = await orca.invokeBackend("query", {
       {
         kind: 4, // QueryTag
         name: "task",
-        properties: [
-          { name: "priority", op: 9, v: 8 }, // priority >= 8
-        ],
+        properties: [{ name: "priority", op: 9, v: 8 }], // priority >= 8
       },
     ],
   },
@@ -164,88 +109,39 @@ const queryResult = await orca.invokeBackend("query", {
 });
 ```
 
-**Important**: Backend APIs return different data formats. Always use adapter functions:
+**Important**: Use adapter functions for backend results:
 
-- `unwrapBlocks()` for search results (handles `[aliasMatches, contentMatches]` tuples)
-- `unwrapBackendResult<T>()` for wrapped responses (handles `[status, data]` pairs)
-- See `TROUBLESHOOTING.md` for common pitfalls and solutions
+- `unwrapBlocks()` for search results
+- `unwrapBackendResult<T>()` for wrapped responses
 
-### Panel Tree Traversal
+## File Naming Conventions
 
-Use `findViewPanelById` from `src/utils/panel-tree.ts` to locate panels in the nested panel structure.
+- `src/ui/*.ts` - UI registration/coordination
+- `src/views/*.tsx` - React components
+- `src/store/*-store.ts` - State stores
+- `src/services/*.ts` - Business logic
+- `src/settings/*.ts` - Settings schemas
 
-## Current Development Status
+## Development Notes
 
-Per `progress.md`, completed steps:
+### Styling
 
-1. UI Shell (EditorSidetool, panel toggle)
-2. Chat Panel (mock conversation, dual-column layout)
-3. Settings (OpenAI-compatible schema)
-4. Context system (block/page/tag selection, preview)
-5. **Query system (Phase 1)**: Advanced query with property filters ✅
+- Use `--orca-color-*` CSS variables only
+- Prefer `orca.components` over custom components
+- Inline styles in `createElement` calls
 
-### Recent Updates (v1.1.0 - 2024-12-20)
+### Recent Updates
 
-**Query Blocks Feature - Phase 1 Completed**:
-
-- ✅ Advanced query tool `queryBlocksByTag` with property filters
-- ✅ Type conversion system for query parameters
-- ✅ Query builder for QueryDescription2 format
-- ✅ AI tool integration (AI can automatically filter by properties)
-- ✅ Support for 10+ comparison operators (>=, >, <=, <, ==, !=, is null, etc.)
-
-See `CHANGELOG-QUERY-BLOCKS.md` for detailed changes.
-
-**UI/UX Enhancements by Gemini**:
-
-- ✅ Code block with copy button
-- ✅ Message hover actions
-- ✅ Tool call visualization cards
-
-**CreateBlock Tool - MCP-inspired Optimization (2024-12-22)**:
-
-- ✅ Context-independent block creation (no specific panel required)
-- ✅ Dual-path block resolution (state → backend API fallback)
-- ✅ Page name support (auto-resolve to root block ID)
-- ✅ Detailed error handling and logging
-- ✅ Flexible parameter design (refBlockId OR pageName)
-
-**CreateBlock Markdown Support (2024-12-24)**:
-
-- ✅ Automatic Markdown parsing in block content
-- ✅ Support for bold (`**text**`), italic (`*text*`), wiki-links (`[[page]]`), inline code (`` `code` ``)
-- ✅ Uses Orca's native `core.editor.batchInsertText` command
-- ✅ Backward compatible with plain text content
-- ✅ No regression - all existing tests pass
-
-**New AI Tools: createPage & insertTag (2024-12-24)**:
-
-- ✅ `createPage` tool for creating page aliases (pages are named blocks)
-- ✅ `insertTag` tool for adding tags with optional properties
-- ✅ Uses Orca's native commands (`core.editor.createAlias`, `core.editor.insertTag`)
-- ✅ Enables structured data management through tags
-- ✅ Full wiki-link integration
-
-**Skill System (2024-12-26)**:
-
-- ✅ User-defined Skills via `#skill` tag
-- ✅ Prompt-type Skills: appends custom system prompt
-- ✅ Tools-type Skills: filters available AI tools to whitelist
-- ✅ `/` trigger in chat input opens Skill picker
-- ✅ SkillChip shows active skill, click X to deactivate
-- ✅ Variable support (Phase 2 planned)
-
-See `CREATEBLOCK-OPTIMIZATION.md` for MCP architecture analysis and implementation details.
-
-Remaining: 6. Query system (Phase 2-4): Complex combinations, time ranges, advanced features 7. (Optional) Session persistence (`setData/getData`) 8. Polish (keyboard shortcuts, export, prompt templates)
+**v1.1.0 (2024-12-20)**: Query system with property filters  
+**2024-12-22**: MCP-inspired createBlock (context-independent)  
+**2024-12-24**: Markdown support, createPage, insertTag tools  
+**2024-12-26**: Skill System (prompt/tools types, `/` trigger)
 
 ## AI Tools Reference
 
-The plugin provides the following AI tools (automatically available to AI during chat):
+The plugin provides AI tools (automatically available during chat):
 
 ### 1. searchBlocksByTag
-
-Simple tag-based search.
 
 ```typescript
 searchBlocksByTag(tagName: string, maxResults?: number)
@@ -253,13 +149,11 @@ searchBlocksByTag(tagName: string, maxResults?: number)
 
 ### 2. searchBlocksByText
 
-Full-text search across all blocks.
-
 ```typescript
 searchBlocksByText(searchText: string, maxResults?: number)
 ```
 
-### 3. queryBlocksByTag (NEW)
+### 3. queryBlocksByTag
 
 Advanced query with property filters.
 
@@ -276,105 +170,74 @@ queryBlocksByTag(tagName: string, options?: {
 
 **Examples**:
 
-- Find high-priority tasks: `queryBlocksByTag("task", { properties: [{ name: "priority", op: ">=", value: 8 }] })`
-- Find notes without category: `queryBlocksByTag("note", { properties: [{ name: "category", op: "is null" }] })`
-- Find specific author: `queryBlocksByTag("article", { properties: [{ name: "author", op: "==", value: "张三" }] })`
+- High-priority tasks: `queryBlocksByTag("task", { properties: [{ name: "priority", op: ">=", value: 8 }] })`
+- Notes without category: `queryBlocksByTag("note", { properties: [{ name: "category", op: "is null" }] })`
 
-### 4. createBlock (NEW - MCP-like)
+### 4. createBlock
 
-Create new blocks without requiring specific UI context (MCP-inspired design).
+MCP-inspired context-independent block creation.
 
 ```typescript
 createBlock({
   refBlockId: number, // Reference block ID
-  pageName: string, // Or page name (auto-resolves to root block)
+  pageName: string, // Or page name (auto-resolves)
   position: "before" | "after" | "firstChild" | "lastChild", // Default: "lastChild"
-  content: string, // Block content (required)
+  content: string, // Block content (supports Markdown)
 });
 ```
 
 **Key Features**:
 
-- **Context-independent**: Works anywhere, no need for specific panel
-- **Dual-path resolution**: Tries `state.blocks` first, falls back to `invokeBackend("get-block")` if needed
-- **Page name support**: Can reference by page name instead of block ID
-- **Markdown support**: Automatically parses Markdown syntax in content (bold, italic, links, code, etc.)
-- **Detailed error handling**: Clear error messages for debugging
+- Context-independent (works anywhere)
+- Dual-path resolution (state → backend fallback)
+- Markdown support (bold, italic, links, code)
+- Page name support
 
 **Examples**:
 
-- Create by block ID: `createBlock({ refBlockId: 12345, position: "lastChild", content: "New task item" })`
-- Create by page name: `createBlock({ pageName: "项目方案", content: "新的想法" })`
-- Insert before block: `createBlock({ refBlockId: 100, position: "before", content: "前置内容" })`
-- **Markdown formatting**: `createBlock({ refBlockId: 100, content: "**Bold** and *italic* with [[wiki link]]" })`
-- **Mixed formatting**: `createBlock({ refBlockId: 100, content: "Review [[Project A]] by *tomorrow* - priority: **HIGH**" })`
-- **Inline code**: `createBlock({ refBlockId: 100, content: "Use \`npm install\` to setup" })`
+- By block ID: `createBlock({ refBlockId: 12345, content: "New task" })`
+- By page name: `createBlock({ pageName: "项目方案", content: "新想法" })`
+- With Markdown: `createBlock({ refBlockId: 100, content: "**Bold** and [[wiki link]]" })`
 
-**Architecture**: See `CREATEBLOCK-OPTIMIZATION.md` for detailed technical design inspired by MCP.
+### 5. createPage
 
-### 5. createPage (NEW)
-
-Create a page alias for an existing block, making it referenceable by name.
+Create page alias for a block.
 
 ```typescript
 createPage({
-  blockId: number, // Block ID to convert to page
-  pageName: string, // Unique page name/alias
+  blockId: number,
+  pageName: string,
 });
 ```
 
-**Key Features**:
+### 6. insertTag
 
-- **Page creation**: Converts any block into a named page
-- **Alias system**: Pages are blocks with unique aliases
-- **Wiki-link support**: Created pages can be referenced via `[[pageName]]`
-
-**Examples**:
-
-- Create page: `createPage({ blockId: 12345, pageName: "项目总结" })`
-- After creation, reference via: `[[项目总结]]`
-
-### 6. insertTag (NEW)
-
-Add a tag to a block with optional properties (metadata).
+Add tag to block with optional properties.
 
 ```typescript
 insertTag({
-  blockId: number, // Block ID to tag
-  tagName: string, // Tag name
-  properties: Array<{
-    // Optional properties
-    name: string;
-    value: any;
-  }>,
+  blockId: number,
+  tagName: string,
+  properties: Array<{ name: string; value: any }>,
 });
 ```
 
-**Key Features**:
-
-- **Tag management**: Add tags for categorization
-- **Property support**: Attach metadata (dates, status, priority, etc.)
-- **Structured data**: Tags can carry typed properties
-
 **Examples**:
 
-- Simple tag: `insertTag({ blockId: 100, tagName: "task" })`
-- With properties: `insertTag({ blockId: 100, tagName: "deadline", properties: [{ name: "date", value: "2024-12-31" }] })`
-- Multiple properties: `insertTag({ blockId: 100, tagName: "task", properties: [{ name: "priority", value: 8 }, { name: "status", value: "in-progress" }] })`
+- Simple: `insertTag({ blockId: 100, tagName: "task" })`
+- With properties: `insertTag({ blockId: 100, tagName: "task", properties: [{ name: "priority", value: 8 }] })`
 
-## Skill System (NEW - 2024-12-26)
+## Skill System
 
-The plugin supports user-defined Skills - reusable AI behaviors that can be invoked via `/` trigger.
+User-defined Skills via `#skill` tag - reusable AI behaviors invoked with `/` trigger.
 
 ### Defining a Skill
-
-Create a block with `#skill` tag and child blocks defining its properties:
 
 ```
 #skill 翻译助手
   - 类型: prompt
   - 描述: 将内容翻译为目标语言
-  - 提示词: 你是一个专业的翻译助手。用户发送内容后，将其翻译为{目标语言}。保持原意，语句通顺自然。
+  - 提示词: 你是专业翻译助手。将内容翻译为{目标语言}。
   - 变量: 目标语言
 ```
 
@@ -382,7 +245,7 @@ Create a block with `#skill` tag and child blocks defining its properties:
 #skill 任务搜索
   - 类型: tools
   - 描述: 只使用任务相关工具
-  - 工具: searchTasks, queryBlocksByTag, searchBlocksByTag
+  - 工具: searchTasks, queryBlocksByTag
   - 提示词: 专注于帮助用户查找和管理任务
 ```
 
@@ -395,20 +258,20 @@ Create a block with `#skill` tag and child blocks defining its properties:
 
 ### Skill Properties
 
-| Property         | Required        | Description                    |
-| ---------------- | --------------- | ------------------------------ |
-| 类型/Type        | Yes             | `prompt` or `tools`            |
-| 描述/Description | No              | Shown in picker UI             |
-| 提示词/Prompt    | No              | Additional system prompt       |
-| 工具/Tools       | No (tools type) | Comma-separated tool names     |
-| 变量/Variables   | No              | Comma-separated variable names |
+| Property         | Required | Description                    |
+| ---------------- | -------- | ------------------------------ |
+| 类型/Type        | Yes      | `prompt` or `tools`            |
+| 描述/Description | No       | Shown in picker UI             |
+| 提示词/Prompt    | No       | Additional system prompt       |
+| 工具/Tools       | No       | Comma-separated tool names     |
+| 变量/Variables   | No       | Comma-separated variable names |
 
 ### Using Skills
 
 1. Type `/` in chat input (at line start or after space)
-2. Select a skill from the picker
+2. Select skill from picker
 3. Skill chip appears above input
-4. Click X to deactivate skill
+4. Click X to deactivate
 
 ### Architecture
 

@@ -4,13 +4,15 @@
  * Renders individual chat messages with:
  * - Markdown content rendering
  * - Tool call status indicators (semantic, animated)
- * - Action bar (copy, regenerate)
+ * - Action bar (copy, regenerate, extract memory)
  *
  * Gemini UX Review: Tool calls now use inline status flow instead of technical cards
  */
 
 import MarkdownMessage from "../components/MarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
+import ExtractMemoryButton from "./ExtractMemoryButton";
+import type { ExtractedMemory } from "../services/memory-extraction";
 import {
   messageRowStyle,
   messageBubbleStyle,
@@ -37,6 +39,10 @@ interface MessageItemProps {
   onRegenerate?: () => void;
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
+  // Conversation context for memory extraction (all messages up to this point)
+  conversationContext?: string;
+  // Callback when memories are extracted from this message
+  onExtractMemory?: (memories: ExtractedMemory[]) => void;
 }
 
 /**
@@ -90,10 +96,17 @@ export default function MessageItem({
   isStreaming,
   onRegenerate,
   toolResults,
+  conversationContext,
+  onExtractMemory,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const [isExtractDropdownOpen, setIsExtractDropdownOpen] = useState(false);
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
+  const isAssistant = message.role === "assistant";
+
+  // Keep action bar visible when dropdown is open
+  const showActionBar = isHovered || isExtractDropdownOpen;
 
   const handleCopy = useCallback(() => {
     if (message.content) {
@@ -161,8 +174,8 @@ export default function MessageItem({
         {
           style: {
             ...actionBarStyle,
-            opacity: isHovered ? 1 : 0,
-            pointerEvents: isHovered ? "auto" : "none",
+            opacity: showActionBar ? 1 : 0,
+            pointerEvents: showActionBar ? "auto" : "none",
           },
         },
         // Copy Button
@@ -175,6 +188,17 @@ export default function MessageItem({
           },
           createElement("i", { className: "ti ti-copy" })
         ),
+        // Extract Memory Button (Only for AI messages with content)
+        isAssistant &&
+          message.content &&
+          conversationContext &&
+          onExtractMemory &&
+          !isStreaming &&
+          createElement(ExtractMemoryButton, {
+            conversationContext,
+            onExtracted: onExtractMemory,
+            onDropdownVisibilityChange: setIsExtractDropdownOpen,
+          }),
         // Regenerate Button (Only for last AI message)
         !isUser &&
           isLastAiMessage &&

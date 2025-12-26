@@ -65,8 +65,9 @@
 - `src/services/ai-tools.ts` - 支持按 Skill 过滤工具 (`filterToolsBySkill`)
 - `src/utils/text-utils.ts` - 修复 `safeText` 支持字符串类型的 content
 
-## Implementation Status (Phase 1 完成)
+## Implementation Status
 
+### Phase 1: 用户主动选择 ✅
 - [x] `skill-store.ts` - 类型定义与状态管理
 - [x] `skill-service.ts` - Skill 加载和解析服务
 - [x] `SkillPicker.tsx` - Skill 选择器 UI
@@ -75,8 +76,57 @@
 - [x] `AiChatPanel.tsx` - 消息发送集成
 - [x] `ai-tools.ts` - `filterToolsBySkill()` 工具过滤
 
-**待解决问题**:
-- `get-block-tree` 返回的数据结构需进一步调试（tags/properties 读取）
+### Phase 2: 变量支持（计划中）
+- [ ] 变量声明解析
+- [ ] 变量填写弹窗
+- [ ] 变量替换
+
+### Phase 3: AI 动态发现与调用（核心目标）⭐
+
+**愿景**：AI 能够根据用户意图自动发现并使用相关 Skill，无需用户手动选择。
+
+**场景示例**：
+- 用户："翻译下这个内容" → AI 自动搜索 `#skill`，找到翻译相关的 prompt skill，应用后进行翻译
+- 用户："把这个写入到笔记里" → AI 自动搜索 `#skill`，找到写入相关的 tool skill，调用相应工具
+
+**核心功能**：
+1. **`searchSkills` 工具** - AI 可搜索可用的 Skills
+   ```typescript
+   searchSkills({ query?: string, type?: "prompt" | "tools" })
+   // 返回: [{ id, name, description, type }]
+   ```
+
+2. **`getSkillDetails` 工具** - AI 获取 Skill 完整内容
+   ```typescript
+   getSkillDetails({ skillId: number })
+   // 返回: { id, name, description, type, prompt, tools }
+   ```
+
+3. **`useSkillPrompt` 工具** - AI 动态应用 Skill 指令
+   ```typescript
+   useSkillPrompt({ skillId: number })
+   // 效果: 将 Skill 的 prompt 注入到当前对话上下文
+   ```
+
+4. **精简 System Prompt** - 只需告诉 AI：
+   > "你可以使用 searchSkills 搜索用户定义的技能，根据用户意图自动选择合适的技能来完成任务。"
+
+5. **自动初始化预置 Skills** ✨
+   - 首次使用插件时，自动检查笔记库是否存在 `#skill` 标签的块
+   - 如果没有，自动创建 "AI Skills" 页面并生成预置 Skills
+   - 预置 Skills 包含：翻译助手、内容总结、写入笔记、搜索笔记等
+   - 用户可随时修改、删除、添加自定义 Skills
+
+**设计原则**：
+- Skills 成为 AI 的"知识库"，AI 按需查阅
+- System Prompt 极简化，核心规则 + Skill 发现提示
+- 用户定义的 Skills 是 AI 能力的扩展点
+- 预置 Skills 降低使用门槛，展示系统能力
+
+### Phase 4: 体验优化（计划中）
+- [ ] 消息气泡显示使用的 Skill
+- [ ] Skill 使用统计
+- [ ] Skill 推荐
 
 ## Impact
 

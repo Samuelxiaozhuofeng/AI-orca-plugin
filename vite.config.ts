@@ -20,6 +20,9 @@ export default defineConfig(({ command }) => {
       },
       rollupOptions: {
         external: ["react", "valtio"],
+        output: {
+          inlineDynamicImports: true,
+        },
       },
     },
     plugins: [react(), externalGlobals({ react: "React", valtio: "Valtio" })],

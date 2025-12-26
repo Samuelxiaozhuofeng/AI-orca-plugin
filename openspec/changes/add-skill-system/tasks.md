@@ -131,22 +131,110 @@
 
 ---
 
-## Phase 3: V1.2 Polish (体验优化)
+## Phase 3: V2 AI Dynamic Discovery (AI 动态发现与调用) ⭐
 
-### 3.1 消息气泡标记
-- [ ] 3.1.1 在 assistant 消息末尾添加 Skill 标记
+**核心目标**：让 AI 能够根据用户意图自动发现并使用相关 Skill，无需用户手动选择。
+
+### 3.1 新增 AI 工具 - searchSkills
+- [x] 3.1.1 在 `src/services/ai-tools.ts` 添加 `searchSkills` 工具定义
+  - 参数: `query?: string`, `type?: "prompt" | "tools"`
+  - 返回: `{ skills: SkillMeta[], total: number }`
+- [x] 3.1.2 实现 `executeSearchSkills()` 函数
+  - 调用 `ensureSkillsLoaded()` 确保缓存
+  - 根据 query 过滤 skill.name 和 skill.description
+  - 根据 type 过滤 skill.type
+- [x] 3.1.3 注册到 TOOLS 数组和 executeTool switch
+
+### 3.2 新增 AI 工具 - getSkillDetails
+- [x] 3.2.1 在 `src/services/ai-tools.ts` 添加 `getSkillDetails` 工具定义
+  - 参数: `skillId: number` (required)
+  - 返回: 完整的 Skill 对象（含 prompt, tools, variables）
+- [x] 3.2.2 实现 `executeGetSkillDetails()` 函数
+  - 从缓存查找 skill by id
+  - 未找到返回错误信息
+- [x] 3.2.3 注册到 TOOLS 数组和 executeTool switch
+
+### 3.3 新增 AI 工具 - applySkillPrompt（可选）
+- [ ] 3.3.1 在 `src/services/ai-tools.ts` 添加 `applySkillPrompt` 工具定义
+  - 参数: `skillId: number`, `variables?: Record<string, string>`
+  - 返回: `{ success, skillName, appliedPrompt }`
+- [ ] 3.3.2 实现 `executeApplySkillPrompt()` 函数
+  - 查找 skill，替换变量，返回最终 prompt
+  - 复用 `replaceVariables()` 函数
+- [ ] 3.3.3 注册到 TOOLS 数组和 executeTool switch
+
+**注意**：`applySkillPrompt` 是可选的，因为 AI 可以直接从 `getSkillDetails` 获取 prompt 并自行应用。
+
+### 3.4 精简 System Prompt
+- [ ] 3.4.1 创建 `src/constants/system-prompts.ts`
+  - V1_SYSTEM_PROMPT: 当前完整版本
+  - V2_SYSTEM_PROMPT: 精简版本 + Skill 发现提示
+- [ ] 3.4.2 在设置中添加 System Prompt 版本选项
+  - 允许用户选择 V1（完整）或 V2（精简 + Skill 发现）
+- [ ] 3.4.3 修改 `handleSend()` 根据设置选择 prompt 版本
+
+### 3.5 测试与验证
+- [ ] 3.5.1 手动测试：AI 搜索 Skills
+  - 创建测试 Skill（翻译助手）
+  - 发送"翻译这段内容"
+  - 验证 AI 调用 searchSkills
+- [ ] 3.5.2 手动测试：AI 获取并应用 Skill
+  - 验证 AI 调用 getSkillDetails
+  - 验证 AI 按 Skill 指令完成任务
+- [ ] 3.5.3 性能测试：Skill 缓存
+  - 验证首次加载后缓存生效
+  - 验证多次调用不重复请求
+
+### 3.6 文档更新
+- [ ] 3.6.1 更新 CLAUDE.md
+  - 添加 searchSkills, getSkillDetails 工具说明
+  - 添加 V2 模式使用说明
+- [ ] 3.6.2 更新 README
+  - 添加 Skill 系统使用指南
+
+### 3.7 自动初始化预置 Skills ✨
+- [x] 3.7.1 创建 `src/constants/default-skills.ts`
+  - 定义 `DefaultSkillDefinition` 接口
+  - 定义 `DEFAULT_SKILLS` 常量数组
+  - 包含 5 个预置技能：翻译助手、内容总结、写作润色、笔记整理、知识检索
+- [x] 3.7.2 创建 `src/services/skill-initializer.ts`
+  - 实现 `ensureDefaultSkills()` 检测函数
+  - 实现 `createDefaultSkillsPage()` 创建函数
+  - 使用 createBlock + insertTag API 创建 skill 块结构
+- [x] 3.7.3 集成到插件加载流程
+  - 在 `src/main.ts` 的 `load()` 函数中调用 `ensureDefaultSkills()`
+  - 或在 `AiChatPanel` 首次渲染时调用
+- [x] 3.7.4 添加用户通知
+  - 创建成功后显示 `orca.notify("info", "已为您创建 AI 技能模板")`
+  - 创建失败时显示错误提示但不阻止使用
+- [ ] 3.7.5 扩展设置选项
+  - 添加 `autoCreateDefaultSkills: boolean` 设置（默认 true）
+  - 添加 `defaultSkillsPageName: string` 设置（默认 "AI Skills"）
+  - 添加"重置默认技能"按钮（可选）
+
+---
+
+## Phase 4: V2.1 Polish (体验优化)
+
+### 4.1 消息气泡标记
+- [ ] 4.1.1 在 assistant 消息末尾添加 Skill 标记
   - 格式: `[技能: XX]`
   - 可选开关
 
-### 3.2 刷新机制
-- [ ] 3.2.1 添加"刷新 Skill 列表"按钮
+### 4.2 刷新机制
+- [ ] 4.2.1 添加"刷新 Skill 列表"按钮
   - 在 SkillPicker 顶部
   - 点击重新加载
 
-### 3.3 使用频率排序
-- [ ] 3.3.1 记录 Skill 使用次数
+### 4.3 使用频率排序
+- [ ] 4.3.1 记录 Skill 使用次数
   - 存储在 localStorage
   - 按使用频率排序
+
+### 4.4 Skill 推荐
+- [ ] 4.4.1 根据对话内容推荐相关 Skill
+  - 分析用户消息关键词
+  - 在 SkillPicker 中高亮推荐
 
 ---
 
@@ -160,31 +248,57 @@
   - 测试无效 Skill 跳过
 
 ### Integration Tests
-- [ ] T2 手动测试清单
+- [ ] T2 手动测试清单 (Phase 1)
   - 创建测试 Skill（两种类型）
   - `/` 触发菜单
   - 选择 Skill → 显示 Chip
   - 发送消息 → 验证 prompt 注入
   - 工具型 → 验证工具过滤
 
+- [ ] T3 手动测试清单 (Phase 3 - AI 动态发现)
+  - 创建翻译 Skill
+  - 发送"翻译这段内容"（不手动选择 Skill）
+  - 验证 AI 调用 searchSkills
+  - 验证 AI 调用 getSkillDetails
+  - 验证 AI 按 Skill 指令完成翻译
+
 ---
 
 ## Dependencies
 
 ```
+Phase 1 (用户选择): 已完成 ✅
 1.1 → 1.2 → 1.3, 1.4 (可并行)
 1.3, 1.4 → 1.5
 1.2, 1.5 → 1.6
 1.2 → 1.7
 
+Phase 2 (变量支持):
 2.1 → 2.2 → 2.3, 2.4
+
+Phase 3 (AI 动态发现): ⭐ 核心目标
+3.1, 3.2 可并行
+3.1, 3.2 → 3.3 (可选)
+3.1, 3.2 → 3.4
+3.4 → 3.5
+3.7 可独立进行（自动初始化）
 
 Phase 2 depends on Phase 1 完成
 Phase 3 depends on Phase 1 完成（可与 Phase 2 并行）
+Phase 4 depends on Phase 1 完成（可与 Phase 2, 3 并行）
 ```
 
 ## Parallelizable Work
 
-- 1.3 (SkillPicker) 和 1.4 (SkillChip) 可并行开发
-- Phase 2 和 Phase 3 可并行开发（都基于 Phase 1）
-- T1 和 T2 可并行进行
+- Phase 2, 3, 4 可并行开发（都基于 Phase 1）
+- 3.1 (searchSkills) 和 3.2 (getSkillDetails) 可并行开发
+- 3.7 (自动初始化) 可独立开发，不依赖其他 Phase 3 任务
+- T1, T2, T3 可并行进行
+
+## Priority Order (推荐实现顺序)
+
+1. **Phase 3.7** - 自动初始化预置 Skills（立即可见的用户价值）
+2. **Phase 3.1-3.2** - searchSkills + getSkillDetails（AI 动态发现核心）
+3. **Phase 3.4** - 精简 System Prompt
+4. **Phase 2** - 变量支持（增强 Skill 灵活性）
+5. **Phase 4** - 体验优化（锦上添花）

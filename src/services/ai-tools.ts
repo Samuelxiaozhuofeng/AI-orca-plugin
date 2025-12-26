@@ -5,7 +5,8 @@
 
 import type { OpenAITool } from "./openai-client";
 import type { Skill } from "../store/skill-store";
-import { normalizeToolName } from "./skill-service";
+import { normalizeToolName, ensureSkillsLoaded } from "./skill-service";
+import { skillStore } from "../store/skill-store";
 import {
   searchBlocksByTag,
   searchBlocksByText,
@@ -415,6 +416,45 @@ export const TOOLS: OpenAITool[] = [
           },
         },
         required: ["blockId", "tagName"],
+      },
+    },
+  },
+  // ========== Skill System Tools ==========
+  {
+    type: "function",
+    function: {
+      name: "searchSkills",
+      description: "搜索用户定义的技能（#skill 标签）。当用户请求涉及特定领域（如翻译、写作、数据分析）时，可搜索是否有相关技能可用。找到相关技能后，使用 getSkillDetails 获取完整内容。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "搜索关键词，匹配技能名称和描述（可选）",
+          },
+          type: {
+            type: "string",
+            enum: ["prompt", "tools"],
+            description: "筛选技能类型：prompt（提示词型）或 tools（工具型）（可选）",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getSkillDetails",
+      description: "获取指定技能的完整内容，包括提示词、工具列表等。使用 searchSkills 返回的技能 ID 调用此工具。获取详情后，你应该按照技能定义的指令行事。",
+      parameters: {
+        type: "object",
+        properties: {
+          skillId: {
+            type: "number",
+            description: "技能 ID（从 searchSkills 结果获取）",
+          },
+        },
+        required: ["skillId"],
       },
     },
   },
@@ -1294,6 +1334,108 @@ Supported parameter names:
       } catch (error: any) {
         console.error("[Tool] Failed to insert tag:", error);
         return `Error: Failed to insert tag: ${error?.message || error}`;
+      }
+    } else if (toolName === "searchSkills") {
+      // Search for user-defined skills
+      const query = typeof args.query === "string" ? args.query.toLowerCase().trim() : "";
+      const typeFilter = args.type === "prompt" || args.type === "tools" ? args.type : undefined;
+
+      console.log("[Tool] searchSkills:", { query, typeFilter });
+
+      try {
+        // 确保 Skills 已加载
+        await ensureSkillsLoaded();
+
+        // 从缓存中获取 Skills
+        let skills = skillStore.skills;
+
+        // 根据 query 过滤（匹配名称和描述）
+        if (query) {
+          skills = skills.filter((s) => {
+            const name = s.name.toLowerCase();
+            const desc = (s.description || "").toLowerCase();
+            return name.includes(query) || desc.includes(query);
+          });
+        }
+
+        // 根据 type 过滤
+        if (typeFilter) {
+          skills = skills.filter((s) => s.type === typeFilter);
+        }
+
+        if (skills.length === 0) {
+          const filterDesc = typeFilter ? ` (type: ${typeFilter})` : "";
+          const queryDesc = query ? ` matching "${query}"` : "";
+          return `No skills found${queryDesc}${filterDesc}. You can create skills by adding blocks with #skill tag in your notes.`;
+        }
+
+        // 返回技能列表（简化格式）
+        const skillList = skills.map((s) => ({
+          id: s.id,
+          name: s.name,
+          description: s.description || "(无描述)",
+          type: s.type,
+        }));
+
+        return JSON.stringify({
+          skills: skillList,
+          total: skillList.length,
+          hint: "使用 getSkillDetails({ skillId: <id> }) 获取技能的完整内容",
+        }, null, 2);
+      } catch (error: any) {
+        console.error("[Tool] Failed to search skills:", error);
+        return `Error: Failed to search skills: ${error?.message || error}`;
+      }
+    } else if (toolName === "getSkillDetails") {
+      // Get full skill details by ID
+      const skillId = typeof args.skillId === "number" ? args.skillId :
+                     (typeof args.skill_id === "number" ? args.skill_id :
+                     (typeof args.id === "number" ? args.id : undefined));
+
+      if (skillId === undefined) {
+        console.error("[Tool] Missing skillId parameter. Args:", args);
+        return "Error: Missing skillId parameter. Please specify the skill ID from searchSkills results.";
+      }
+
+      console.log("[Tool] getSkillDetails:", { skillId });
+
+      try {
+        // 确保 Skills 已加载
+        await ensureSkillsLoaded();
+
+        // 从缓存中查找 Skill
+        const skill = skillStore.skills.find((s) => s.id === skillId);
+
+        if (!skill) {
+          return `Error: Skill with ID ${skillId} not found. Use searchSkills to find available skills.`;
+        }
+
+        // 返回完整的 Skill 信息
+        const result: Record<string, any> = {
+          id: skill.id,
+          name: skill.name,
+          description: skill.description || "(无描述)",
+          type: skill.type,
+          prompt: skill.prompt || "(无提示词)",
+        };
+
+        if (skill.type === "tools" && skill.tools && skill.tools.length > 0) {
+          result.tools = skill.tools;
+        }
+
+        if (skill.variables && skill.variables.length > 0) {
+          result.variables = skill.variables;
+        }
+
+        // 添加使用说明
+        result.usage = skill.type === "prompt"
+          ? "请按照上述 prompt 指令完成用户的请求"
+          : `请使用上述列出的工具完成用户的请求: ${skill.tools?.join(", ") || "无指定工具"}`;
+
+        return JSON.stringify(result, null, 2);
+      } catch (error: any) {
+        console.error("[Tool] Failed to get skill details:", error);
+        return `Error: Failed to get skill details: ${error?.message || error}`;
       }
     } else {
       console.error("[Tool] Unknown tool:", toolName);

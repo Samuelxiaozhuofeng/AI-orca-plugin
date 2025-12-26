@@ -1,17 +1,17 @@
 /**
  * ChatInput - 整合输入区域组件
- * 包含: Context Chips + Skill Chip + @ 触发按钮 + / 触发按钮 + 输入框 + 发送按钮 + 模型选择器
+ * 包含: Context Chips + @ 触发按钮 + 输入框 + 发送按钮 + 模型选择器 + Skill选择器
  */
 
 import type { DbId } from "../orca.d.ts";
 import type { AiModelOption } from "../settings/ai-chat-settings";
+import type { Skill } from "../store/skill-store";
 import { contextStore } from "../store/context-store";
-import { skillStore, type Skill } from "../store/skill-store";
+import { skillStore, clearSkill } from "../store/skill-store";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
 import SkillPicker from "./SkillPicker";
-import SkillChip from "./SkillChip";
-import { ModelSelectorButton } from "./chat-input";
+import { ModelSelectorButton, InjectionModeSelector } from "./chat-input";
 import {
   containerStyle,
   inputWrapperStyle,
@@ -127,8 +127,6 @@ export default function ChatInput({
       }
       // / 触发 skill picker（仅当在行首或空格后输入 /）
       if (e.key === "/") {
-        // 检查是否在 IME 输入法组合状态
-        if (e.nativeEvent?.isComposing) return;
         const value = e.target.value || "";
         const pos = e.target.selectionStart || 0;
         const charBefore = pos > 0 ? value[pos - 1] : "";
@@ -151,14 +149,13 @@ export default function ChatInput({
 
   const handleSkillPickerClose = useCallback(() => {
     setSkillPickerOpen(false);
-    // Restore focus to textarea after picker closes
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
   }, []);
 
   const handleSkillSelect = useCallback((skill: Skill) => {
-    // Skill 已通过 setActiveSkill 设置，这里只需关闭 picker
+    // Skill 已在 SkillPicker 中通过 setActiveSkill 设置
     setSkillPickerOpen(false);
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -169,15 +166,39 @@ export default function ChatInput({
     "div",
     { style: inputContainerStyle },
 
-    // Context Chips + Skill Chip 区域
-    createElement(
+    // Active Skill 指示器
+    skillSnap.activeSkill && createElement(
       "div",
-      { style: { display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" } },
-      // Context Chips
-      contextSnap.selected.length > 0 && createElement(ContextChips, { items: contextSnap.selected }),
-      // Skill Chip
-      skillSnap.activeSkill && createElement(SkillChip, { skill: skillSnap.activeSkill as Skill })
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "8px 12px",
+          marginBottom: 8,
+          background: "var(--orca-color-primary-1, #e3f2fd)",
+          borderRadius: 8,
+          fontSize: 13,
+        },
+      },
+      createElement("i", { 
+        className: skillSnap.activeSkill.type === "tools" ? "ti ti-tool" : "ti ti-sparkles",
+        style: { color: "var(--orca-color-primary)" },
+      }),
+      createElement("span", { style: { flex: 1 } }, `技能: ${skillSnap.activeSkill.name}`),
+      createElement(
+        Button,
+        {
+          variant: "plain",
+          onClick: () => clearSkill(),
+          style: { padding: 2 },
+        },
+        createElement("i", { className: "ti ti-x", style: { fontSize: 14 } })
+      )
     ),
+
+    // Context Chips 区域
+    createElement(ContextChips, { items: contextSnap.selected }),
 
     // Context Picker 悬浮菜单
     createElement(ContextPicker, {
@@ -219,11 +240,10 @@ export default function ChatInput({
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         
-        // Left Tools: @ Button + / Skill Button + Model Selector
+        // Left Tools: @ Button + / Skill Button + Model Selector + Injection Mode Selector
         createElement(
           "div",
           { style: { display: "flex", gap: 8, alignItems: "center" } },
-          // @ Button for Context
           createElement(
             "div",
             {
@@ -241,7 +261,6 @@ export default function ChatInput({
               createElement("i", { className: "ti ti-at" })
             )
           ),
-          // / Button for Skill
           createElement(
             "div",
             {
@@ -264,7 +283,8 @@ export default function ChatInput({
             selectedModel,
             onModelChange,
             onAddModel,
-          })
+          }),
+          createElement(InjectionModeSelector, null)
         ),
 
         // Right Tool: Send/Stop Button
