@@ -132,7 +132,8 @@ export function flattenBlockTreeToLines(
   const text = safeText(node);
   if (text) {
     // Include block ID in the line so AI can identify it without separate search
-    out.push(`${"  ".repeat(depth)}- ${text} (block #${node.id})`);
+    // Use standard markdown link format for block references
+    out.push(`${"  ".repeat(depth)}- ${text} [${node.id}](orca-block:${node.id})`);
     state.blocks += 1;
   }
 

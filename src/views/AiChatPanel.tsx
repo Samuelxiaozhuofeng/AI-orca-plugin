@@ -182,7 +182,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       {
         id: nowId(),
         role: "assistant",
-        content: "New chat started. How can I help you?",
+        content: "New conversation started. How can I help?",
         createdAt: Date.now(),
         localOnly: true,
       },
@@ -374,9 +374,26 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
 
           // If JSON parsing failed, return error to model
-          const result = parseError
-            ? `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`
-            : await executeTool(toolName, args);
+          let result: string;
+          if (parseError) {
+             result = `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`;
+          } else {
+             // Execute tool with timeout protection
+             const TOOL_TIMEOUT_MS = 60000; // 60s timeout for tool execution
+             try {
+               const timeoutPromise = new Promise<string>((_, reject) => {
+                 setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+               });
+               
+               result = await Promise.race([
+                 executeTool(toolName, args),
+                 timeoutPromise
+               ]);
+             } catch (err: any) {
+               console.error(`[AI] [Round ${toolRound}] Tool execution error/timeout:`, err);
+               result = `Error: ${err.message || "Tool execution failed"}`;
+             }
+          }
 
           console.log(`[AI] [Round ${toolRound}] Tool result: ${result.substring(0, 100)}${result.length > 100 ? "..." : ""}`);
 

@@ -143,11 +143,16 @@ function ModelListPanel({
       value: modelFilter,
       onChange: (e: any) => onFilterChange(e.target.value),
       pre: createElement("i", { className: "ti ti-search" }),
+      style: { width: "100%", maxWidth: "100%", boxSizing: "border-box" },
     }),
     createElement(
       "div",
       { style: modelListScrollStyle },
-      createElement(Menu as any, { keyboardNav: true, navDirection: "vertical" }, ...menuItems)
+      createElement(Menu as any, { 
+        keyboardNav: true, 
+        navDirection: "vertical", 
+        style: { width: "100%", borderRadius: 0, background: "transparent" } 
+      }, ...menuItems)
     )
   );
 }
@@ -181,6 +186,7 @@ function AddModelPanel({
         }
       },
       pre: createElement("i", { className: "ti ti-plus" }),
+      style: { width: "100%", maxWidth: "100%", boxSizing: "border-box", overflow: "hidden", minWidth: 0 },
     }),
     createElement(
       Button,
@@ -188,7 +194,7 @@ function AddModelPanel({
         variant: "solid",
         disabled: isAdding || !modelDraft.trim(),
         onClick: onAdd,
-        style: { marginTop: 8, width: "100%" },
+        style: { marginTop: 8, width: "100%", boxSizing: "border-box" },
       },
       isAdding ? "Adding..." : "Add"
     ),

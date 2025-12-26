@@ -128,10 +128,12 @@ function parseSingleFilter(expr: string): QueryPropertyFilterInput | null {
     return { name, op: opRaw };
   }
 
-  const includesMatch = normalized.match(/^(.+?)\s+(includes|not includes)\s+(.+)$/i);
+  const includesMatch = normalized.match(/^(.+?)\s+(includes|not includes|contains|not contains)\s+(.+)$/i);
   if (includesMatch) {
     const name = includesMatch[1].trim();
-    const opRaw = includesMatch[2].toLowerCase();
+    let opRaw = includesMatch[2].toLowerCase();
+    if (opRaw === "contains") opRaw = "includes";
+    if (opRaw === "not contains") opRaw = "not includes";
     const rawValue = includesMatch[3];
     if (!name || !isQueryOperatorString(opRaw)) return null;
 
@@ -139,15 +141,16 @@ function parseSingleFilter(expr: string): QueryPropertyFilterInput | null {
     return { name, op: opRaw, value: inferred.value, type: inferred.type };
   }
 
-  const compareMatch = normalized.match(/^(.+?)\s*(==|!=|>=|<=|>|<|=)\s*(.+)$/);
+  const compareMatch = normalized.match(/^(.+?)\s*(==|!=|>=|<=|>|<|=|:)\s*(.+)$/);
   if (compareMatch) {
     const name = compareMatch[1].trim();
-    const opRaw = compareMatch[2] === "=" ? "==" : compareMatch[2];
+    let opRaw = compareMatch[2];
+    if (opRaw === "=" || opRaw === ":") opRaw = "==";
     const rawValue = compareMatch[3];
     if (!name || !isQueryOperatorString(opRaw)) return null;
 
     const inferred = tryInferTypedValue(rawValue);
-    return { name, op: opRaw, value: inferred.value, type: inferred.type };
+    return { name, op: opRaw as QueryOperatorString, value: inferred.value, type: inferred.type };
   }
 
   return null;

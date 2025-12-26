@@ -14,6 +14,8 @@ export const panelContainerStyle: React.CSSProperties = {
   flexDirection: "column",
   background: "var(--orca-color-bg-1)",
   color: "var(--orca-color-text-1)",
+  animation: "panelEnter 240ms ease-out",
+  transformOrigin: "left center",
 };
 
 export const headerStyle: React.CSSProperties = {
@@ -21,7 +23,7 @@ export const headerStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  borderBottom: "1px solid var(--orca-color-border)",
+  borderBottom: "none",
   background: "var(--orca-color-bg-1)",
   zIndex: 10,
 };
@@ -29,7 +31,7 @@ export const headerStyle: React.CSSProperties = {
 export const headerTitleStyle: React.CSSProperties = {
   fontWeight: 600,
   flex: 1,
-  fontFamily: "var(--chat-font-sans)",
+  fontFamily: "var(--orca-fontfamily-ui)",
 };
 
 export const messageListStyle: React.CSSProperties = {
@@ -58,8 +60,8 @@ export const messageBubbleStyle = (role: string): React.CSSProperties => ({
   maxWidth: role === "user" ? "75%" : "90%",
   padding: role === "user" ? "12px 16px" : "16px 20px",
   borderRadius: role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-  background: role === "user" ? "var(--orca-color-primary, #007bff)" : "var(--orca-color-bg-2)",
-  color: role === "user" ? "var(--orca-color-text-inverse, #fff)" : "var(--orca-color-text-1)",
+  background: role === "user" ? "var(--orca-color-primary)" : "var(--orca-color-bg-2)",
+  color: role === "user" ? "var(--orca-color-text-inverse)" : "var(--orca-color-text-1)",
   border: role === "assistant" ? "1px solid var(--orca-color-border)" : "none",
   boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
   position: "relative",
@@ -69,7 +71,7 @@ export const cursorStyle: React.CSSProperties = {
   display: "inline-block",
   width: "2px",
   height: "1.2em",
-  background: "var(--orca-color-primary, #007bff)",
+  background: "var(--orca-color-primary)",
   marginLeft: "2px",
   verticalAlign: "text-bottom",
   animation: "blink 1s step-end infinite",
@@ -82,8 +84,8 @@ export const toolCallStyle: React.CSSProperties = {
   borderRadius: 6,
   fontSize: "0.85em",
   opacity: 0.9,
-  fontFamily: "monospace",
-  borderLeft: "3px solid var(--orca-color-primary, #007bff)",
+  fontFamily: "var(--orca-fontfamily-code)",
+  borderLeft: "3px solid var(--orca-color-primary)",
 };
 
 export const loadingContainerStyle: React.CSSProperties = {
@@ -132,14 +134,14 @@ export const codeBlockPreStyle: React.CSSProperties = {
   padding: "12px",
   overflowX: "auto",
   userSelect: "text", // 允许选择/复制 Markdown 内容
-  fontFamily: '"JetBrains Mono", Consolas, monospace',
+  fontFamily: 'var(--orca-fontfamily-code)',
   fontSize: "13px",
   lineHeight: "1.5",
   color: "var(--orca-color-text-1)",
 };
 
 export const inlineCodeStyle: React.CSSProperties = {
-  fontFamily: '"JetBrains Mono", Consolas, monospace',
+  fontFamily: 'var(--orca-fontfamily-code)',
   background: "var(--orca-color-bg-3)",
   padding: "2px 6px",
   borderRadius: "4px",
@@ -150,10 +152,10 @@ export const inlineCodeStyle: React.CSSProperties = {
 
 export const markdownContainerStyle = (role: string): React.CSSProperties => ({
   fontFamily: role === "assistant"
-    ? '"Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif'
-    : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    ? 'var(--orca-fontfamily-editor)'
+    : 'var(--orca-fontfamily-ui)',
   fontSize: "16px",
-  color: role === "user" ? "var(--orca-color-text-inverse, #fff)" : "var(--orca-color-text-1)",
+  color: role === "user" ? "var(--orca-color-text-inverse)" : "var(--orca-color-text-1)",
   lineHeight: "1.6",
   userSelect: "text", // 允许选择/复制 Markdown 内容
 });
@@ -176,7 +178,7 @@ export const headingStyle = (level: number): React.CSSProperties => ({
   fontWeight: "bold",
   fontSize: level === 1 ? "24px" : level === 2 ? "20px" : "18px",
   lineHeight: "1.4",
-  borderLeft: "4px solid var(--orca-color-primary, #007bff)",
+  borderLeft: "4px solid var(--orca-color-primary)",
   paddingLeft: "12px",
   background: "var(--orca-color-bg-2)",
   borderRadius: "0 8px 8px 0",
@@ -184,7 +186,7 @@ export const headingStyle = (level: number): React.CSSProperties => ({
 });
 
 export const linkStyle: React.CSSProperties = {
-  color: "var(--orca-color-primary, #007bff)",
+  color: "var(--orca-color-primary)",
   textDecoration: "underline",
   cursor: "pointer",
 };
@@ -202,7 +204,7 @@ export const blockLinkContainerStyle: React.CSSProperties = {
 };
 
 export const blockLinkTextStyle: React.CSSProperties = {
-  color: "var(--orca-color-primary, #007bff)",
+  color: "var(--orca-color-primary)",
   fontWeight: 500,
   flex: 1,
 };
@@ -214,8 +216,8 @@ export const blockLinkArrowStyle: React.CSSProperties = {
   width: "18px",
   height: "18px",
   borderRadius: "3px",
-  background: "var(--orca-color-primary, #007bff)",
-  color: "var(--orca-color-text-inverse, #fff)",
+  background: "var(--orca-color-primary)",
+  color: "var(--orca-color-text-inverse)",
   fontSize: "11px",
   flexShrink: 0,
   transition: "transform 0.2s ease",
@@ -223,7 +225,7 @@ export const blockLinkArrowStyle: React.CSSProperties = {
 
 export const boldStyle: React.CSSProperties = {
   fontWeight: "bold",
-  color: "var(--orca-color-primary, #007bff)",
+  color: "var(--orca-color-primary)",
   padding: "0 2px",
 };
 
@@ -307,7 +309,7 @@ export const toolHeaderStyle: React.CSSProperties = {
 export const toolBodyStyle: React.CSSProperties = {
   padding: "12px",
   borderTop: "1px solid var(--orca-color-border)",
-  fontFamily: "monospace",
+  fontFamily: "var(--orca-fontfamily-code)",
   whiteSpace: "pre-wrap",
   wordBreak: "break-all",
   maxHeight: "300px",
