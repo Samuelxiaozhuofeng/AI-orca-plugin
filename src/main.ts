@@ -3,6 +3,7 @@ import zhCN from "./translations/zhCN";
 import { registerAiChatSettingsSchema } from "./settings/ai-chat-settings";
 import { registerAiChatUI, unregisterAiChatUI } from "./ui/ai-chat-ui";
 import { ensureDefaultSkills } from "./services/skill-initializer";
+import { loadMemoryStore } from "./store/memory-store";
 
 let pluginName: string;
 
@@ -13,6 +14,9 @@ export async function load(_name: string) {
 
   await registerAiChatSettingsSchema(pluginName);
   registerAiChatUI(pluginName);
+
+  // Load persisted memory data
+  await loadMemoryStore();
 
   // 后台初始化预置 Skills（不阻塞插件加载）
   ensureDefaultSkills().catch((error) => {

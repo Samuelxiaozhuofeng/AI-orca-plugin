@@ -200,8 +200,7 @@ export default function InjectionModeSelector() {
               createElement(
                 "div",
                 { style: { flex: 1 } },
-                createElement("div", { style: menuItemLabelStyle }, user.name),
-                user.isDefault && createElement("div", { style: menuItemDescStyle }, "默认用户")
+                createElement("div", { style: menuItemLabelStyle }, user.name)
               ),
               isSelected &&
                 createElement("i", { 

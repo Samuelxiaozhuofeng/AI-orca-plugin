@@ -344,7 +344,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       let toolCalls: ToolCallInfo[] = [];
 
       // Get memory text for injection based on current injection mode
-      const memoryText = memoryStore.getMemoryText();
+      // Uses getFullMemoryText which combines portrait (higher priority) + unextracted memories
+      const memoryText = memoryStore.getFullMemoryText();
 
 	      const { standard: apiMessages, fallback: apiMessagesFallback } = buildConversationMessages({
 	        messages: conversation,
