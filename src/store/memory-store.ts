@@ -28,6 +28,7 @@ export interface UserProfile {
   name: string;
   emoji: string;
   isDefault?: boolean;
+  isSelf?: boolean;  // Whether this user represents "myself"
   createdAt: number;
 }
 
@@ -275,6 +276,21 @@ export function updateUserEmoji(id: string, emoji: string): boolean {
     ...updatedUsers[userIndex],
     emoji: emoji.trim(),
   };
+  memoryStoreState.users = updatedUsers;
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Set a user as "myself" (only one user can be marked as self)
+ * @param id - User ID to set as self, or null to clear
+ * @returns true if update succeeded
+ */
+export function setUserAsSelf(id: string | null): boolean {
+  const updatedUsers = memoryStoreState.users.map(u => ({
+    ...u,
+    isSelf: u.id === id,
+  }));
   memoryStoreState.users = updatedUsers;
   saveMemoryStore();
   return true;
@@ -1034,16 +1050,32 @@ export function getEnabledMemories(): MemoryItem[] {
 
 /**
  * Get enabled memories that are NOT extracted (for injection)
+ * Self user's memories are prioritized first
  * @returns Array of enabled, non-extracted memory items
  */
 export function getUnextractedMemories(): MemoryItem[] {
-  const { memories, activeUserId, injectionMode } = memoryStoreState;
+  const { memories, users, activeUserId, injectionMode } = memoryStoreState;
 
+  let filtered: MemoryItem[];
   if (injectionMode === 'ALL') {
-    return memories.filter(m => m.isEnabled && !m.isExtracted);
+    filtered = memories.filter(m => m.isEnabled && !m.isExtracted);
   } else {
-    return memories.filter(m => m.userId === activeUserId && m.isEnabled && !m.isExtracted);
+    filtered = memories.filter(m => m.userId === activeUserId && m.isEnabled && !m.isExtracted);
   }
+
+  // Sort: self user's memories first
+  const selfUser = users.find(u => u.isSelf);
+  if (selfUser) {
+    filtered.sort((a, b) => {
+      const aIsSelf = a.userId === selfUser.id;
+      const bIsSelf = b.userId === selfUser.id;
+      if (aIsSelf && !bIsSelf) return -1;
+      if (!aIsSelf && bIsSelf) return 1;
+      return 0;
+    });
+  }
+
+  return filtered;
 }
 
 /**
@@ -1063,7 +1095,8 @@ export function getMemoryText(): string {
     // ALL mode: prefix with user name
     return unextractedMemories.map(m => {
       const user = users.find(u => u.id === m.userId);
-      const userName = user?.name || '未知用户';
+      // Use "我" for self user, otherwise use user name
+      const userName = user?.isSelf ? '我' : (user?.name || '未知用户');
       return `- [${userName}]: ${m.content}`;
     }).join('\n');
   } else {
@@ -1074,24 +1107,38 @@ export function getMemoryText(): string {
 
 /**
  * Get formatted portrait text for injection into system prompt
+ * Self user's portrait is prioritized first
  * @returns Formatted portrait text string
  */
 export function getPortraitText(): string {
   const { users, portraits, activeUserId, injectionMode } = memoryStoreState;
   
-  const relevantPortraits = injectionMode === 'ALL' 
-    ? portraits 
+  let relevantPortraits = injectionMode === 'ALL' 
+    ? [...portraits] 
     : portraits.filter(p => p.userId === activeUserId);
 
   if (relevantPortraits.length === 0) {
     return '';
   }
 
+  // Sort: self user's portrait first
+  const selfUser = users.find(u => u.isSelf);
+  if (selfUser && injectionMode === 'ALL') {
+    relevantPortraits.sort((a, b) => {
+      const aIsSelf = a.userId === selfUser.id;
+      const bIsSelf = b.userId === selfUser.id;
+      if (aIsSelf && !bIsSelf) return -1;
+      if (!aIsSelf && bIsSelf) return 1;
+      return 0;
+    });
+  }
+
   const parts: string[] = [];
 
   for (const portrait of relevantPortraits) {
     const user = users.find(u => u.id === portrait.userId);
-    const userName = user?.name || '未知用户';
+    // Use "我" for self user, otherwise use user name
+    const userName = user?.isSelf ? '我' : (user?.name || '未知用户');
     
     const lines: string[] = [];
     
@@ -1241,6 +1288,7 @@ export const memoryStore = {
   createUser,
   updateUser,
   updateUserEmoji,
+  setUserAsSelf,
   deleteUser,
   setActiveUser,
   getActiveUser,

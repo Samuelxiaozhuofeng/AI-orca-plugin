@@ -851,6 +851,7 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         onEditUser: handleEditUser,
         onDeleteUser: handleDeleteUserClick,
         onAvatarClick: handleAvatarClick,
+        onSetAsSelf: (id: string | null) => memoryStore.setUserAsSelf(id),
       }),
       // User Portrait Card
       createElement(UserPortraitCard, {
