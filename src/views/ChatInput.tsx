@@ -8,7 +8,9 @@ import type { AiModelOption } from "../settings/ai-chat-settings";
 import { contextStore } from "../store/context-store";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
-import { ModelSelectorButton, InjectionModeSelector } from "./chat-input";
+import SkillPicker from "./SkillPicker";
+import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton } from "./chat-input";
+import { loadFromStorage } from "../store/chat-mode-store";
 import {
   textareaStyle,
   sendButtonStyle,
@@ -19,8 +21,9 @@ const React = window.React as unknown as {
   useRef: <T>(value: T) => { current: T };
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
+  useEffect: (effect: () => void | (() => void), deps?: any[]) => void;
 };
-const { createElement, useRef, useState, useCallback } = React;
+const { createElement, useRef, useState, useCallback, useEffect } = React;
 
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
@@ -79,6 +82,11 @@ export default function ChatInput({
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
+
+  // Load chat mode from storage on mount (Requirements: 5.2)
+  useEffect(() => {
+    loadFromStorage();
+  }, []);
 
   const canSend = text.trim().length > 0 && !disabled;
 
@@ -188,7 +196,8 @@ export default function ChatInput({
             onModelChange,
             onAddModel,
           }),
-          createElement(InjectionModeSelector, null)
+          createElement(InjectionModeSelector, null),
+          createElement(ModeSelectorButton, null)
         ),
 
         // Right Tool: Send/Stop Button

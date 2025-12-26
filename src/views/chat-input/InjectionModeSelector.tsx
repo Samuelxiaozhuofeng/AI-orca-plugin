@@ -25,15 +25,16 @@ const { Button, ContextMenu } = orca.components;
 // ============================================================================
 
 const selectorButtonStyle: React.CSSProperties = {
-  padding: "2px 10px",
+  padding: "4px",
   height: "24px",
-  fontSize: 12,
+  width: "24px",
+  fontSize: 14,
   color: "var(--orca-color-text-2)",
-  borderRadius: "8px",
-  background: "var(--orca-color-bg-3)",
+  borderRadius: "6px",
+  background: "transparent",
   display: "flex",
   alignItems: "center",
-  gap: 6,
+  justifyContent: "center",
 };
 
 const menuContainerStyle: React.CSSProperties = {
@@ -220,9 +221,7 @@ export default function InjectionModeSelector() {
           title: `记忆注入: ${displayLabel}`,
           style: selectorButtonStyle,
         },
-        createElement("i", { className: `ti ${displayIcon}` }),
-        createElement("span", null, displayLabel),
-        createElement("i", { className: "ti ti-chevron-up" })
+        createElement("i", { className: `ti ${displayIcon}` })
       )
   );
 }

@@ -4,6 +4,7 @@
  * Renders individual chat messages with:
  * - Markdown content rendering
  * - Tool call status indicators (semantic, animated)
+ * - Tool confirmation cards for Supervised mode
  * - Action bar (copy, regenerate, extract memory)
  *
  * Gemini UX Review: Tool calls now use inline status flow instead of technical cards
@@ -11,6 +12,7 @@
 
 import MarkdownMessage from "../components/MarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
+import ToolConfirmationCard from "./ToolConfirmationCard";
 import ExtractMemoryButton from "./ExtractMemoryButton";
 import type { ExtractedMemory } from "../services/memory-extraction";
 import {
@@ -22,6 +24,13 @@ import {
 } from "../styles/ai-chat-styles";
 import type { Message } from "../services/session-service";
 import type { ToolCallInfo } from "../services/chat-stream-handler";
+import {
+  chatModeStore,
+  type PendingToolCall,
+  getPendingToolCalls,
+  approveAllToolCalls,
+  rejectAllToolCalls,
+} from "../store/chat-mode-store";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -31,6 +40,10 @@ const React = window.React as unknown as {
   Fragment: typeof window.React.Fragment;
 };
 const { createElement, useState, useCallback, useMemo, Fragment } = React;
+
+const { useSnapshot } = (window as any).Valtio as {
+  useSnapshot: <T extends object>(obj: T) => T;
+};
 
 interface MessageItemProps {
   message: Message;
@@ -43,6 +56,14 @@ interface MessageItemProps {
   conversationContext?: string;
   // Callback when memories are extracted from this message
   onExtractMemory?: (memories: ExtractedMemory[]) => void;
+  // Callback when a tool call is approved (for Supervised mode)
+  onToolApproved?: (toolCall: PendingToolCall) => void;
+  // Callback when a tool call is rejected (for Supervised mode)
+  onToolRejected?: (toolCall: PendingToolCall) => void;
+  // Callback when all tool calls are batch approved
+  onBatchApprove?: (toolCalls: PendingToolCall[]) => void;
+  // Callback when all tool calls are batch rejected
+  onBatchReject?: (toolCalls: PendingToolCall[]) => void;
 }
 
 /**
@@ -98,12 +119,19 @@ export default function MessageItem({
   toolResults,
   conversationContext,
   onExtractMemory,
+  onToolApproved,
+  onToolRejected,
+  onBatchApprove,
+  onBatchReject,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isExtractDropdownOpen, setIsExtractDropdownOpen] = useState(false);
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
+
+  // Subscribe to chat mode store for reactive updates
+  const modeSnap = useSnapshot(chatModeStore);
 
   // Keep action bar visible when dropdown is open
   const showActionBar = isHovered || isExtractDropdownOpen;
@@ -124,6 +152,38 @@ export default function MessageItem({
     if (!message.tool_calls || !toolResults) return true;
     return message.tool_calls.some((tc) => !toolResults.has(tc.id));
   }, [message.tool_calls, toolResults]);
+
+  // Get pending tool calls for this message in Supervised mode
+  // Only show confirmation cards for the last assistant message with tool calls
+  const pendingToolCallsForMessage = useMemo(() => {
+    // Only show in supervised mode
+    if (modeSnap.mode !== 'supervised') return [];
+    // Only for assistant messages with tool calls
+    if (!isAssistant || !message.tool_calls || message.tool_calls.length === 0) return [];
+    // Only show if this is the last AI message (where tool calls are pending)
+    if (!isLastAiMessage) return [];
+    
+    // Get all pending tool calls from the store
+    return modeSnap.pendingToolCalls.filter(tc => tc.status === 'pending');
+  }, [modeSnap.mode, modeSnap.pendingToolCalls, isAssistant, message.tool_calls, isLastAiMessage]);
+
+  // Check if we should show pending tool confirmation cards instead of regular tool status
+  const hasPendingToolCalls = pendingToolCallsForMessage.length > 0;
+
+  // Show batch actions when there are multiple pending tool calls
+  const showBatchActions = pendingToolCallsForMessage.length > 1;
+
+  // Handle batch approve all pending tool calls
+  const handleBatchApprove = useCallback(() => {
+    const approved = approveAllToolCalls();
+    onBatchApprove?.(approved);
+  }, [onBatchApprove]);
+
+  // Handle batch reject all pending tool calls
+  const handleBatchReject = useCallback(() => {
+    const rejected = rejectAllToolCalls();
+    onBatchReject?.(rejected);
+  }, [onBatchReject]);
 
   // Special handling for tool result messages (standalone)
   if (isTool) {
@@ -151,9 +211,102 @@ export default function MessageItem({
           style: cursorStyle,
         }),
 
+      // Pending Tool Calls Confirmation (Supervised mode)
+      // Show confirmation cards when there are pending tool calls
+      hasPendingToolCalls &&
+        createElement(
+          "div",
+          { style: { marginTop: "12px" } },
+          // Batch action buttons when multiple tool calls are pending
+          showBatchActions &&
+            createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  gap: "8px",
+                  justifyContent: "flex-end",
+                  marginBottom: "10px",
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--orca-color-border)",
+                },
+              },
+              createElement(
+                "span",
+                {
+                  style: {
+                    flex: 1,
+                    fontSize: "12px",
+                    color: "var(--orca-color-text-2)",
+                    display: "flex",
+                    alignItems: "center",
+                  },
+                },
+                `${pendingToolCallsForMessage.length} 个操作待确认`
+              ),
+              createElement(
+                "button",
+                {
+                  style: {
+                    padding: "4px 10px",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    border: "1px solid var(--orca-color-border)",
+                    background: "var(--orca-color-bg-3)",
+                    color: "var(--orca-color-text-2)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  },
+                  onClick: handleBatchReject,
+                  title: "跳过全部操作",
+                },
+                createElement("i", { className: "ti ti-x" }),
+                "全部跳过"
+              ),
+              createElement(
+                "button",
+                {
+                  style: {
+                    padding: "4px 10px",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    border: "none",
+                    background: "var(--orca-color-success, #00c853)",
+                    color: "var(--orca-color-text-inverse, #fff)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  },
+                  onClick: handleBatchApprove,
+                  title: "批准全部操作",
+                },
+                createElement("i", { className: "ti ti-checks" }),
+                "全部批准"
+              )
+            ),
+          // Individual tool confirmation cards
+          ...pendingToolCallsForMessage.map((tc) =>
+            createElement(ToolConfirmationCard, {
+              key: tc.id,
+              toolCall: tc,
+              onApprove: onToolApproved,
+              onReject: onToolRejected,
+            })
+          )
+        ),
+
       // Tool Calls with Results (unified display)
+      // Only show when NOT in pending confirmation state
       // Gemini UX Review: Single status flow instead of separate call/result cards
-      message.tool_calls &&
+      !hasPendingToolCalls &&
+        message.tool_calls &&
         message.tool_calls.length > 0 &&
         createElement(
           "div",

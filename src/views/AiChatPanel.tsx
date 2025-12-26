@@ -6,6 +6,7 @@ import { contextStore, type ContextRef } from "../store/context-store";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
+import { chatModeStore, getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import ChatInput from "./ChatInput";
 import MarkdownMessage from "../components/MarkdownMessage";
@@ -35,8 +36,8 @@ import {
 import { sessionStore, updateSessionStore, markSessionSaved, clearSessionStore } from "../store/session-store";
 import { TOOLS, executeTool } from "../services/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
-import { buildConversationMessages } from "../services/message-builder";
-import { streamChatWithRetry, type ToolCallInfo } from "../services/chat-stream-handler";
+import { buildConversationMessages, shouldIncludeTools } from "../services/message-builder";
+import { streamChatWithRetry, routeToolCallsByMode, type ToolCallInfo } from "../services/chat-stream-handler";
 import {
   panelContainerStyle,
   headerStyle,
@@ -301,6 +302,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         orca.notify("warn", `Context build failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
 
+      // Get current chat mode for tool handling
+      const currentChatMode = getMode();
+      const includeTools = shouldIncludeTools(currentChatMode);
+
       // Maintain an in-memory conversation so multi-round tool calls include prior tool results.
       // Use historyOverride if available to build conversation
       const baseMessages = historyOverride || messages;
@@ -326,6 +331,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        systemPrompt,
 	        contextText,
 	        customMemory: memoryText,
+	        chatMode: currentChatMode,
 	      });
 
       for await (const chunk of streamChatWithRetry(
@@ -336,7 +342,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
           signal: aborter.signal,
-          tools: TOOLS,
+          tools: includeTools ? TOOLS : undefined,
         },
         apiMessages,
         apiMessagesFallback,
@@ -379,9 +385,27 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         const assistantIdx = conversation.findIndex((m) => m.id === currentAssistantId);
         if (assistantIdx >= 0) conversation[assistantIdx].tool_calls = currentToolCalls;
 
+        // Route tool calls based on current chat mode
+        const routingResult = routeToolCallsByMode(currentToolCalls, currentChatMode);
+        
+        // In Supervised mode, pause execution and wait for user confirmation
+        if (routingResult.shouldPauseForConfirmation) {
+          console.log(`[AI] [Round ${toolRound}] Supervised mode - pausing for user confirmation`);
+          console.log(`[AI] [Round ${toolRound}] Queued ${routingResult.pendingForConfirmation.length} tool call(s) for confirmation`);
+          // Break out of the loop - tool execution will resume when user approves
+          break;
+        }
+
+        // Agent mode: execute tools immediately
+        const toolsToExecute = routingResult.executeImmediately;
+        if (toolsToExecute.length === 0) {
+          console.log(`[AI] [Round ${toolRound}] No tools to execute immediately`);
+          break;
+        }
+
         // Execute tools
         const toolResultMessages: Message[] = [];
-        for (const toolCall of currentToolCalls) {
+        for (const toolCall of toolsToExecute) {
           const toolName = toolCall.function.name;
           let args: any = {};
           let parseError: string | null = null;
@@ -446,6 +470,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	          systemPrompt,
 	          contextText,
 	          customMemory: memoryText,
+	          chatMode: currentChatMode,
 	        });
 
         // Create assistant message for next response

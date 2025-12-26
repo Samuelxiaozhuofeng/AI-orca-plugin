@@ -2,6 +2,7 @@
  * Chat Stream Handler Service
  *
  * Encapsulates streaming AI chat completions with automatic retry and fallback logic.
+ * Supports mode-based tool call handling (Agent/Supervised/Ask modes).
  */
 
 import {
@@ -10,6 +11,12 @@ import {
   type OpenAITool,
 } from "./openai-client";
 import { nowId } from "../utils/text-utils";
+import {
+  type ChatMode,
+  type PendingToolCall,
+  getMode,
+  addPendingToolCall,
+} from "../store/chat-mode-store";
 
 export interface StreamOptions {
   apiUrl: string;
@@ -282,4 +289,117 @@ export async function* streamChatWithRetry(
   }
 
   yield { type: "done", result: { content, toolCalls } };
+}
+
+// ============================================================================
+// Mode-Based Tool Call Handling
+// ============================================================================
+
+/**
+ * Result of processing tool calls based on chat mode
+ */
+export interface ToolCallRoutingResult {
+  /** Tool calls to execute immediately (Agent mode) */
+  executeImmediately: ToolCallInfo[];
+  /** Tool calls queued for user confirmation (Supervised mode) */
+  pendingForConfirmation: PendingToolCall[];
+  /** Whether execution should pause for user confirmation */
+  shouldPauseForConfirmation: boolean;
+}
+
+/**
+ * Route tool calls based on the current chat mode.
+ * 
+ * - Agent mode: All tool calls are returned for immediate execution
+ * - Supervised mode: Tool calls are added to pending queue, execution pauses
+ * - Ask mode: Should not receive tool calls (handled by message-builder excluding tools)
+ * 
+ * @param toolCalls - Array of tool calls from the AI response
+ * @param chatMode - Optional chat mode override (defaults to store value)
+ * @returns Routing result indicating how to handle the tool calls
+ */
+export function routeToolCallsByMode(
+  toolCalls: ToolCallInfo[],
+  chatMode?: ChatMode
+): ToolCallRoutingResult {
+  const mode = chatMode ?? getMode();
+  
+  console.log(`[routeToolCallsByMode] Mode: ${mode}, Tool calls: ${toolCalls.length}`);
+  
+  // Ask mode should not receive tool calls (handled upstream by excluding tools from API)
+  // If we somehow receive them, treat as no-op
+  if (mode === 'ask') {
+    console.warn('[routeToolCallsByMode] Received tool calls in Ask mode - ignoring');
+    return {
+      executeImmediately: [],
+      pendingForConfirmation: [],
+      shouldPauseForConfirmation: false,
+    };
+  }
+  
+  // Agent mode: execute all tool calls immediately
+  if (mode === 'agent') {
+    console.log('[routeToolCallsByMode] Agent mode - executing immediately');
+    return {
+      executeImmediately: toolCalls,
+      pendingForConfirmation: [],
+      shouldPauseForConfirmation: false,
+    };
+  }
+  
+  // Supervised mode: queue all tool calls for user confirmation
+  if (mode === 'supervised') {
+    console.log('[routeToolCallsByMode] Supervised mode - queuing for confirmation');
+    
+    const pendingCalls: PendingToolCall[] = [];
+    
+    for (const toolCall of toolCalls) {
+      let args: Record<string, any> = {};
+      try {
+        args = JSON.parse(toolCall.function.arguments || '{}');
+      } catch (e) {
+        console.warn(`[routeToolCallsByMode] Failed to parse args for ${toolCall.function.name}:`, e);
+        args = { _raw: toolCall.function.arguments };
+      }
+      
+      const pendingCall = addPendingToolCall(toolCall.function.name, args);
+      // Store the original tool call ID for later execution
+      (pendingCall as any).originalToolCallId = toolCall.id;
+      pendingCalls.push(pendingCall);
+    }
+    
+    return {
+      executeImmediately: [],
+      pendingForConfirmation: pendingCalls,
+      shouldPauseForConfirmation: pendingCalls.length > 0,
+    };
+  }
+  
+  // Fallback: treat unknown modes as agent mode
+  console.warn(`[routeToolCallsByMode] Unknown mode "${mode}" - defaulting to agent behavior`);
+  return {
+    executeImmediately: toolCalls,
+    pendingForConfirmation: [],
+    shouldPauseForConfirmation: false,
+  };
+}
+
+/**
+ * Check if tool execution should proceed based on current mode
+ * @param chatMode - Optional chat mode override
+ * @returns true if tools should be executed immediately, false if confirmation needed
+ */
+export function shouldExecuteToolsImmediately(chatMode?: ChatMode): boolean {
+  const mode = chatMode ?? getMode();
+  return mode === 'agent';
+}
+
+/**
+ * Check if the current mode requires tool confirmation
+ * @param chatMode - Optional chat mode override
+ * @returns true if in supervised mode requiring confirmation
+ */
+export function requiresToolConfirmation(chatMode?: ChatMode): boolean {
+  const mode = chatMode ?? getMode();
+  return mode === 'supervised';
 }
