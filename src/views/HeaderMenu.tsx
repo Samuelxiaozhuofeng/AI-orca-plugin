@@ -11,12 +11,14 @@ interface HeaderMenuProps {
   onSaveSession: () => void;
   onClearChat: () => void;
   onOpenSettings: () => void;
+  onOpenMemoryManager: () => void;
 }
 
 export default function HeaderMenu({
   onSaveSession,
   onClearChat,
   onOpenSettings,
+  onOpenMemoryManager,
 }: HeaderMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -106,6 +108,18 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-settings" }),
           "Settings"
+        ),
+        // Memory Manager
+        createElement(
+          "div",
+          {
+            style: menuItemStyle,
+            onClick: () => handleItemClick(onOpenMemoryManager),
+            onMouseEnter: (e: any) => e.currentTarget.style.background = "var(--orca-color-bg-2)",
+            onMouseLeave: (e: any) => e.currentTarget.style.background = "transparent",
+          },
+          createElement("i", { className: "ti ti-brain" }),
+          "记忆管理"
         ),
         // Divider
         createElement("div", {

@@ -12,12 +12,14 @@ export interface MessageBuildParams {
   userContent: string;
   systemPrompt?: string;
   contextText?: string;
+  customMemory?: string;
 }
 
 export interface ConversationBuildParams {
   messages: Message[];
   systemPrompt?: string;
   contextText?: string;
+  customMemory?: string;
 }
 
 export interface ToolResultParams extends MessageBuildParams {
@@ -43,11 +45,12 @@ function messageToApi(m: Message): OpenAIChatMessage {
 }
 
 /**
- * Build system message content from prompt and context
+ * Build system message content from prompt, context, and memory
  */
-function buildSystemContent(systemPrompt?: string, contextText?: string): string | null {
+function buildSystemContent(systemPrompt?: string, contextText?: string, customMemory?: string): string | null {
   const parts: string[] = [];
   if (systemPrompt?.trim()) parts.push(systemPrompt.trim());
+  if (customMemory?.trim()) parts.push(`用户信息:\n${customMemory.trim()}`);
   if (contextText?.trim()) parts.push(`Context:\n${contextText.trim()}`);
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
@@ -62,9 +65,9 @@ export function buildConversationMessages(params: ConversationBuildParams): {
   standard: OpenAIChatMessage[];
   fallback: OpenAIChatMessage[];
 } {
-  const { messages, systemPrompt, contextText } = params;
+  const { messages, systemPrompt, contextText, customMemory } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
   const history = messages.filter((m) => !m.localOnly).map(messageToApi);
 
   const standard: OpenAIChatMessage[] = [
@@ -102,9 +105,9 @@ export function buildConversationMessages(params: ConversationBuildParams): {
  * Build chat messages for initial API call (before tool execution)
  */
 export function buildChatMessages(params: MessageBuildParams): OpenAIChatMessage[] {
-  const { messages, userContent, systemPrompt, contextText } = params;
+  const { messages, userContent, systemPrompt, contextText, customMemory } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
   const history = messages.filter((m) => !m.localOnly).map(messageToApi);
 
   return [
@@ -129,12 +132,13 @@ export function buildMessagesWithToolResults(params: ToolResultParams): {
     userContent,
     systemPrompt,
     contextText,
+    customMemory,
     assistantContent,
     toolCalls,
     toolResults,
   } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
   const history = messages.filter((m) => !m.localOnly).map(messageToApi);
 
   // Standard OpenAI format with tool role

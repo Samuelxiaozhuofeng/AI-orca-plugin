@@ -6,6 +6,7 @@ import { skillStore, replaceVariables } from "../store/skill-store";
 import { filterToolsBySkill } from "../services/ai-tools";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
+import { memoryStore } from "../store/memory-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import ChatInput from "./ChatInput";
 import MarkdownMessage from "../components/MarkdownMessage";
@@ -14,6 +15,7 @@ import ChatHistoryMenu from "./ChatHistoryMenu";
 import HeaderMenu from "./HeaderMenu";
 import EmptyState from "./EmptyState";
 import LoadingDots from "../components/LoadingDots";
+import MemoryManager from "./MemoryManager";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
   buildAiModelOptions,
@@ -112,6 +114,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
+
+  // View mode state for switching between chat and memory manager
+  type ViewMode = 'chat' | 'memory-manager';
+  const [viewMode, setViewMode] = useState<ViewMode>('chat');
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -236,6 +242,18 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Memory Manager View Switching
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const handleOpenMemoryManager = useCallback(() => {
+    setViewMode('memory-manager');
+  }, []);
+
+  const handleCloseMemoryManager = useCallback(() => {
+    setViewMode('chat');
+  }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Chat Send Logic
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -325,10 +343,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       let currentContent = "";
       let toolCalls: ToolCallInfo[] = [];
 
+      // Get memory text for injection based on current injection mode
+      // Uses getFullMemoryText which combines portrait (higher priority) + unextracted memories
+      const memoryText = memoryStore.getFullMemoryText();
+
 	      const { standard: apiMessages, fallback: apiMessagesFallback } = buildConversationMessages({
 	        messages: conversation,
 	        systemPrompt,
 	        contextText,
+	        customMemory: memoryText,
 	      });
 
       for await (const chunk of streamChatWithRetry(
@@ -431,6 +454,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	          messages: conversation,
 	          systemPrompt,
 	          contextText,
+	          customMemory: memoryText,
 	        });
 
         // Create assistant message for next response
@@ -666,6 +690,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     messageListContent = messageElements;
   }
 
+  // If in memory manager view, render MemoryManager instead of chat
+  if (viewMode === 'memory-manager') {
+    return createElement(MemoryManager, { onBack: handleCloseMemoryManager });
+  }
+
   return createElement(
     "div",
     {
@@ -692,6 +721,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         onSaveSession: handleSaveSession,
         onClearChat: clear,
         onOpenSettings: () => void orca.commands.invokeCommand("core.openSettings"),
+        onOpenMemoryManager: handleOpenMemoryManager,
       }),
       // Close Button
       createElement(Button, { variant: "plain", onClick: () => closeAiChatPanel(panelId), title: "Close" }, createElement("i", { className: "ti ti-x" }))
