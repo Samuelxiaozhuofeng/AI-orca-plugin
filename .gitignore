@@ -27,3 +27,4 @@ dist-ssr
 .gemini-session
 DEPLOY-GUIDE.md
 deploy.bat
+CLAUDE.md

@@ -1230,13 +1230,61 @@ Supported parameter names:
           ? properties.map((prop: any) => ({ name: prop.name, value: prop.value }))
           : undefined;
 
-        await orca.commands.invokeEditorCommand(
-          "core.editor.insertTag",
-          null,          // cursor context
-          blockId,       // block ID
-          tagName,       // tag name
-          tagProperties  // optional properties
-        );
+        // === 智能导航：确保目标块在编辑器中可见 ===
+        // insertTag 命令需要目标块在当前编辑器视图中才能正确工作
+        const targetRootBlockId = await getRootBlockId(blockId);
+
+        let currentRootBlockId: number | undefined = undefined;
+        let targetPanelId: string | undefined = undefined;
+
+        try {
+          const activePanelId = orca.state.activePanel;
+          const aiChatPanelId = uiStore.aiChatPanelId;
+
+          if (activePanelId === aiChatPanelId) {
+            // AI chat panel 处于活跃状态，需要在另一个 panel 操作
+            targetPanelId = undefined;
+          } else {
+            targetPanelId = activePanelId;
+            const activePanel = orca.nav.findViewPanel(activePanelId, orca.state.panels);
+
+            if (activePanel && activePanel.view === "block" && activePanel.viewArgs?.blockId) {
+              const currentBlockId = activePanel.viewArgs.blockId;
+              currentRootBlockId = await getRootBlockId(currentBlockId);
+            }
+          }
+        } catch (error) {
+          console.warn("[insertTag] Failed to get current panel's root block:", error);
+        }
+
+        const needsNavigation = !targetRootBlockId || !currentRootBlockId || (targetRootBlockId !== currentRootBlockId);
+
+        if (needsNavigation) {
+          if (targetPanelId) {
+            console.log(`[insertTag] Navigating to block ${blockId} in panel ${targetPanelId} (root: ${targetRootBlockId})`);
+            orca.nav.replace("block", { blockId: blockId }, targetPanelId);
+          } else {
+            console.log(`[insertTag] Opening block ${blockId} in last panel (root: ${targetRootBlockId})`);
+            orca.nav.openInLastPanel("block", { blockId: blockId });
+          }
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } else {
+          console.log(`[insertTag] Already on target page (root: ${targetRootBlockId}), skipping navigation`);
+        }
+        // === 智能导航结束 ===
+
+        await orca.commands.invokeGroup(async () => {
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,          // cursor context
+            blockId,       // block ID
+            tagName,       // tag name
+            tagProperties  // optional properties
+          );
+        }, {
+          topGroup: true,
+          undoable: true
+        });
 
         const propsDesc = tagProperties
           ? ` with properties: ${tagProperties.map((p: any) => `${p.name}=${p.value}`).join(", ")}`
