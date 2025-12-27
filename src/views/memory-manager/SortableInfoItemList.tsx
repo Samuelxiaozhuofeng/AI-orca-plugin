@@ -207,6 +207,10 @@ export default function SortableInfoItemList({
   // Editing state: { itemId, valueIndex } where valueIndex 0 = primary value, >0 = additional values
   const [editingValue, setEditingValue] = useState<{ itemId: string; valueIndex: number } | null>(null);
   const [editingText, setEditingText] = useState("");
+  // Label editing state
+  const [editingLabelItemId, setEditingLabelItemId] = useState<string | null>(null);
+  const [editingLabelText, setEditingLabelText] = useState("");
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -222,6 +226,13 @@ export default function SortableInfoItemList({
       editInputRef.current.select();
     }
   }, [editingValue]);
+
+  useEffect(() => {
+    if (editingLabelItemId && labelInputRef.current) {
+      labelInputRef.current.focus();
+      labelInputRef.current.select();
+    }
+  }, [editingLabelItemId]);
 
   const handleDragStart = useCallback((e: React.DragEvent, itemId: string) => {
     setDraggedId(itemId);
@@ -327,6 +338,31 @@ export default function SortableInfoItemList({
     }
   }, [handleSaveEditValue]);
 
+  // Label editing handlers
+  const handleStartEditLabel = useCallback((itemId: string, currentLabel: string) => {
+    setEditingLabelItemId(itemId);
+    setEditingLabelText(currentLabel);
+  }, []);
+
+  const handleSaveEditLabel = useCallback((item: PortraitInfoItem) => {
+    if (editingLabelItemId) {
+      // Call onEditItem with updated label but same value
+      onEditItem(editingLabelItemId, editingLabelText.trim(), item.value);
+      setEditingLabelItemId(null);
+      setEditingLabelText("");
+    }
+  }, [editingLabelItemId, editingLabelText, onEditItem]);
+
+  const handleLabelKeyDown = useCallback((e: React.KeyboardEvent, item: PortraitInfoItem) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSaveEditLabel(item);
+    } else if (e.key === "Escape") {
+      setEditingLabelItemId(null);
+      setEditingLabelText("");
+    }
+  }, [handleSaveEditLabel]);
+
   const renderItem = (item: PortraitInfoItem) => {
     const isDragging = draggedId === item.id;
     const isHovered = hoveredItemId === item.id;
@@ -382,30 +418,46 @@ export default function SortableInfoItemList({
             { style: dragHandleStyle },
             createElement("i", { className: "ti ti-grip-vertical" })
           ),
-          // Label and primary value
+          // Label (editable inline)
           item.label
-            ? createElement(
-                "span",
-                {
+            ? editingLabelItemId === item.id
+              ? createElement("input", {
+                  ref: labelInputRef,
+                  type: "text",
+                  value: editingLabelText,
+                  onChange: (e: any) => setEditingLabelText(e.target.value),
+                  onKeyDown: (e: any) => handleLabelKeyDown(e, item),
+                  onBlur: () => handleSaveEditLabel(item),
+                  onClick: (e: any) => e.stopPropagation(),
                   style: {
                     color: "var(--orca-color-text-2)",
                     fontWeight: 500,
-                    cursor: "pointer",
+                    background: "var(--orca-color-bg-1)",
+                    border: "1px solid var(--orca-color-primary)",
+                    borderRadius: "4px",
+                    padding: "2px 6px",
+                    fontSize: "13px",
+                    outline: "none",
+                    minWidth: "60px",
                   },
-                  onClick: () => onEditItem(item.id, item.label, item.value),
-                  title: "点击编辑",
-                },
-                `${item.label}：`
-              )
-            : createElement(
-                "span",
-                {
-                  style: { cursor: "pointer" },
-                  onClick: () => onEditItem(item.id, item.label, item.value),
-                  title: "点击编辑",
-                },
-                item.value
-              )
+                })
+              : createElement(
+                  "span",
+                  {
+                    style: {
+                      color: "var(--orca-color-text-2)",
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    },
+                    onClick: (e: any) => {
+                      e.stopPropagation();
+                      handleStartEditLabel(item.id, item.label);
+                    },
+                    title: "点击编辑标签",
+                  },
+                  `${item.label}：`
+                )
+            : null
         ),
         // Values list
         createElement(
