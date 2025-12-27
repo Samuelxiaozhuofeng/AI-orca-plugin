@@ -186,6 +186,8 @@ function parseTimeline(content: string): TimelineItem[] | null {
   return items.length > 0 ? items : null;
 }
 
+
+
 /**
  * Markdown Parser
  * - Parses block-level structure (headings, lists, quotes, code fences, paragraphs)
@@ -605,6 +607,24 @@ function parseInlineMarkdown(text: string, depth = 0, insideLink = false): Markd
             children: [{ type: "text", content: blockRefMatch[0].trim() }],
           });
           i += blockRefMatch[0].length;
+          continue;
+        }
+      }
+
+      // Fallback: [数字] format - AI sometimes uses this despite instructions
+      // Only match if it looks like a block ID (reasonable range: 3+ digits)
+      // and not part of a markdown link (no following parenthesis)
+      const bracketNumMatch = text.slice(i).match(/^\[(\d{3,})\](?!\()/);
+      if (bracketNumMatch) {
+        const blockId = parseInt(bracketNumMatch[1], 10);
+        if (blockId > 0) {
+          flushBuffer();
+          nodes.push({
+            type: "link",
+            url: `orca-block:${blockId}`,
+            children: [{ type: "text", content: `${blockId}` }],
+          });
+          i += bracketNumMatch[0].length;
           continue;
         }
       }

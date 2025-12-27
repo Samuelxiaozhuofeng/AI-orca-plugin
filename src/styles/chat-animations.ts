@@ -553,6 +553,7 @@ br + .md-block-dot {
     background: var(--orca-color-border, rgba(128, 128, 128, 0.2));
     flex-shrink: 0;
 }
+
 `;
 
 let styleElement: HTMLStyleElement | null = null;

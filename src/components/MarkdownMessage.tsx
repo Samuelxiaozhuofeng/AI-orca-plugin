@@ -19,7 +19,6 @@ import {
 
 const React = window.React as any;
 const { createElement, useMemo, useState } = React;
-const { Button } = orca.components;
 
 interface Props {
   content: string;
