@@ -313,6 +313,27 @@ export const TOOLS: OpenAITool[] = [
   {
     type: "function",
     function: {
+      name: "getBlock",
+      description: "根据块 ID 获取单个块的详细内容。当你需要查看某个特定块的完整内容时使用。",
+      parameters: {
+        type: "object",
+        properties: {
+          blockId: {
+            type: "number",
+            description: "块的 ID（数字）",
+          },
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含所有子块内容（默认 true）",
+          },
+        },
+        required: ["blockId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "createBlock",
       description: "在指定位置创建新笔记条目。你需要提供参考块 ID 以及新内容插入的位置（如子块末尾、当前块之后等）。",
       parameters: {
@@ -933,6 +954,57 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       } catch (err: any) {
         console.error(`[Tool] Error in getPage:`, err);
         return `Error getting page "${args.pageName}": ${err.message}`;
+      }
+    } else if (toolName === "getBlock") {
+      try {
+        let blockIdRaw = args.blockId || args.block_id || args.id;
+        const includeChildren = args.includeChildren !== false;
+
+        // Handle orca-block:xxx format
+        if (typeof blockIdRaw === "string") {
+          const match = blockIdRaw.match(/^(?:orca-block:)?(\d+)$/);
+          if (match) blockIdRaw = parseInt(match[1], 10);
+        }
+
+        const blockId = toFiniteNumber(blockIdRaw);
+
+        if (!blockId) {
+          console.error("[Tool] Missing or invalid blockId parameter");
+          return "Error: Missing or invalid blockId parameter. Please provide a valid block ID number.";
+        }
+
+        console.log("[Tool] getBlock:", { blockId, includeChildren });
+
+        // Get block from state or backend
+        let block = orca.state.blocks[blockId] || await orca.invokeBackend("get-block", blockId);
+        if (!block) {
+          return `Block ${blockId} not found.`;
+        }
+
+        // Build content
+        let content = block.content || "";
+        let title = block.alias?.[0] || content.split("\n")[0]?.substring(0, 50) || `Block #${blockId}`;
+        title = title.replace(/[\[\]]/g, "");
+
+        // Get children content if requested
+        let childrenContent = "";
+        if (includeChildren && block.children && block.children.length > 0) {
+          const childContents: string[] = [];
+          for (const childId of block.children) {
+            const childBlock = orca.state.blocks[childId] || await orca.invokeBackend("get-block", childId);
+            if (childBlock && childBlock.content) {
+              childContents.push(`  - ${childBlock.content}`);
+            }
+          }
+          if (childContents.length > 0) {
+            childrenContent = "\n\n**子块内容：**\n" + childContents.join("\n");
+          }
+        }
+
+        return `# ${title}\n\n${content}${childrenContent}\n\n---\n📄 [查看原块](orca-block:${blockId})`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in getBlock:`, err);
+        return `Error getting block ${args.blockId}: ${err.message}`;
       }
     } else if (toolName === "createBlock") {
       try {
