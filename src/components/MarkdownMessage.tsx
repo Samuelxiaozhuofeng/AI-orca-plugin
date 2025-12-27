@@ -265,35 +265,19 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       });
 
     case "table": {
-      const tableStyle: any = {
-        width: "100%",
-        borderCollapse: "collapse",
-        margin: "12px 0",
-        fontSize: "14px",
-        overflow: "auto",
+      // Helper to get alignment class
+      const getAlignClass = (align: string | null): string => {
+        if (align === "center") return "align-center";
+        if (align === "right") return "align-right";
+        return "align-left";
       };
-      const thStyle = (align: string | null): any => ({
-        padding: "8px 12px",
-        borderBottom: "2px solid var(--orca-color-border, rgba(128, 128, 128, 0.3))",
-        background: "var(--orca-color-bg-tertiary, rgba(128, 128, 128, 0.1))",
-        fontWeight: 600,
-        textAlign: align || "left",
-        whiteSpace: "nowrap",
-        color: "var(--orca-color-text, inherit)",
-      });
-      const tdStyle = (align: string | null): any => ({
-        padding: "8px 12px",
-        borderBottom: "1px solid var(--orca-color-border, rgba(128, 128, 128, 0.2))",
-        textAlign: align || "left",
-        color: "var(--orca-color-text, inherit)",
-      });
 
       return createElement(
         "div",
-        { key, style: { overflowX: "auto", margin: "12px 0" } },
+        { key, className: "md-table-container" },
         createElement(
           "table",
-          { style: tableStyle },
+          { className: "md-table" },
           // Header
           createElement(
             "thead",
@@ -304,7 +288,7 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
               ...node.headers.map((headerCells, colIndex) =>
                 createElement(
                   "th",
-                  { key: colIndex, style: thStyle(node.alignments[colIndex]) },
+                  { key: colIndex, className: getAlignClass(node.alignments[colIndex]) },
                   ...headerCells.map((child, i) => renderInlineNode(child, i))
                 )
               )
@@ -317,19 +301,11 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
             ...node.rows.map((row, rowIndex) =>
               createElement(
                 "tr",
-                {
-                  key: rowIndex,
-                  onMouseEnter: (e: any) => {
-                    e.currentTarget.style.background = "var(--orca-color-bg-hover, rgba(128, 128, 128, 0.1))";
-                  },
-                  onMouseLeave: (e: any) => {
-                    e.currentTarget.style.background = "transparent";
-                  },
-                },
+                { key: rowIndex },
                 ...row.map((cellNodes, colIndex) =>
                   createElement(
                     "td",
-                    { key: colIndex, style: tdStyle(node.alignments[colIndex]) },
+                    { key: colIndex, className: getAlignClass(node.alignments[colIndex]) },
                     ...cellNodes.map((child, i) => renderInlineNode(child, i))
                   )
                 )

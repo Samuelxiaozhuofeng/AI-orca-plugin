@@ -96,6 +96,52 @@ export const chatAnimations = `
     animation: shimmer 1.5s ease-in-out infinite;
     will-change: opacity;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Markdown Table Styles
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.md-table-container {
+    overflow-x: auto;
+    margin: 12px 0;
+}
+
+.md-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.md-table th {
+    padding: 8px 12px;
+    border-bottom: 2px solid var(--orca-color-border, rgba(128, 128, 128, 0.3));
+    background: var(--orca-color-bg-tertiary, rgba(128, 128, 128, 0.1));
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--orca-color-text, inherit);
+}
+
+.md-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--orca-color-border, rgba(128, 128, 128, 0.2));
+    color: var(--orca-color-text, inherit);
+}
+
+.md-table tr:hover td {
+    background: var(--orca-color-bg-hover, rgba(128, 128, 128, 0.1));
+}
+
+.md-table .align-left {
+    text-align: left;
+}
+
+.md-table .align-center {
+    text-align: center;
+}
+
+.md-table .align-right {
+    text-align: right;
+}
 `;
 
 let styleElement: HTMLStyleElement | null = null;
