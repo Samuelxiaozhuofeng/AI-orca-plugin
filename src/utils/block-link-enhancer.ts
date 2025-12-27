@@ -81,7 +81,13 @@ export function formatBlockResult(block: {
   content?: string;
   fullContent?: string;
 }, index: number): string {
-  const linkTitle = block.title.replace(/[\[\]]/g, '');  // Escape brackets
+  let linkTitle = block.title.replace(/[\[\]]/g, '');  // Escape brackets
+  
+  // Use block ID format for untitled blocks to prevent AI from calling getPage
+  if (!linkTitle || linkTitle === '(untitled)' || linkTitle.trim() === '') {
+    linkTitle = `Block #${block.id}`;
+  }
+  
   const body = block.fullContent ?? block.content ?? '';
   return `${index + 1}. [${linkTitle}](orca-block:${block.id})\n${body}`;
 }
@@ -92,5 +98,5 @@ export function formatBlockResult(block: {
  */
 export function addLinkPreservationNote(resultCount: number): string {
   if (resultCount === 0) return '';
-  return '📌 提示：链接可点击。在回复中引用块时，请使用 blockid:数字 格式（例如：blockid:433），这将自动渲染为可点击的链接。\n\n';
+  return '📌 提示：链接可点击。在回复中引用块时，请使用 blockid:数字 格式（例如：blockid:433），这将自动渲染为可点击的链接。\n⚠️ 注意：以上结果已包含完整内容，请勿再调用 getPage 获取详情。\n\n';
 }
