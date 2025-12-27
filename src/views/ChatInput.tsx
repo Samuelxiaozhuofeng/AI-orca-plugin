@@ -8,7 +8,6 @@ import type { AiModelOption } from "../settings/ai-chat-settings";
 import { contextStore } from "../store/context-store";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
-import SkillPicker from "./SkillPicker";
 import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton } from "./chat-input";
 import { loadFromStorage } from "../store/chat-mode-store";
 import {
