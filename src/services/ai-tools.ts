@@ -740,6 +740,18 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         }, { topGroup: true, undoable: true });
 
         const newBlockId = Array.isArray(newBlockIds) ? newBlockIds[0] : newBlockIds;
+        
+        if (newBlockId === undefined || newBlockId === null) {
+          // Try to get the last child of refBlock as fallback
+          await new Promise(resolve => setTimeout(resolve, 50));
+          const updatedRefBlock = orca.state.blocks[refBlockId];
+          if (updatedRefBlock?.children && updatedRefBlock.children.length > 0) {
+            const lastChildId = updatedRefBlock.children[updatedRefBlock.children.length - 1];
+            return `Created new block: [${lastChildId}](orca-block:${lastChildId})`;
+          }
+          return `Block created but ID not returned. Please check the target location.`;
+        }
+        
         return `Created new block: [${newBlockId}](orca-block:${newBlockId})`;
       } catch (err: any) {
         console.error(`[Tool] Error in createBlock:`, err);

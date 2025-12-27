@@ -107,7 +107,8 @@ export function mergeToolCalls(
       }
     } else {
       // Create new tool call
-      const newId = tc.id || nowId();
+      // Use tc.id if available, otherwise generate based on index or fallback to nowId()
+      const newId = tc.id || (typeof tc.index === "number" ? `tool_call_${tc.index}` : nowId());
       const newToolCall: any = {
         id: newId,
         type: tc.type || "function",

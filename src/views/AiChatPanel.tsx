@@ -382,9 +382,22 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         const assistantIdx = conversation.findIndex((m) => m.id === currentAssistantId);
         if (assistantIdx >= 0) conversation[assistantIdx].tool_calls = currentToolCalls;
 
+        // Filter out tool calls that have already been executed (by checking existing tool results)
+        const executedToolCallIds = new Set(allToolResultMessages.map(m => m.tool_call_id));
+        const newToolCalls = currentToolCalls.filter(tc => !executedToolCallIds.has(tc.id));
+        
+        if (newToolCalls.length === 0) {
+          console.log(`[AI] [Round ${toolRound}] All tool calls already executed, skipping`);
+          break;
+        }
+        
+        if (newToolCalls.length < currentToolCalls.length) {
+          console.log(`[AI] [Round ${toolRound}] Filtered ${currentToolCalls.length - newToolCalls.length} duplicate tool calls`);
+        }
+
         // Execute tools
         const toolResultMessages: Message[] = [];
-        for (const toolCall of currentToolCalls) {
+        for (const toolCall of newToolCalls) {
           const toolName = toolCall.function.name;
           let args: any = {};
           let parseError: string | null = null;
