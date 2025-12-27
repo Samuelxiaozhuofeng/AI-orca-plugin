@@ -274,20 +274,19 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       };
       const thStyle = (align: string | null): any => ({
         padding: "8px 12px",
-        borderBottom: "2px solid var(--orca-color-border, #e0e0e0)",
-        background: "var(--orca-color-bg-secondary, #f5f5f5)",
+        borderBottom: "2px solid var(--orca-color-border, rgba(128, 128, 128, 0.3))",
+        background: "var(--orca-color-bg-tertiary, rgba(128, 128, 128, 0.1))",
         fontWeight: 600,
         textAlign: align || "left",
         whiteSpace: "nowrap",
+        color: "var(--orca-color-text, inherit)",
       });
       const tdStyle = (align: string | null): any => ({
         padding: "8px 12px",
-        borderBottom: "1px solid var(--orca-color-border, #e0e0e0)",
+        borderBottom: "1px solid var(--orca-color-border, rgba(128, 128, 128, 0.2))",
         textAlign: align || "left",
+        color: "var(--orca-color-text, inherit)",
       });
-      const trHoverStyle = {
-        background: "var(--orca-color-bg-hover, #f9f9f9)",
-      };
 
       return createElement(
         "div",
@@ -321,7 +320,7 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
                 {
                   key: rowIndex,
                   onMouseEnter: (e: any) => {
-                    e.currentTarget.style.background = "var(--orca-color-bg-hover, #f9f9f9)";
+                    e.currentTarget.style.background = "var(--orca-color-bg-hover, rgba(128, 128, 128, 0.1))";
                   },
                   onMouseLeave: (e: any) => {
                     e.currentTarget.style.background = "transparent";
