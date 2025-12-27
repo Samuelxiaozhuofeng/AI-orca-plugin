@@ -1,4 +1,4 @@
-import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TaskCardData } from "../utils/markdown-renderer";
+import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem } from "../utils/markdown-renderer";
 import {
   codeBlockContainerStyle,
   codeBlockHeaderStyle,
@@ -308,90 +308,26 @@ function ChecklistBlock({
   );
 }
 
-// Helper component for Task Card
-function TaskCardBlock({ task }: { task: TaskCardData }) {
-  const statusConfig: Record<string, { icon: string; label: string; className: string }> = {
-    todo: { icon: "ti ti-circle", label: "待办", className: "status-todo" },
-    done: { icon: "ti ti-circle-check", label: "已完成", className: "status-done" },
-    "in-progress": { icon: "ti ti-loader", label: "进行中", className: "status-progress" },
-    cancelled: { icon: "ti ti-circle-x", label: "已取消", className: "status-cancelled" },
-  };
-
-  const priorityConfig: Record<string, { icon: string; label: string; className: string }> = {
-    high: { icon: "ti ti-arrow-up", label: "高", className: "priority-high" },
-    medium: { icon: "ti ti-minus", label: "中", className: "priority-medium" },
-    low: { icon: "ti ti-arrow-down", label: "低", className: "priority-low" },
-  };
-
-  const status = statusConfig[task.status] || statusConfig.todo;
-  const priority = task.priority ? priorityConfig[task.priority] : null;
-
-  const handleBlockClick = () => {
-    if (task.blockId) {
-      try {
-        orca.nav.openInLastPanel("block", { blockId: task.blockId });
-      } catch (error) {
-        console.error("[TaskCard] Navigation failed:", error);
-      }
-    }
-  };
-
+// Helper component for Timeline
+function TimelineBlock({ items, renderInline }: { items: TimelineItem[], renderInline: (node: MarkdownInlineNode, key: number) => any }) {
   return createElement(
     "div",
-    { className: "md-task-card" },
-    // Header: status + title
-    createElement(
-      "div",
-      { className: "md-task-header" },
+    { className: "md-timeline" },
+    ...items.map((item, index) =>
       createElement(
-        "span",
-        { className: `md-task-status ${status.className}` },
-        createElement("i", { className: status.icon }),
-        status.label
-      ),
-      priority && createElement(
-        "span",
-        { className: `md-task-priority ${priority.className}` },
-        createElement("i", { className: priority.icon }),
-        priority.label
-      )
-    ),
-    // Title with link indicator (using BlockPreviewPopup for hover preview)
-    createElement(
-      "div",
-      { className: "md-task-title-row" },
-      task.blockId && createElement(
-        orca.components.BlockPreviewPopup,
-        { blockId: task.blockId, delay: 300 },
-        createElement(
-          "span",
-          { 
-            className: "md-task-link-dot",
-            onClick: handleBlockClick,
-          }
-        )
-      ),
-      createElement(
-        "span",
-        { className: "md-task-title" },
-        task.title
-      )
-    ),
-    // Footer: due date + tags
-    (task.dueDate || task.tags.length > 0) && createElement(
-      "div",
-      { className: "md-task-footer" },
-      task.dueDate && createElement(
-        "span",
-        { className: "md-task-due" },
-        createElement("i", { className: "ti ti-calendar" }),
-        task.dueDate
-      ),
-      task.tags.length > 0 && createElement(
         "div",
-        { className: "md-task-tags" },
-        ...task.tags.map((tag, i) =>
-          createElement("span", { key: i, className: "md-task-tag" }, tag)
+        { key: index, className: "md-timeline-item" },
+        createElement("div", { className: "md-timeline-dot" }),
+        createElement(
+          "div",
+          { className: "md-timeline-content" },
+          createElement("div", { className: "md-timeline-date" }, item.date),
+          createElement(
+            "div",
+            { className: "md-timeline-title" },
+            ...item.title.map((node, i) => renderInline(node, i))
+          ),
+          item.description && createElement("div", { className: "md-timeline-desc" }, item.description)
         )
       )
     )
@@ -688,10 +624,11 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       });
     }
 
-    case "taskcard": {
-      return createElement(TaskCardBlock, {
+    case "timeline": {
+      return createElement(TimelineBlock, {
         key,
-        task: node.task,
+        items: node.items,
+        renderInline: renderInlineNode,
       });
     }
 

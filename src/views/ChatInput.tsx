@@ -21,8 +21,14 @@ const React = window.React as unknown as {
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
   useEffect: (effect: () => void | (() => void), deps?: any[]) => void;
+  useMemo: <T>(factory: () => T, deps: any[]) => T;
 };
-const { createElement, useRef, useState, useCallback, useEffect } = React;
+const { createElement, useRef, useState, useCallback, useEffect, useMemo } = React;
+
+// 斜杠命令定义
+const SLASH_COMMANDS = [
+  { command: "/timeline", description: "以时间线格式展示结果" },
+];
 
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
@@ -78,9 +84,27 @@ export default function ChatInput({
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
+
+  // 检测是否显示斜杠命令菜单
+  const filteredCommands = useMemo(() => {
+    if (!text.startsWith("/")) return [];
+    const query = text.toLowerCase();
+    return SLASH_COMMANDS.filter(cmd => cmd.command.toLowerCase().startsWith(query));
+  }, [text]);
+
+  useEffect(() => {
+    if (filteredCommands.length > 0 && text.startsWith("/") && !text.includes(" ")) {
+      setSlashMenuOpen(true);
+      setSlashMenuIndex(0);
+    } else {
+      setSlashMenuOpen(false);
+    }
+  }, [filteredCommands, text]);
 
   // Load chat mode from storage on mount (Requirements: 5.2)
   useEffect(() => {
@@ -103,6 +127,37 @@ export default function ChatInput({
 
   const handleKeyDown = useCallback(
     (e: any) => {
+      // 斜杠菜单键盘导航
+      if (slashMenuOpen && filteredCommands.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setSlashMenuIndex(i => (i + 1) % filteredCommands.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setSlashMenuIndex(i => (i - 1 + filteredCommands.length) % filteredCommands.length);
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+          e.preventDefault();
+          const cmd = filteredCommands[slashMenuIndex];
+          if (cmd) {
+            setText(cmd.command + " ");
+            if (textareaRef.current) {
+              textareaRef.current.value = cmd.command + " ";
+            }
+          }
+          setSlashMenuOpen(false);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSlashMenuOpen(false);
+          return;
+        }
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         if (e.nativeEvent?.isComposing) return;
         e.preventDefault();
@@ -119,7 +174,7 @@ export default function ChatInput({
         }
       }
     },
-    [handleSend]
+    [handleSend, slashMenuOpen, filteredCommands, slashMenuIndex]
   );
 
   const handlePickerClose = useCallback(() => {
@@ -148,7 +203,53 @@ export default function ChatInput({
     // Input Wrapper
     createElement(
       "div",
-      { style: textareaWrapperStyle(isFocused) },
+      { style: { ...textareaWrapperStyle(isFocused), position: "relative" } },
+
+      // Slash Command Menu
+      slashMenuOpen && filteredCommands.length > 0 && createElement(
+        "div",
+        {
+          style: {
+            position: "absolute",
+            bottom: "100%",
+            left: 0,
+            right: 0,
+            marginBottom: "4px",
+            background: "var(--orca-color-bg-1)",
+            border: "1px solid var(--orca-color-border)",
+            borderRadius: "8px",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            overflow: "hidden",
+            zIndex: 100,
+          },
+        },
+        ...filteredCommands.map((cmd, index) =>
+          createElement(
+            "div",
+            {
+              key: cmd.command,
+              onClick: () => {
+                setText(cmd.command + " ");
+                if (textareaRef.current) {
+                  textareaRef.current.value = cmd.command + " ";
+                  textareaRef.current.focus();
+                }
+                setSlashMenuOpen(false);
+              },
+              style: {
+                padding: "8px 12px",
+                cursor: "pointer",
+                background: index === slashMenuIndex ? "var(--orca-color-bg-3)" : "transparent",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              },
+            },
+            createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-primary)" } }, cmd.command),
+            createElement("span", { style: { color: "var(--orca-color-text-2)", fontSize: "12px" } }, cmd.description)
+          )
+        )
+      ),
 
       // Row 1: TextArea
       createElement(CompositionTextArea as any, {

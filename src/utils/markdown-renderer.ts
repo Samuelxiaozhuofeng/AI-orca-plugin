@@ -8,21 +8,15 @@ export type MarkdownInlineNode =
 
 export type TableAlignment = "left" | "center" | "right" | null;
 
-export type TaskPriority = "high" | "medium" | "low" | null;
-export type TaskStatus = "todo" | "done" | "in-progress" | "cancelled";
-
 export type CheckboxItem = {
   checked: boolean;
   children: MarkdownInlineNode[];
 };
 
-export type TaskCardData = {
-  title: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  dueDate?: string;
-  tags: string[];
-  blockId?: number;
+export type TimelineItem = {
+  date: string;
+  title: MarkdownInlineNode[];  // 支持链接等 inline 元素
+  description?: string;
 };
 
 export type MarkdownNode =
@@ -30,7 +24,7 @@ export type MarkdownNode =
   | { type: "heading"; level: number; children: MarkdownInlineNode[] }
   | { type: "list"; ordered: boolean; items: MarkdownInlineNode[][] }
   | { type: "checklist"; items: CheckboxItem[] }
-  | { type: "taskcard"; task: TaskCardData }
+  | { type: "timeline"; items: TimelineItem[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
   | { type: "table"; headers: MarkdownInlineNode[][]; alignments: TableAlignment[]; rows: MarkdownInlineNode[][][] }
@@ -120,58 +114,27 @@ function isCheckboxLine(line: string): { checked: boolean; text: string } | null
 }
 
 /**
- * Parse task card from special format:
- * ```task
- * title: Task title
- * status: todo|done|in-progress|cancelled
- * priority: high|medium|low
- * due: 2024-01-01
- * tags: #tag1, #tag2
- * block: 1234
- * ```
- * Or detect from content patterns
+ * Parse timeline from code block content
+ * Format: date | title | description (optional)
+ * Title supports inline markdown (links, bold, etc.)
  */
-function parseTaskCard(content: string): TaskCardData | null {
-  const lines = content.trim().split("\n");
-  const task: TaskCardData = {
-    title: "",
-    status: "todo",
-    priority: null,
-    tags: [],
-  };
-
+function parseTimeline(content: string): TimelineItem[] | null {
+  const lines = content.trim().split("\n").filter(l => l.trim());
+  if (lines.length === 0) return null;
+  
+  const items: TimelineItem[] = [];
   for (const line of lines) {
-    const [key, ...valueParts] = line.split(":");
-    const value = valueParts.join(":").trim();
-    
-    switch (key.trim().toLowerCase()) {
-      case "title":
-        task.title = value;
-        break;
-      case "status":
-        if (["todo", "done", "in-progress", "cancelled"].includes(value.toLowerCase())) {
-          task.status = value.toLowerCase() as TaskStatus;
-        }
-        break;
-      case "priority":
-        if (["high", "medium", "low"].includes(value.toLowerCase())) {
-          task.priority = value.toLowerCase() as TaskPriority;
-        }
-        break;
-      case "due":
-        task.dueDate = value;
-        break;
-      case "tags":
-        task.tags = value.split(",").map(t => t.trim()).filter(Boolean);
-        break;
-      case "block":
-        const blockId = parseInt(value, 10);
-        if (blockId > 0) task.blockId = blockId;
-        break;
+    const parts = line.split("|").map(p => p.trim());
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      items.push({
+        date: parts[0],
+        title: parseInlineMarkdown(parts[1]),  // 解析为 inline nodes 支持链接
+        description: parts[2] || undefined,
+      });
     }
   }
-
-  return task.title ? task : null;
+  
+  return items.length > 0 ? items : null;
 }
 
 /**
@@ -228,13 +191,13 @@ export function parseMarkdown(text: string): MarkdownNode[] {
   const flushCodeBlock = () => {
     if (!inCodeBlock) return;
     
-    // Check if it's a task code block
-    if (codeBlockLang.toLowerCase() === "task") {
-      const taskData = parseTaskCard(codeBlockLines.join("\n"));
-      if (taskData) {
+    // Check if it's a timeline code block
+    if (codeBlockLang.toLowerCase() === "timeline") {
+      const timelineItems = parseTimeline(codeBlockLines.join("\n"));
+      if (timelineItems) {
         nodes.push({
-          type: "taskcard",
-          task: taskData,
+          type: "timeline",
+          items: timelineItems,
         });
         inCodeBlock = false;
         codeBlockLang = "";

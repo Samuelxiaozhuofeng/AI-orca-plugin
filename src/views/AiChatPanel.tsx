@@ -266,6 +266,23 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // 系统提示词模板变量：支持 {maxToolRounds}，按当前 MAX_TOOL_ROUNDS 注入
 	    let systemPrompt = settings.systemPrompt.split("{maxToolRounds}").join(String(MAX_TOOL_ROUNDS));
 
+	    // 检测用户指令并追加格式要求
+	    let processedContent = content;
+	    if (content.includes("/timeline")) {
+	      processedContent = content.replace(/\/timeline/g, "").trim();
+	      systemPrompt += `\n\n【格式要求 - 时间线】用户要求使用时间线格式展示结果。
+格式：
+\`\`\`timeline
+日期 | [标题](orca-block:id) | 详细描述
+\`\`\`
+要求：
+1. 每行一个事件，用 | 分隔：日期 | 标题（带跳转链接） | 描述
+2. 标题必须使用 [标题](orca-block:id) 格式，让用户可以点击跳转
+3. 描述要详细，包含关键内容摘要，不要只写一两个字
+4. 按时间顺序排列（从早到晚或从晚到早）
+5. 日期格式统一，如 2024-12-01 或 12月1日`;
+	    }
+
 	    // Get current chat mode for tool handling
 	    const currentChatMode = getMode();
 	    const includeTools = currentChatMode !== 'ask';
@@ -279,7 +296,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     setSending(true);
 
+    // 显示给用户的消息保留原始内容
     const userMsg: Message = { id: nowId(), role: "user", content, createdAt: Date.now() };
+    // 发送给 API 的消息使用处理后的内容（去掉指令）
+    const userMsgForApi: Message = { id: userMsg.id, role: "user", content: processedContent, createdAt: userMsg.createdAt };
 
     // Use override if provided (for regeneration), otherwise append to current state
     if (historyOverride) {
@@ -306,7 +326,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       // Maintain an in-memory conversation so multi-round tool calls include prior tool results.
       // Use historyOverride if available to build conversation
       const baseMessages = historyOverride || messages;
-      const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsg];
+      const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsgForApi];
 
       // Create assistant message placeholder
       const assistantId = nowId();
