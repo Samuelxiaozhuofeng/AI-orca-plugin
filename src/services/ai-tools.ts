@@ -392,6 +392,19 @@ function normalizeJournalOffset(val: any, defaultVal: number): number {
 }
 
 /**
+ * 生成搜索结果的上限警告信息
+ * @param resultCount - 实际返回的结果数
+ * @param maxResults - 请求的最大结果数
+ * @param actualLimit - 实际应用的上限（考虑系统最大值）
+ */
+function buildLimitWarning(resultCount: number, maxResults: number, actualLimit: number = 50): string {
+  if (resultCount >= actualLimit) {
+    return `\n\n⚠️ **注意：结果已达到上限 (${actualLimit} 条)**\n实际匹配的笔记可能更多。如需获取完整列表，请：\n1. 使用更精确的搜索条件缩小范围\n2. 或分批查询（如按时间范围分段）`;
+  }
+  return "";
+}
+
+/**
  * 主入口：处理 AI 调用的工具。
  */
 export async function executeTool(toolName: string, args: any): Promise<string> {
@@ -406,10 +419,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           return "Error: Missing tag_query parameter. Please specify which tag to search for.";
         }
         
-        const maxResults = args.maxResults || 20;
+        const requestedMax = args.maxResults || 20;
+        const actualLimit = Math.min(requestedMax, 50);
         
         console.log(`[Tool] searchBlocksByTag: "${tagQuery}"`);
-        const results = await searchBlocksByTag(tagQuery, Math.min(maxResults, 50));
+        const results = await searchBlocksByTag(tagQuery, actualLimit);
         console.log(`[Tool] searchBlocksByTag found ${results.length} results`);
 
         if (results.length === 0) {
@@ -418,8 +432,9 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         const preservationNote = addLinkPreservationNote(results.length);
         const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
 
-        return `${preservationNote}Found ${results.length} block(s) with tag "${tagQuery}":\n${summary}`;
+        return `${preservationNote}Found ${results.length} block(s) with tag "${tagQuery}":\n${summary}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByTag:`, err);
         return `Error searching by tag: ${err.message}`;
@@ -427,10 +442,11 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
     } else if (toolName === "searchBlocksByText") {
       try {
         const query = args.query;
-        const maxResults = args.maxResults || 20;
+        const requestedMax = args.maxResults || 20;
+        const actualLimit = Math.min(requestedMax, 50);
 
         console.log(`[Tool] searchBlocksByText: "${query}"`);
-        const results = await searchBlocksByText(query, Math.min(maxResults, 50));
+        const results = await searchBlocksByText(query, actualLimit);
         console.log(`[Tool] searchBlocksByText found ${results.length} results`);
 
         if (results.length === 0) {
@@ -439,8 +455,9 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         const preservationNote = addLinkPreservationNote(results.length);
         const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
 
-        return `${preservationNote}Found ${results.length} block(s) matching "${query}":\n${summary}`;
+        return `${preservationNote}Found ${results.length} block(s) matching "${query}":\n${summary}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByText:`, err);
         return `Error searching by text: ${err.message}`;
@@ -456,7 +473,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         }
         
         let filters = args.filters || args.properties || [];
-        const maxResults = args.maxResults || 20;
+        const requestedMax = args.maxResults || 20;
+        const actualLimit = Math.min(requestedMax, 50);
 
         // Handle case where AI passes filters as a JSON string instead of array
         if (typeof filters === "string") {
@@ -468,8 +486,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           }
         }
 
-        console.log(`[Tool] query_blocks_by_tag: #${tagName}`, { filters, maxResults });
-        const results = await queryBlocksByTag(tagName, { properties: filters, maxResults });
+        console.log(`[Tool] query_blocks_by_tag: #${tagName}`, { filters, maxResults: actualLimit });
+        const results = await queryBlocksByTag(tagName, { properties: filters, maxResults: actualLimit });
         console.log(`[Tool] query_blocks_by_tag found ${results.length} results`);
 
         if (results.length === 0) {
@@ -479,9 +497,10 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         const preservationNote = addLinkPreservationNote(results.length);
         const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
 
         // Add explicit completion indicator to prevent unnecessary follow-up queries
-        return `${preservationNote}✅ Search complete. Found ${results.length} block(s) for #${tagName}:\n${summary}\n\n---\n📋 Above are all matching results. You can directly reference these blocks using the blockid format shown. No further queries needed.`;
+        return `${preservationNote}✅ Search complete. Found ${results.length} block(s) for #${tagName}:\n${summary}${limitWarning}\n\n---\n📋 Above are all matching results. You can directly reference these blocks using the blockid format shown.${results.length >= actualLimit ? " Note: More results may exist beyond the limit." : " No further queries needed."}`;
       } catch (err: any) {
         console.error(`[Tool] Error in query_blocks_by_tag:`, err);
         return `Error querying tag with filters: ${err.message}`;
@@ -579,13 +598,14 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         // Advanced query with multiple conditions
         const conditions = args.conditions;
         const combineMode = args.combineMode || "and";
-        const maxResults = args.maxResults || 50;
+        const requestedMax = args.maxResults || 50;
+        const actualLimit = Math.min(requestedMax, 50);
 
         if (!Array.isArray(conditions) || conditions.length === 0) {
           return "Error: At least one condition is required for query_blocks.";
         }
 
-        console.log("[Tool] query_blocks:", { conditions, combineMode, maxResults });
+        console.log("[Tool] query_blocks:", { conditions, combineMode, maxResults: actualLimit });
 
         const convertedConditions: QueryCondition[] = conditions.map((c: any) => {
           switch (c.type) {
@@ -620,7 +640,7 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         const results = await queryBlocksAdvanced({
           conditions: convertedConditions,
           combineMode: combineMode as QueryCombineMode,
-          pageSize: Math.min(maxResults, 50),
+          pageSize: actualLimit,
         });
         console.log(`[Tool] query_blocks found ${results.length} results`);
 
@@ -630,8 +650,9 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         const preservationNote = addLinkPreservationNote(results.length);
         const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
 
-        return `${preservationNote}Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}`;
+        return `${preservationNote}Found ${results.length} block(s) matching ${combineMode.toUpperCase()} query:\n${summary}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in query_blocks:`, err);
         return `Error executing complex query: ${err.message}`;
@@ -679,7 +700,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         let pageName = args.pageName || args.page_name || args.page || args.alias || args.name 
           || args.query || args.reference || args.target || args.text || args.blockName
           || args.searchText || args.pageTitle || args.title || args.reference_page_name;
-        const maxResults = args.maxResults || 50;
+        const requestedMax = args.maxResults || 50;
+        const actualLimit = Math.min(requestedMax, 50);
 
         if (Array.isArray(pageName)) {
           pageName = pageName[0];
@@ -690,9 +712,9 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           return "Error: Missing page name parameter. Please specify which page to find references to.";
         }
 
-        console.log("[Tool] searchBlocksByReference:", { pageName, maxResults });
+        console.log("[Tool] searchBlocksByReference:", { pageName, maxResults: actualLimit });
 
-        const results = await searchBlocksByReference(pageName, Math.min(maxResults, 50));
+        const results = await searchBlocksByReference(pageName, actualLimit);
         console.log(`[Tool] searchBlocksByReference found ${results.length} results`);
 
         if (results.length === 0) {
@@ -701,8 +723,9 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
 
         const preservationNote = addLinkPreservationNote(results.length);
         const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
 
-        return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}`;
+        return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByReference:`, err);
         return `Error searching references to "${args.pageName}": ${err.message}`;
