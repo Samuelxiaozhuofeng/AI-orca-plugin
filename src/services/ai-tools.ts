@@ -37,7 +37,12 @@ export const TOOLS: OpenAITool[] = [
     type: "function",
     function: {
       name: "searchBlocksByTag",
-      description: "根据标签精准搜索笔记。支持搜索单个标签（如 #TODO）或多个标签（如 #TODO #Project）。这是获取结构化数据的最佳方式。",
+      description: `根据标签精准搜索笔记。支持搜索单个标签（如 #TODO）或多个标签。
+使用建议：
+- 用户问"有多少条X"时，用 countOnly:true 只返回数量
+- 用户要"列出所有X"时，用 briefMode:true 返回简洁列表
+- 用户要"详细看看"时，用默认模式返回完整内容
+- 结果超过50条时，用 offset 分页获取更多`,
       parameters: {
         type: "object",
         properties: {
@@ -49,6 +54,18 @@ export const TOOLS: OpenAITool[] = [
             type: "number",
             description: "返回的最大结果数（默认 20，最大 50）",
           },
+          offset: {
+            type: "number",
+            description: "跳过前 N 条结果（用于分页，如 offset:50 获取第51-100条）",
+          },
+          countOnly: {
+            type: "boolean",
+            description: "仅返回总数统计，不返回内容（用于回答'有多少条'类问题）",
+          },
+          briefMode: {
+            type: "boolean",
+            description: "简洁模式：返回标题+摘要，不返回完整内容（用于列表概览）",
+          },
         },
         required: ["tag_query"],
       },
@@ -58,7 +75,11 @@ export const TOOLS: OpenAITool[] = [
     type: "function",
     function: {
       name: "searchBlocksByText",
-      description: "全文搜索笔记。当你需要查找包含特定内容、短语或关键词的笔记时使用。适合进行模糊搜索或查找具体文本。",
+      description: `全文搜索笔记内容。适合查找包含特定关键词或短语的笔记。
+使用建议：
+- 用户问"有多少条包含X的笔记"时，用 countOnly:true
+- 用户要"列出包含X的笔记"时，用 briefMode:true
+- 结果超过50条时，用 offset 分页`,
       parameters: {
         type: "object",
         properties: {
@@ -69,6 +90,18 @@ export const TOOLS: OpenAITool[] = [
           maxResults: {
             type: "number",
             description: "返回的最大结果数（默认 20，最大 50）",
+          },
+          offset: {
+            type: "number",
+            description: "跳过前 N 条结果（用于分页）",
+          },
+          countOnly: {
+            type: "boolean",
+            description: "仅返回总数统计（用于回答'有多少条'类问题）",
+          },
+          briefMode: {
+            type: "boolean",
+            description: "简洁模式：返回标题+摘要（用于列表概览）",
           },
         },
         required: ["query"],
@@ -223,7 +256,11 @@ export const TOOLS: OpenAITool[] = [
     type: "function",
     function: {
       name: "searchBlocksByReference",
-      description: "搜索引用了特定页面的所有笔记（反向链接）。这有助于发现不同笔记之间的关联。输入参数为页面标题或文件名。",
+      description: `搜索引用了特定页面的所有笔记（反向链接）。
+使用建议：
+- 用户问"有多少笔记引用了X"时，用 countOnly:true
+- 用户要"列出引用X的笔记"时，用 briefMode:true
+- 结果超过50条时，用 offset 分页获取更多`,
       parameters: {
         type: "object",
         properties: {
@@ -234,6 +271,18 @@ export const TOOLS: OpenAITool[] = [
           maxResults: {
             type: "number",
             description: "返回的最大结果数（默认 20，最大 50）",
+          },
+          offset: {
+            type: "number",
+            description: "跳过前 N 条结果（用于分页）",
+          },
+          countOnly: {
+            type: "boolean",
+            description: "仅返回总数统计（用于回答'有多少条'类问题）",
+          },
+          briefMode: {
+            type: "boolean",
+            description: "简洁模式：返回标题+摘要（用于列表概览）",
           },
         },
         required: ["pageName"],
@@ -405,6 +454,38 @@ function buildLimitWarning(resultCount: number, maxResults: number, actualLimit:
 }
 
 /**
+ * 格式化简洁模式的搜索结果（标题+摘要+ID）
+ */
+function formatBriefResult(result: any, index: number): string {
+  const title = result.title || `(Block ${result.id})`;
+  // 提取内容摘要（前80字符）
+  const content = result.content || result.fullContent || "";
+  const summary = content.length > 80 
+    ? content.substring(0, 80).replace(/\n/g, " ") + "..."
+    : content.replace(/\n/g, " ");
+  
+  if (summary && summary !== title) {
+    return `${index + 1}. **${title}** [${result.id}](orca-block:${result.id})\n   ${summary}`;
+  }
+  return `${index + 1}. **${title}** [${result.id}](orca-block:${result.id})`;
+}
+
+/**
+ * 格式化仅统计模式的结果
+ */
+function formatCountOnlyResult(
+  count: number,
+  queryDesc: string,
+  hitLimit: boolean,
+  limit: number
+): string {
+  if (hitLimit) {
+    return `📊 统计结果：找到 **至少 ${count} 条** ${queryDesc}\n⚠️ 已达到查询上限 (${limit})，实际数量可能更多。`;
+  }
+  return `📊 统计结果：找到 **${count} 条** ${queryDesc}`;
+}
+
+/**
  * 主入口：处理 AI 调用的工具。
  */
 export async function executeTool(toolName: string, args: any): Promise<string> {
@@ -419,22 +500,50 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           return "Error: Missing tag_query parameter. Please specify which tag to search for.";
         }
         
-        const requestedMax = args.maxResults || 20;
-        const actualLimit = Math.min(requestedMax, 50);
+        const countOnly = args.countOnly === true;
+        const briefMode = args.briefMode === true;
+        const offset = Math.max(0, Math.trunc(args.offset || 0));
+        const requestedMax = args.maxResults || (countOnly ? 200 : 20);
+        const actualLimit = Math.min(requestedMax, countOnly ? 200 : 50);
+        // Fetch extra to support offset
+        const fetchLimit = offset + actualLimit;
         
-        console.log(`[Tool] searchBlocksByTag: "${tagQuery}"`);
-        const results = await searchBlocksByTag(tagQuery, actualLimit);
-        console.log(`[Tool] searchBlocksByTag found ${results.length} results`);
+        console.log(`[Tool] searchBlocksByTag: "${tagQuery}" (countOnly=${countOnly}, briefMode=${briefMode}, offset=${offset})`);
+        const allResults = await searchBlocksByTag(tagQuery, Math.min(fetchLimit, 200));
+        const results = allResults.slice(offset, offset + actualLimit);
+        const totalFetched = allResults.length;
+        console.log(`[Tool] searchBlocksByTag found ${totalFetched} total, returning ${results.length} (offset=${offset})`);
 
         if (results.length === 0) {
-          return `No blocks found with tag query "${tagQuery}".`;
+          if (offset > 0 && totalFetched > 0) {
+            return `No more results after offset ${offset}. Total found: ${totalFetched} block(s).`;
+          }
+          return countOnly 
+            ? formatCountOnlyResult(0, `标签 "${tagQuery}" 的笔记`, false, actualLimit)
+            : `No blocks found with tag query "${tagQuery}".`;
+        }
+
+        // Count only mode - just return the count
+        if (countOnly) {
+          return formatCountOnlyResult(totalFetched, `标签 "${tagQuery}" 的笔记`, totalFetched >= fetchLimit, fetchLimit);
         }
 
         const preservationNote = addLinkPreservationNote(results.length);
-        const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
-        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
+        const summary = briefMode
+          ? results.map((r: any, i: number) => formatBriefResult(r, i + offset)).join("\n")
+          : results.map((r: any, i: number) => formatBlockResult(r, i + offset)).join("\n\n");
+        
+        // Build pagination info
+        let paginationInfo = "";
+        if (offset > 0 || totalFetched >= fetchLimit) {
+          paginationInfo = `\n\n📄 显示第 ${offset + 1}-${offset + results.length} 条`;
+          if (totalFetched >= fetchLimit) {
+            paginationInfo += `（可能还有更多，用 offset:${offset + actualLimit} 获取下一页）`;
+          }
+        }
+        const limitWarning = totalFetched >= fetchLimit ? buildLimitWarning(totalFetched, requestedMax, fetchLimit) : "";
 
-        return `${preservationNote}Found ${results.length} block(s) with tag "${tagQuery}":\n${summary}${limitWarning}`;
+        return `${preservationNote}Found ${results.length} block(s) with tag "${tagQuery}":\n${summary}${paginationInfo}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByTag:`, err);
         return `Error searching by tag: ${err.message}`;
@@ -442,22 +551,50 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
     } else if (toolName === "searchBlocksByText") {
       try {
         const query = args.query;
-        const requestedMax = args.maxResults || 20;
-        const actualLimit = Math.min(requestedMax, 50);
+        const countOnly = args.countOnly === true;
+        const countOnly = args.countOnly === true;
+        const briefMode = args.briefMode === true;
+        const offset = Math.max(0, Math.trunc(args.offset || 0));
+        const requestedMax = args.maxResults || (countOnly ? 200 : 20);
+        const actualLimit = Math.min(requestedMax, countOnly ? 200 : 50);
+        const fetchLimit = offset + actualLimit;
 
-        console.log(`[Tool] searchBlocksByText: "${query}"`);
-        const results = await searchBlocksByText(query, actualLimit);
-        console.log(`[Tool] searchBlocksByText found ${results.length} results`);
+        console.log(`[Tool] searchBlocksByText: "${query}" (countOnly=${countOnly}, briefMode=${briefMode}, offset=${offset})`);
+        const allResults = await searchBlocksByText(query, Math.min(fetchLimit, 200));
+        const results = allResults.slice(offset, offset + actualLimit);
+        const totalFetched = allResults.length;
+        console.log(`[Tool] searchBlocksByText found ${totalFetched} total, returning ${results.length} (offset=${offset})`);
 
         if (results.length === 0) {
-          return `No blocks found matching text "${query}".`;
+          if (offset > 0 && totalFetched > 0) {
+            return `No more results after offset ${offset}. Total found: ${totalFetched} block(s).`;
+          }
+          return countOnly
+            ? formatCountOnlyResult(0, `包含 "${query}" 的笔记`, false, actualLimit)
+            : `No blocks found matching text "${query}".`;
+        }
+
+        // Count only mode
+        if (countOnly) {
+          return formatCountOnlyResult(totalFetched, `包含 "${query}" 的笔记`, totalFetched >= fetchLimit, fetchLimit);
         }
 
         const preservationNote = addLinkPreservationNote(results.length);
-        const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
-        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
+        const summary = briefMode
+          ? results.map((r: any, i: number) => formatBriefResult(r, i + offset)).join("\n")
+          : results.map((r: any, i: number) => formatBlockResult(r, i + offset)).join("\n\n");
+        
+        // Build pagination info
+        let paginationInfo = "";
+        if (offset > 0 || totalFetched >= fetchLimit) {
+          paginationInfo = `\n\n📄 显示第 ${offset + 1}-${offset + results.length} 条`;
+          if (totalFetched >= fetchLimit) {
+            paginationInfo += `（可能还有更多，用 offset:${offset + actualLimit} 获取下一页）`;
+          }
+        }
+        const limitWarning = totalFetched >= fetchLimit ? buildLimitWarning(totalFetched, requestedMax, fetchLimit) : "";
 
-        return `${preservationNote}Found ${results.length} block(s) matching "${query}":\n${summary}${limitWarning}`;
+        return `${preservationNote}Found ${results.length} block(s) matching "${query}":\n${summary}${paginationInfo}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByText:`, err);
         return `Error searching by text: ${err.message}`;
@@ -700,8 +837,12 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         let pageName = args.pageName || args.page_name || args.page || args.alias || args.name 
           || args.query || args.reference || args.target || args.text || args.blockName
           || args.searchText || args.pageTitle || args.title || args.reference_page_name;
-        const requestedMax = args.maxResults || 50;
-        const actualLimit = Math.min(requestedMax, 50);
+        const countOnly = args.countOnly === true;
+        const briefMode = args.briefMode === true;
+        const offset = Math.max(0, Math.trunc(args.offset || 0));
+        const requestedMax = args.maxResults || (countOnly ? 200 : 50);
+        const actualLimit = Math.min(requestedMax, countOnly ? 200 : 50);
+        const fetchLimit = offset + actualLimit;
 
         if (Array.isArray(pageName)) {
           pageName = pageName[0];
@@ -712,20 +853,43 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           return "Error: Missing page name parameter. Please specify which page to find references to.";
         }
 
-        console.log("[Tool] searchBlocksByReference:", { pageName, maxResults: actualLimit });
+        console.log("[Tool] searchBlocksByReference:", { pageName, maxResults: actualLimit, countOnly, briefMode, offset });
 
-        const results = await searchBlocksByReference(pageName, actualLimit);
-        console.log(`[Tool] searchBlocksByReference found ${results.length} results`);
+        const allResults = await searchBlocksByReference(pageName, Math.min(fetchLimit, 200));
+        const results = allResults.slice(offset, offset + actualLimit);
+        const totalFetched = allResults.length;
+        console.log(`[Tool] searchBlocksByReference found ${totalFetched} total, returning ${results.length} (offset=${offset})`);
 
         if (results.length === 0) {
-          return `No blocks found referencing "[[${pageName}]]".`;
+          if (offset > 0 && totalFetched > 0) {
+            return `No more results after offset ${offset}. Total found: ${totalFetched} block(s).`;
+          }
+          return countOnly
+            ? formatCountOnlyResult(0, `引用 "[[${pageName}]]" 的笔记`, false, actualLimit)
+            : `No blocks found referencing "[[${pageName}]]".`;
+        }
+
+        // Count only mode
+        if (countOnly) {
+          return formatCountOnlyResult(totalFetched, `引用 "[[${pageName}]]" 的笔记`, totalFetched >= fetchLimit, fetchLimit);
         }
 
         const preservationNote = addLinkPreservationNote(results.length);
-        const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
-        const limitWarning = buildLimitWarning(results.length, requestedMax, actualLimit);
+        const summary = briefMode
+          ? results.map((r: any, i: number) => formatBriefResult(r, i + offset)).join("\n")
+          : results.map((r: any, i: number) => formatBlockResult(r, i + offset)).join("\n\n");
+        
+        // Build pagination info
+        let paginationInfo = "";
+        if (offset > 0 || totalFetched >= fetchLimit) {
+          paginationInfo = `\n\n📄 显示第 ${offset + 1}-${offset + results.length} 条`;
+          if (totalFetched >= fetchLimit) {
+            paginationInfo += `（可能还有更多，用 offset:${offset + actualLimit} 获取下一页）`;
+          }
+        }
+        const limitWarning = totalFetched >= fetchLimit ? buildLimitWarning(totalFetched, requestedMax, fetchLimit) : "";
 
-        return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}${limitWarning}`;
+        return `${preservationNote}Found ${results.length} block(s) referencing "[[${pageName}]]":\n${summary}${paginationInfo}${limitWarning}`;
       } catch (err: any) {
         console.error(`[Tool] Error in searchBlocksByReference:`, err);
         return `Error searching references to "${args.pageName}": ${err.message}`;
