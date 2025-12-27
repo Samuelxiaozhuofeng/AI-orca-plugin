@@ -25,18 +25,12 @@ export type TaskCardData = {
   blockId?: number;
 };
 
-export type ProgressData = {
-  value: number; // 0-100
-  label?: string;
-};
-
 export type MarkdownNode =
   | { type: "paragraph"; children: MarkdownInlineNode[] }
   | { type: "heading"; level: number; children: MarkdownInlineNode[] }
   | { type: "list"; ordered: boolean; items: MarkdownInlineNode[][] }
   | { type: "checklist"; items: CheckboxItem[] }
   | { type: "taskcard"; task: TaskCardData }
-  | { type: "progress"; data: ProgressData }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
   | { type: "table"; headers: MarkdownInlineNode[][]; alignments: TableAlignment[]; rows: MarkdownInlineNode[][][] }
@@ -292,30 +286,6 @@ export function parseMarkdown(text: string): MarkdownNode[] {
       flushParagraph();
       flushList();
       nodes.push({ type: "hr" });
-      continue;
-    }
-
-    // Progress bar: "progress: 60%", "进度: 60%", "[=====>    ] 60%"
-    const progressMatch = rawLine.match(/^(?:progress|进度)\s*[:：]\s*(\d+)%?\s*(.*)$/i) ||
-                          rawLine.match(/^\[([=\->#]+)\s*\]\s*(\d+)%?\s*(.*)$/);
-    if (progressMatch) {
-      flushParagraph();
-      flushList();
-      let value: number;
-      let label: string | undefined;
-      
-      if (progressMatch[0].startsWith("[")) {
-        // [=====>    ] 60% format
-        value = parseInt(progressMatch[2], 10);
-        label = progressMatch[3]?.trim() || undefined;
-      } else {
-        // progress: 60% format
-        value = parseInt(progressMatch[1], 10);
-        label = progressMatch[2]?.trim() || undefined;
-      }
-      
-      value = Math.max(0, Math.min(100, value));
-      nodes.push({ type: "progress", data: { value, label } });
       continue;
     }
 

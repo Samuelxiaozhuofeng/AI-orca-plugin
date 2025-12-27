@@ -1,4 +1,4 @@
-import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TaskCardData, type ProgressData } from "../utils/markdown-renderer";
+import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TaskCardData } from "../utils/markdown-renderer";
 import {
   codeBlockContainerStyle,
   codeBlockHeaderStyle,
@@ -398,33 +398,50 @@ function TaskCardBlock({ task }: { task: TaskCardData }) {
   );
 }
 
-// Helper component for Progress Bar
-function ProgressBar({ data }: { data: ProgressData }) {
-  const getColor = (value: number): string => {
-    if (value >= 80) return "var(--orca-color-success, #28a745)";
-    if (value >= 50) return "var(--orca-color-primary-5, var(--orca-color-primary, #007bff))";
-    if (value >= 30) return "var(--orca-color-warning, #ffc107)";
-    return "var(--orca-color-danger, #dc3545)";
-  };
-
-  return createElement(
-    "div",
-    { className: "md-progress" },
-    createElement(
-      "div",
-      { className: "md-progress-bar" },
-      createElement("div", {
-        className: "md-progress-fill",
-        style: { width: `${data.value}%`, background: getColor(data.value) }
-      })
-    ),
-    createElement(
-      "span",
-      { className: "md-progress-text" },
-      `${data.value}%`,
-      data.label && createElement("span", { className: "md-progress-label" }, ` ${data.label}`)
-    )
+// Helper: Check if a link node will be rendered as a dot (meaningless reference)
+function isBlockDotLink(node: MarkdownInlineNode): boolean {
+  if (node.type !== "link") return false;
+  if (!node.url.startsWith("orca-block:")) return false;
+  const linkText = node.children.map(c => c.type === "text" ? c.content : "").join("").trim();
+  return (
+    /^\d+$/.test(linkText) ||
+    /^blockid[:：]?\d+$/i.test(linkText) ||
+    /^块\s*ID\s*[:：]?\s*\d+$/i.test(linkText) ||
+    /^(查看|详情|点击|跳转|打开|前往|查看详情|点击查看|查看更多|小圆点|View|Click|Open)$/i.test(linkText)
   );
+}
+
+// Helper: Clean up brackets/commas around block dots in inline nodes
+function cleanupDotPunctuation(nodes: MarkdownInlineNode[]): MarkdownInlineNode[] {
+  const result: MarkdownInlineNode[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const prevIsDot = i > 0 && isBlockDotLink(nodes[i - 1]);
+    const nextIsDot = i < nodes.length - 1 && isBlockDotLink(nodes[i + 1]);
+    
+    if (node.type === "text" && (prevIsDot || nextIsDot)) {
+      // Remove brackets and commas around dots
+      let cleaned = node.content;
+      if (nextIsDot) {
+        // Before a dot: remove trailing ( （ [ 【
+        cleaned = cleaned.replace(/[(\[（【]+\s*$/, "");
+      }
+      if (prevIsDot) {
+        // After a dot: remove leading ) ） ] 】 , ，
+        cleaned = cleaned.replace(/^\s*[)\]）】,，]+/, "");
+      }
+      if (prevIsDot && nextIsDot) {
+        // Between dots: remove , ， and spaces
+        cleaned = cleaned.replace(/^[\s,，]+$/, "");
+      }
+      if (cleaned) {
+        result.push({ type: "text", content: cleaned });
+      }
+    } else {
+      result.push(node);
+    }
+  }
+  return result;
 }
 
 function renderInlineNode(node: MarkdownInlineNode, key: number): any {
@@ -493,13 +510,14 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
         // 2. blockid:xxx format (e.g., "blockid:14772")
         // 3. 块 ID: xxx format (e.g., "块 ID: 14184")
         // 4. Exact match action words only (e.g., "查看详情", "点击")
+        // 5. "小圆点" literal (AI sometimes uses this)
         // Real titles (even short ones like "日记", "想法") should show text
         const linkText = node.children.map(c => c.type === "text" ? c.content : "").join("").trim();
         const isBlockIdOnly = 
           /^\d+$/.test(linkText) || // Pure numbers only
           /^blockid[:：]?\d+$/i.test(linkText) || // blockid:xxx format
           /^块\s*ID\s*[:：]?\s*\d+$/i.test(linkText) || // 块 ID: xxx format
-          /^(查看|详情|点击|跳转|打开|前往|查看详情|点击查看|查看更多|View|Click|Open)$/i.test(linkText); // Exact match action words
+          /^(查看|详情|点击|跳转|打开|前往|查看详情|点击查看|查看更多|小圆点|View|Click|Open)$/i.test(linkText); // Exact match action words
 
         // Render as small dot if it's just a block ID reference
         if (isBlockIdOnly) {
@@ -601,15 +619,17 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       );
     }
 
-    case "paragraph":
+    case "paragraph": {
+      const cleanedChildren = cleanupDotPunctuation(node.children);
       return createElement(
         "p",
         {
           key,
           style: paragraphStyle,
         },
-        ...node.children.map((child, i) => renderInlineNode(child, i)),
+        ...cleanedChildren.map((child, i) => renderInlineNode(child, i)),
       );
+    }
 
     case "list": {
       const ListTag = (node.ordered ? "ol" : "ul") as any;
@@ -672,13 +692,6 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       return createElement(TaskCardBlock, {
         key,
         task: node.task,
-      });
-    }
-
-    case "progress": {
-      return createElement(ProgressBar, {
-        key,
-        data: node.data,
       });
     }
 

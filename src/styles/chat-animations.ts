@@ -288,43 +288,6 @@ export const chatAnimations = `
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Progress Bar
-   ─────────────────────────────────────────────────────────────────────────── */
-
-.md-progress {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 12px 0;
-}
-
-.md-progress-bar {
-    flex: 1;
-    height: 8px;
-    background: var(--orca-color-bg-3, rgba(128, 128, 128, 0.15));
-    border-radius: 4px;
-    overflow: hidden;
-}
-
-.md-progress-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.md-progress-text {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--orca-color-text-1, inherit);
-    min-width: 45px;
-}
-
-.md-progress-label {
-    font-weight: 400;
-    color: var(--orca-color-text-2, #666);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
    List Styles
    ─────────────────────────────────────────────────────────────────────────── */
 
@@ -543,6 +506,12 @@ export const chatAnimations = `
 .md-block-dot:hover {
     transform: scale(1.4);
     box-shadow: 0 0 8px currentColor;
+}
+
+/* Hide br tags adjacent to block dots */
+.md-block-dot + br,
+br + .md-block-dot {
+    display: none;
 }
 
 .md-task-footer {
