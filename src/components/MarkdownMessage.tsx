@@ -1,4 +1,4 @@
-import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode } from "../utils/markdown-renderer";
+import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment } from "../utils/markdown-renderer";
 import {
   codeBlockContainerStyle,
   codeBlockHeaderStyle,
@@ -263,6 +263,83 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
         language: node.language,
         content: node.content,
       });
+
+    case "table": {
+      const tableStyle: any = {
+        width: "100%",
+        borderCollapse: "collapse",
+        margin: "12px 0",
+        fontSize: "14px",
+        overflow: "auto",
+      };
+      const thStyle = (align: string | null): any => ({
+        padding: "8px 12px",
+        borderBottom: "2px solid var(--orca-color-border, #e0e0e0)",
+        background: "var(--orca-color-bg-secondary, #f5f5f5)",
+        fontWeight: 600,
+        textAlign: align || "left",
+        whiteSpace: "nowrap",
+      });
+      const tdStyle = (align: string | null): any => ({
+        padding: "8px 12px",
+        borderBottom: "1px solid var(--orca-color-border, #e0e0e0)",
+        textAlign: align || "left",
+      });
+      const trHoverStyle = {
+        background: "var(--orca-color-bg-hover, #f9f9f9)",
+      };
+
+      return createElement(
+        "div",
+        { key, style: { overflowX: "auto", margin: "12px 0" } },
+        createElement(
+          "table",
+          { style: tableStyle },
+          // Header
+          createElement(
+            "thead",
+            null,
+            createElement(
+              "tr",
+              null,
+              ...node.headers.map((headerCells, colIndex) =>
+                createElement(
+                  "th",
+                  { key: colIndex, style: thStyle(node.alignments[colIndex]) },
+                  ...headerCells.map((child, i) => renderInlineNode(child, i))
+                )
+              )
+            )
+          ),
+          // Body
+          createElement(
+            "tbody",
+            null,
+            ...node.rows.map((row, rowIndex) =>
+              createElement(
+                "tr",
+                {
+                  key: rowIndex,
+                  onMouseEnter: (e: any) => {
+                    e.currentTarget.style.background = "var(--orca-color-bg-hover, #f9f9f9)";
+                  },
+                  onMouseLeave: (e: any) => {
+                    e.currentTarget.style.background = "transparent";
+                  },
+                },
+                ...row.map((cellNodes, colIndex) =>
+                  createElement(
+                    "td",
+                    { key: colIndex, style: tdStyle(node.alignments[colIndex]) },
+                    ...cellNodes.map((child, i) => renderInlineNode(child, i))
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+    }
 
     default:
       return null;

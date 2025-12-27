@@ -6,12 +6,15 @@ export type MarkdownInlineNode =
   | { type: "link"; url: string; children: MarkdownInlineNode[] }
   | { type: "break" };
 
+export type TableAlignment = "left" | "center" | "right" | null;
+
 export type MarkdownNode =
   | { type: "paragraph"; children: MarkdownInlineNode[] }
   | { type: "heading"; level: number; children: MarkdownInlineNode[] }
   | { type: "list"; ordered: boolean; items: MarkdownInlineNode[][] }
   | { type: "quote"; children: MarkdownNode[] }
-  | { type: "codeblock"; content: string; language?: string };
+  | { type: "codeblock"; content: string; language?: string }
+  | { type: "table"; headers: MarkdownInlineNode[][]; alignments: TableAlignment[]; rows: MarkdownInlineNode[][][] };
 
 function normalizeNewlines(text: string): string {
   return text.replace(/\r\n/g, "\n");
@@ -37,6 +40,51 @@ function mergeAdjacentTextNodes(nodes: MarkdownInlineNode[]): MarkdownInlineNode
     merged.push(node);
   }
   return merged;
+}
+
+/**
+ * Parse a table row into cells
+ */
+function parseTableRow(line: string): string[] {
+  // Remove leading/trailing pipes and split by |
+  const trimmed = line.trim();
+  const withoutPipes = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+  const withoutEndPipe = withoutPipes.endsWith("|") ? withoutPipes.slice(0, -1) : withoutPipes;
+  return withoutEndPipe.split("|").map(cell => cell.trim());
+}
+
+/**
+ * Check if a line is a table separator (e.g., |---|:---:|---:|)
+ */
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  // Must contain at least one | and consist of |, -, :, and spaces
+  if (!trimmed.includes("|")) return false;
+  return /^[\s|:\-]+$/.test(trimmed) && trimmed.includes("-");
+}
+
+/**
+ * Parse table alignment from separator row
+ */
+function parseTableAlignments(separatorLine: string): TableAlignment[] {
+  const cells = parseTableRow(separatorLine);
+  return cells.map(cell => {
+    const trimmed = cell.trim();
+    const hasLeft = trimmed.startsWith(":");
+    const hasRight = trimmed.endsWith(":");
+    if (hasLeft && hasRight) return "center";
+    if (hasRight) return "right";
+    if (hasLeft) return "left";
+    return null;
+  });
+}
+
+/**
+ * Check if a line looks like a table row
+ */
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.includes("|") && !trimmed.startsWith(">") && !trimmed.match(/^\s*```/);
 }
 
 /**
@@ -161,6 +209,40 @@ export function parseMarkdown(text: string): MarkdownNode[] {
         level: headingMatch[1].length,
         children: parseInlineMarkdown(headingMatch[2]),
       });
+      continue;
+    }
+
+    // Table detection: header row followed by separator row
+    if (isTableRow(rawLine) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+      flushParagraph();
+      flushList();
+
+      const headerCells = parseTableRow(rawLine);
+      const alignments = parseTableAlignments(lines[i + 1]);
+      const rows: MarkdownInlineNode[][][] = [];
+
+      // Skip header and separator
+      let j = i + 2;
+      
+      // Collect data rows
+      while (j < lines.length && isTableRow(lines[j]) && !isTableSeparator(lines[j])) {
+        const rowCells = parseTableRow(lines[j]);
+        // Pad or trim to match header column count
+        while (rowCells.length < headerCells.length) rowCells.push("");
+        if (rowCells.length > headerCells.length) rowCells.length = headerCells.length;
+        
+        rows.push(rowCells.map(cell => parseInlineMarkdown(cell)));
+        j++;
+      }
+
+      nodes.push({
+        type: "table",
+        headers: headerCells.map(cell => parseInlineMarkdown(cell)),
+        alignments,
+        rows,
+      });
+
+      i = j - 1;
       continue;
     }
 
