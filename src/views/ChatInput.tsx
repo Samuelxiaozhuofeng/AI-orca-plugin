@@ -47,7 +47,7 @@ const { useSnapshot } = (window as any).Valtio as {
 const { Button, CompositionTextArea } = orca.components;
 
 type Props = {
-  onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void;
+  onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void | Promise<void>;
   onStop?: () => void;
   disabled?: boolean;
   currentPageId: DbId | null;
@@ -100,6 +100,7 @@ export default function ChatInput({
   const [pendingFiles, setPendingFiles] = useState<FileRef[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -126,21 +127,26 @@ export default function ChatInput({
     loadFromStorage();
   }, []);
 
-  const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled;
+  const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled && !isSending;
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const val = textareaRef.current?.value || text;
     const trimmed = val.trim();
-    if ((!trimmed && pendingFiles.length === 0) || disabled) return;
+    if ((!trimmed && pendingFiles.length === 0) || disabled || isSending) return;
 
-    onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
-    setText("");
-    setPendingFiles([]);
-    setClearContextPending(false);
-    if (textareaRef.current) {
-      textareaRef.current.value = "";
+    setIsSending(true);
+    try {
+      await onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
+      setText("");
+      setPendingFiles([]);
+      setClearContextPending(false);
+      if (textareaRef.current) {
+        textareaRef.current.value = "";
+      }
+    } finally {
+      setIsSending(false);
     }
-  }, [disabled, onSend, text, pendingFiles, clearContextPending]);
+  }, [disabled, onSend, text, pendingFiles, clearContextPending, isSending]);
 
   // 处理清除上下文按钮点击
   const handleClearContextClick = useCallback(() => {
@@ -788,9 +794,25 @@ export default function ChatInput({
                 variant: "solid",
                 disabled: !canSend,
                 onClick: handleSend,
-                style: { ...sendButtonStyle(canSend), borderRadius: "50%", width: "32px", height: "32px", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" },
+                title: isSending ? "正在加载内容..." : "发送消息",
+                style: { 
+                  ...sendButtonStyle(canSend), 
+                  borderRadius: "50%", 
+                  width: "32px", 
+                  height: "32px", 
+                  padding: 0, 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center",
+                  opacity: isSending ? 0.7 : 1,
+                },
               },
-              createElement("i", { className: "ti ti-arrow-up" })
+              createElement("i", { 
+                className: isSending ? "ti ti-loader" : "ti ti-arrow-up",
+                style: isSending ? {
+                  animation: "spin 1s linear infinite",
+                } : undefined,
+              })
             )
       )
     )

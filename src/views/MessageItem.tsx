@@ -13,6 +13,7 @@
 
 import MarkdownMessage from "../components/MarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
+import SuggestedReplies from "../components/SuggestedReplies";
 import ExtractMemoryButton from "./ExtractMemoryButton";
 import type { ExtractedMemory } from "../services/memory-extraction";
 import { getFileDisplayUrl, getFileIcon, getFileFullPath } from "../services/file-service";
@@ -220,6 +221,10 @@ interface MessageItemProps {
   conversationContext?: string;
   // Callback when memories are extracted from this message
   onExtractMemory?: (memories: ExtractedMemory[]) => void;
+  // Callback when user clicks a suggested reply
+  onSuggestedReply?: (text: string) => void;
+  // Callback to generate AI-powered suggestions
+  onGenerateSuggestions?: () => Promise<string[]>;
 }
 
 /**
@@ -396,6 +401,8 @@ export default function MessageItem({
   toolResults,
   conversationContext,
   onExtractMemory,
+  onSuggestedReply,
+  onGenerateSuggestions,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isExtractDropdownOpen, setIsExtractDropdownOpen] = useState(false);
@@ -565,11 +572,34 @@ export default function MessageItem({
       // Content
       createElement(MarkdownMessage, { content: message.content || "", role: message.role }),
 
-      // Cursor for streaming
+      // Cursor for streaming - 如果内容为空，显示"正在输出"提示
       isStreaming &&
-        createElement("span", {
-          style: cursorStyle,
-        }),
+        (message.content && message.content.length > 0
+          ? createElement("span", {
+              style: cursorStyle,
+            })
+          : createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  color: "var(--orca-color-text-3)",
+                  fontSize: "13px",
+                  fontStyle: "italic",
+                  marginTop: "4px",
+                },
+              },
+              createElement("i", {
+                className: "ti ti-dots",
+                style: {
+                  fontSize: "16px",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                },
+              }),
+              "正在输出"
+            )),
 
       // Tool Calls with Results (unified display, auto-collapse when done)
       message.tool_calls &&
@@ -578,6 +608,18 @@ export default function MessageItem({
           toolCalls: message.tool_calls,
           toolResults,
           isStreaming,
+        }),
+
+      // Suggested Replies (only for last AI message, after streaming completes)
+      isAssistant &&
+        isLastAiMessage &&
+        !isStreaming &&
+        message.content &&
+        onSuggestedReply &&
+        onGenerateSuggestions &&
+        createElement(SuggestedReplies, {
+          onReplyClick: onSuggestedReply,
+          onGenerate: onGenerateSuggestions,
         }),
 
       // Message Time

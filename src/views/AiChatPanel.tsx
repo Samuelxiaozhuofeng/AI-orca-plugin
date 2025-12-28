@@ -7,6 +7,7 @@ import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
 import { getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
+import { generateSuggestedReplies } from "../services/suggestion-service";
 import ChatInput from "./ChatInput";
 import MarkdownMessage from "../components/MarkdownMessage";
 import MessageItem from "./MessageItem";
@@ -428,21 +429,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     setSending(true);
 
-    // 显示给用户的消息保留原始内容
+    // 先添加用户消息到列表
     const userMsg: Message = { 
       id: nowId(), 
       role: "user", 
       content, 
       createdAt: Date.now(),
       files: files && files.length > 0 ? files : undefined,
-    };
-    // 发送给 API 的消息使用处理后的内容（去掉指令）
-    const userMsgForApi: Message = { 
-      id: userMsg.id, 
-      role: "user", 
-      content: processedContent, 
-      createdAt: userMsg.createdAt,
-      files: userMsg.files,
     };
 
     // Use override if provided (for regeneration), otherwise append to current state
@@ -453,6 +446,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
     
     queueMicrotask(scrollToBottom);
+
+    // 发送给 API 的消息使用处理后的内容（去掉指令）
+    const userMsgForApi: Message = { 
+      id: userMsg.id, 
+      role: "user", 
+      content: processedContent, 
+      createdAt: userMsg.createdAt,
+      files: userMsg.files,
+    };
 
     const aborter = new AbortController();
     abortRef.current = aborter;
@@ -943,6 +945,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
   }, []);
 
+  // 生成建议回复 - 根据指定的 AI 消息内容生成
+  const createSuggestionGenerator = useCallback(
+    (messageContent: string) => async (): Promise<string[]> => {
+      const suggestions = await generateSuggestedReplies(messageContent);
+      return suggestions;
+    },
+    []
+  );
+
   // ─────────────────────────────────────────────────────────────────────────
   // Derived State
   // ─────────────────────────────────────────────────────────────────────────
@@ -1028,11 +1039,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           onDelete: () => handleDeleteMessage(m.id),
           onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
           toolResults: m.tool_calls ? toolResultsMap : undefined,
+          onSuggestedReply: isLastAi ? (text: string) => handleSend(text) : undefined,
+          onGenerateSuggestions: isLastAi && m.content ? createSuggestionGenerator(m.content) : undefined,
         })
       );
     });
 
-    // Add loading dots if waiting for response
+    // Add loading indicator if waiting for response
     const lastMsg = messages[messages.length - 1];
     if (sending && lastMsg && lastMsg.role === "user") {
       messageElements.push(
@@ -1040,14 +1053,56 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           "div",
           {
             key: "loading",
-            style: loadingContainerStyle,
+            style: {
+              ...loadingContainerStyle,
+              animation: "messageSlideIn 0.3s ease-out",
+            },
           },
           createElement(
             "div",
             {
-              style: loadingBubbleStyle,
+              style: {
+                ...loadingBubbleStyle,
+                minHeight: "48px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              },
             },
-            createElement(LoadingDots)
+            // 添加明显的"正在思考"提示
+            createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  color: "var(--orca-color-text-2)",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                },
+              },
+              createElement("i", {
+                className: "ti ti-brain",
+                style: {
+                  fontSize: "20px",
+                  color: "var(--orca-color-primary)",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                },
+              }),
+              createElement(
+                "span",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                "AI 正在思考",
+                createElement(LoadingDots)
+              )
+            )
           )
         )
       );

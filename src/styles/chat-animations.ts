@@ -72,6 +72,16 @@ export const chatAnimations = `
     100% { opacity: 0.6; }
 }
 
+/* Spin Animation for Loading States */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 /* Animation Classes */
 .tool-animation-sparkle {
     display: inline-block;
