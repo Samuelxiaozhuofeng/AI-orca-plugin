@@ -420,7 +420,7 @@ type ToolStatus = "loading" | "success" | "failed" | "cancelled";
  * Gemini UX Review: Pill shape + subtle background + secondary text color
  */
 export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => ({
-  display: "inline-flex",
+  display: "flex",
   alignItems: "center",
   gap: "8px",
   padding: "6px 12px",
@@ -435,6 +435,8 @@ export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => 
       ? "var(--orca-color-danger, #dc3545)"
       : "var(--orca-color-text-2)",
   transition: "all 0.2s ease",
+  maxWidth: "100%",
+  overflow: "hidden",
 });
 
 /**
