@@ -26,6 +26,12 @@ export type CompareItem = {
   right: MarkdownInlineNode[];
 };
 
+export type GalleryImage = {
+  src: string;
+  alt: string;
+  caption?: string;
+};
+
 export type MarkdownNode =
   | { type: "paragraph"; children: MarkdownInlineNode[] }
   | { type: "heading"; level: number; children: MarkdownInlineNode[] }
@@ -34,6 +40,7 @@ export type MarkdownNode =
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
   | { type: "localgraph"; blockId: number }
+  | { type: "gallery"; images: GalleryImage[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
   | { type: "table"; headers: MarkdownInlineNode[][]; alignments: TableAlignment[]; rows: MarkdownInlineNode[][][] }
@@ -162,6 +169,47 @@ function parseCompare(content: string): { leftTitle: MarkdownInlineNode[]; right
 }
 
 /**
+ * Parse gallery from code block content
+ * Format: Each line is an image entry
+ * - Simple: image_path
+ * - With alt: image_path | alt_text
+ * - With caption: image_path | alt_text | caption
+ * - Markdown image: ![alt](src)
+ */
+function parseGallery(content: string): GalleryImage[] | null {
+  const lines = content.trim().split("\n").filter(l => l.trim());
+  if (lines.length === 0) return null;
+  
+  const images: GalleryImage[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Try markdown image format: ![alt](src)
+    const mdMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)(?:\s*\|\s*(.+))?$/);
+    if (mdMatch) {
+      images.push({
+        src: mdMatch[2],
+        alt: mdMatch[1] || "",
+        caption: mdMatch[3]?.trim(),
+      });
+      continue;
+    }
+    
+    // Try pipe-separated format: src | alt | caption
+    const parts = trimmed.split("|").map(p => p.trim());
+    if (parts[0]) {
+      images.push({
+        src: parts[0],
+        alt: parts[1] || "",
+        caption: parts[2],
+      });
+    }
+  }
+  
+  return images.length > 0 ? images : null;
+}
+
+/**
  * Parse timeline from code block content
  * Format: date | title | description (optional) | category (optional)
  * Title supports inline markdown (links, bold, etc.)
@@ -188,6 +236,71 @@ function parseTimeline(content: string): TimelineItem[] | null {
 }
 
 
+
+/**
+ * Check if a paragraph contains only a single image (no other content)
+ */
+function isImageOnlyParagraph(node: MarkdownNode): node is { type: "paragraph"; children: MarkdownInlineNode[] } {
+  if (node.type !== "paragraph") return false;
+  const children = node.children;
+  // Filter out breaks and empty text
+  const meaningful = children.filter(c => {
+    if (c.type === "break") return false;
+    if (c.type === "text" && !c.content.trim()) return false;
+    return true;
+  });
+  return meaningful.length === 1 && meaningful[0].type === "image";
+}
+
+/**
+ * Extract image info from an image-only paragraph
+ */
+function extractImageFromParagraph(node: MarkdownNode): GalleryImage | null {
+  if (!isImageOnlyParagraph(node)) return null;
+  const imgNode = node.children.find(c => c.type === "image");
+  if (!imgNode || imgNode.type !== "image") return null;
+  return { src: imgNode.src, alt: imgNode.alt };
+}
+
+/**
+ * Post-process: merge consecutive image-only paragraphs into gallery blocks
+ * Only merges when there are 2+ consecutive images
+ */
+function mergeConsecutiveImages(nodes: MarkdownNode[]): MarkdownNode[] {
+  const result: MarkdownNode[] = [];
+  let imageBuffer: GalleryImage[] = [];
+  
+  const flushImageBuffer = () => {
+    if (imageBuffer.length === 0) return;
+    if (imageBuffer.length === 1) {
+      // Single image: keep as paragraph
+      result.push({
+        type: "paragraph",
+        children: [{ type: "image", src: imageBuffer[0].src, alt: imageBuffer[0].alt }],
+      });
+    } else {
+      // Multiple images: create gallery
+      result.push({
+        type: "gallery",
+        images: imageBuffer,
+      });
+    }
+    imageBuffer = [];
+  };
+  
+  for (const node of nodes) {
+    const img = extractImageFromParagraph(node);
+    if (img) {
+      imageBuffer.push(img);
+    } else {
+      flushImageBuffer();
+      result.push(node);
+    }
+  }
+  
+  flushImageBuffer();
+  return result;
+}
 
 /**
  * Markdown Parser
@@ -275,6 +388,21 @@ export function parseMarkdown(text: string): MarkdownNode[] {
       }
     }
     
+    // Check if it's a gallery code block
+    if (codeBlockLang.toLowerCase() === "gallery" || codeBlockLang.toLowerCase() === "images") {
+      const galleryImages = parseGallery(codeBlockLines.join("\n"));
+      if (galleryImages) {
+        nodes.push({
+          type: "gallery",
+          images: galleryImages,
+        });
+        inCodeBlock = false;
+        codeBlockLang = "";
+        codeBlockLines = [];
+        return;
+      }
+    }
+    
     // Check if it's a localgraph code block
     if (codeBlockLang.toLowerCase() === "localgraph") {
       const blockIdStr = codeBlockLines.join("\n").trim();
@@ -289,6 +417,30 @@ export function parseMarkdown(text: string): MarkdownNode[] {
         codeBlockLines = [];
         return;
       }
+    }
+    
+    // Intercept graph/mermaid code blocks - AI sometimes returns these despite instructions
+    // Try to extract blockId from the content and convert to localgraph
+    if (codeBlockLang.toLowerCase() === "graph" || codeBlockLang.toLowerCase() === "mermaid" || codeBlockLang.toLowerCase() === "flowchart") {
+      const content = codeBlockLines.join("\n");
+      // Try to find block IDs in the content (e.g., "14772", "blockid:14772", links like "14772[title]")
+      const blockIdMatches = content.match(/\b(\d{3,})\b/g);
+      if (blockIdMatches && blockIdMatches.length > 0) {
+        // Use the first block ID found as the center node
+        const blockId = parseInt(blockIdMatches[0], 10);
+        if (blockId > 0) {
+          console.log(`[markdown-renderer] Intercepted ${codeBlockLang} block, converting to localgraph with blockId=${blockId}`);
+          nodes.push({
+            type: "localgraph",
+            blockId,
+          });
+          inCodeBlock = false;
+          codeBlockLang = "";
+          codeBlockLines = [];
+          return;
+        }
+      }
+      // If no valid blockId found, fall through to render as regular code block
     }
     
     nodes.push({
@@ -460,7 +612,8 @@ export function parseMarkdown(text: string): MarkdownNode[] {
   flushChecklist();
   if (inCodeBlock) flushCodeBlock();
 
-  return nodes;
+  // Post-process: merge consecutive image-only paragraphs into galleries
+  return mergeConsecutiveImages(nodes);
 }
 
 function parseInlineMarkdown(text: string, depth = 0, insideLink = false): MarkdownInlineNode[] {

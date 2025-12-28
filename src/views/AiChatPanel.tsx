@@ -360,8 +360,19 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      } catch (e) {}
 	      
 	      if (graphBlockId) {
-	        processedContent = processedContent || `显示块 ${graphBlockId} 的链接关系`;
-	        systemPrompt += `\n\n【特殊指令 - 图谱】用户要求显示链接关系图谱。请调用 getBlockLinks 工具获取块 ${graphBlockId} 的链接关系。`;
+	        processedContent = `请调用 getBlockLinks 工具，参数 blockId=${graphBlockId}，获取该块的链接关系图谱`;
+	        systemPrompt += `\n\n【强制指令 - 链接图谱】
+这是一个图谱请求，你必须：
+1. 立即调用 getBlockLinks 工具，参数 blockId=${graphBlockId}
+2. 工具会返回包含 \`\`\`localgraph 代码块的结果，系统会自动渲染为可视化图谱
+
+⛔ 严禁以下行为：
+- 不要自己画图或生成任何图表代码
+- 不要返回 \`\`\`graph、\`\`\`mermaid、\`\`\`flowchart 等代码块
+- 不要用文字描述链接关系
+- 不要解释你要做什么，直接调用工具
+
+✅ 正确做法：直接调用 getBlockLinks(blockId=${graphBlockId})`;
 	      } else {
 	        processedContent = processedContent || "请先选择一个页面或块，然后使用 /graph 命令查看其链接关系";
 	      }

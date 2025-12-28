@@ -27,13 +27,13 @@ const { createElement, useRef, useState, useCallback, useEffect, useMemo } = Rea
 
 // 斜杠命令定义
 const SLASH_COMMANDS = [
-  { command: "/timeline", description: "以时间线格式展示结果", icon: "ti ti-timeline-event" },
+  { command: "/timeline", description: "以时间线格式展示结果", icon: "ti ti-clock" },
   { command: "/brief", description: "简洁回答，不要长篇大论", icon: "ti ti-bolt" },
   { command: "/detail", description: "详细回答，展开说明", icon: "ti ti-file-text" },
   { command: "/table", description: "用表格格式展示结果", icon: "ti ti-table" },
-  { command: "/summary", description: "总结模式，精炼内容要点", icon: "ti ti-list-check" },
+  { command: "/summary", description: "总结模式，精炼内容要点", icon: "ti ti-list" },
   { command: "/compare", description: "对比模式，左右对比展示", icon: "ti ti-columns" },
-  { command: "/graph", description: "显示当前页面的链接关系图谱", icon: "ti ti-topology-star-3" },
+  { command: "/graph", description: "显示当前页面的链接关系图谱", icon: "ti ti-share" },
 ];
 
 const { useSnapshot } = (window as any).Valtio as {

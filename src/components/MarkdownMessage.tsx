@@ -1,4 +1,4 @@
-import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem } from "../utils/markdown-renderer";
+import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import LocalGraph from "./LocalGraph";
 import {
   codeBlockContainerStyle,
@@ -422,6 +422,212 @@ function CompareBlock({
   );
 }
 
+// Helper component for Gallery (image grid with lightbox)
+function GalleryBlock({ images }: { images: GalleryImage[] }) {
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+  const [viewMode, setViewMode] = useState("grid" as "grid" | "masonry" | "list");
+  
+  // Build full image path
+  const getImageSrc = (src: string): string => {
+    if (src.startsWith("./") || src.startsWith("../")) {
+      const relativePath = src.replace(/^\.\//, "");
+      const repoDir = orca.state.repoDir;
+      if (repoDir) {
+        return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
+      }
+    }
+    return src;
+  };
+  
+  // Get native path for shell-open
+  const getImageFilePath = (src: string): string => {
+    if (src.startsWith("./") || src.startsWith("../")) {
+      const relativePath = src.replace(/^\.\//, "");
+      const repoDir = orca.state.repoDir;
+      if (repoDir) {
+        return `${repoDir}\\assets\\${relativePath}`;
+      }
+    }
+    return src;
+  };
+  
+  const openInSystem = (src: string) => {
+    orca.invokeBackend("shell-open", getImageFilePath(src));
+  };
+  
+  const closeLightbox = () => setSelectedIndex(-1);
+  
+  const showPrev = () => {
+    if (selectedIndex > 0) setSelectedIndex(selectedIndex - 1);
+  };
+  
+  const showNext = () => {
+    if (selectedIndex < images.length - 1) setSelectedIndex(selectedIndex + 1);
+  };
+  
+  // Keyboard navigation
+  const handleKeyDown = (e: any) => {
+    if (selectedIndex < 0) return;
+    if (e.key === "Escape") closeLightbox();
+    if (e.key === "ArrowLeft") showPrev();
+    if (e.key === "ArrowRight") showNext();
+  };
+  
+  // Grid view
+  const renderGridView = () => createElement(
+    "div",
+    { className: "md-gallery-grid" },
+    ...images.map((img, index) =>
+      createElement(
+        "div",
+        { 
+          key: index, 
+          className: "md-gallery-item",
+          onClick: () => setSelectedIndex(index),
+        },
+        createElement("img", {
+          src: getImageSrc(img.src),
+          alt: img.alt || `Image ${index + 1}`,
+          className: "md-gallery-thumb",
+          onError: (e: any) => { e.target.style.display = "none"; },
+        }),
+        img.caption && createElement(
+          "div",
+          { className: "md-gallery-caption" },
+          img.caption
+        )
+      )
+    )
+  );
+  
+  // List view
+  const renderListView = () => createElement(
+    "div",
+    { className: "md-gallery-list" },
+    ...images.map((img, index) =>
+      createElement(
+        "div",
+        { 
+          key: index, 
+          className: "md-gallery-list-item",
+          onClick: () => setSelectedIndex(index),
+        },
+        createElement("img", {
+          src: getImageSrc(img.src),
+          alt: img.alt || `Image ${index + 1}`,
+          className: "md-gallery-list-thumb",
+          onError: (e: any) => { e.target.style.display = "none"; },
+        }),
+        createElement(
+          "div",
+          { className: "md-gallery-list-info" },
+          createElement("div", { className: "md-gallery-list-title" }, img.alt || `Image ${index + 1}`),
+          img.caption && createElement("div", { className: "md-gallery-list-caption" }, img.caption)
+        )
+      )
+    )
+  );
+  
+  // Lightbox
+  const renderLightbox = () => {
+    if (selectedIndex < 0) return null;
+    const img = images[selectedIndex];
+    
+    return createElement(
+      "div",
+      { 
+        className: "md-gallery-lightbox",
+        onClick: closeLightbox,
+        onKeyDown: handleKeyDown,
+        tabIndex: 0,
+      },
+      createElement(
+        "div",
+        { 
+          className: "md-gallery-lightbox-content",
+          onClick: (e: any) => e.stopPropagation(),
+        },
+        // Close button
+        createElement(
+          "button",
+          { className: "md-gallery-lightbox-close", onClick: closeLightbox },
+          createElement("i", { className: "ti ti-x" })
+        ),
+        // Navigation
+        selectedIndex > 0 && createElement(
+          "button",
+          { className: "md-gallery-lightbox-prev", onClick: showPrev },
+          createElement("i", { className: "ti ti-chevron-left" })
+        ),
+        selectedIndex < images.length - 1 && createElement(
+          "button",
+          { className: "md-gallery-lightbox-next", onClick: showNext },
+          createElement("i", { className: "ti ti-chevron-right" })
+        ),
+        // Image
+        createElement("img", {
+          src: getImageSrc(img.src),
+          alt: img.alt || "",
+          className: "md-gallery-lightbox-img",
+        }),
+        // Info bar
+        createElement(
+          "div",
+          { className: "md-gallery-lightbox-info" },
+          createElement("span", null, `${selectedIndex + 1} / ${images.length}`),
+          img.alt && createElement("span", { className: "md-gallery-lightbox-alt" }, img.alt),
+          createElement(
+            "button",
+            { 
+              className: "md-gallery-lightbox-open",
+              onClick: () => openInSystem(img.src),
+              title: "在系统中打开",
+            },
+            createElement("i", { className: "ti ti-external-link" })
+          )
+        )
+      )
+    );
+  };
+  
+  return createElement(
+    "div",
+    { className: "md-gallery" },
+    // Toolbar
+    createElement(
+      "div",
+      { className: "md-gallery-toolbar" },
+      createElement("span", { className: "md-gallery-count" }, `${images.length} 张图片`),
+      createElement(
+        "div",
+        { className: "md-gallery-view-switcher" },
+        createElement(
+          "button",
+          { 
+            className: `md-gallery-view-btn ${viewMode === "grid" ? "active" : ""}`,
+            onClick: () => setViewMode("grid"),
+            title: "网格视图",
+          },
+          createElement("i", { className: "ti ti-layout-grid" })
+        ),
+        createElement(
+          "button",
+          { 
+            className: `md-gallery-view-btn ${viewMode === "list" ? "active" : ""}`,
+            onClick: () => setViewMode("list"),
+            title: "列表视图",
+          },
+          createElement("i", { className: "ti ti-list" })
+        )
+      )
+    ),
+    // Content
+    viewMode === "grid" ? renderGridView() : renderListView(),
+    // Lightbox
+    renderLightbox()
+  );
+}
+
 // Helper: Check if a link node will be rendered as a dot (meaningless reference)
 function isBlockDotLink(node: MarkdownInlineNode): boolean {
   if (node.type !== "link") return false;
@@ -770,6 +976,13 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       return createElement(LocalGraph, {
         key,
         blockId: node.blockId,
+      });
+    }
+
+    case "gallery": {
+      return createElement(GalleryBlock, {
+        key,
+        images: node.images,
       });
     }
 
