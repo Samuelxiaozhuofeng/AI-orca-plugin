@@ -34,7 +34,7 @@ const panelStyle: React.CSSProperties = {
   marginTop: 4,
   width: 300,
   maxHeight: 480,
-  background: "rgba(var(--orca-color-bg-1-rgb, 255, 255, 255), 0.95)",
+  background: "var(--orca-color-bg-1)",
   backdropFilter: "blur(10px)",
   border: "1px solid var(--orca-color-border)",
   borderRadius: 12,

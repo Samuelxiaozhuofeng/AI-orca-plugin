@@ -48,7 +48,7 @@ const panelStyle: React.CSSProperties = {
   zIndex: 99999,
   width: 320,
   maxHeight: 420,
-  background: "rgba(var(--orca-color-bg-1-rgb, 255, 255, 255), 0.95)",
+  background: "var(--orca-color-bg-1)",
   backdropFilter: "blur(12px)",
   border: "1px solid var(--orca-color-border)",
   borderRadius: 12,
