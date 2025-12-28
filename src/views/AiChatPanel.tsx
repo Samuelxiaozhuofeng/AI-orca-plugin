@@ -30,6 +30,7 @@ import {
   clearAllSessions,
   createNewSession,
   toggleSessionPinned,
+  toggleSessionFavorited,
   renameSession,
   autoCacheSession,
   type SavedSession,
@@ -214,6 +215,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Toggle session pinned status
   const handleTogglePin = useCallback(async (sessionId: string) => {
     await toggleSessionPinned(sessionId);
+    const data = await loadSessions();
+    setSessions(data.sessions);
+  }, []);
+
+  // Toggle session favorited status
+  const handleToggleFavorite = useCallback(async (sessionId: string) => {
+    await toggleSessionFavorited(sessionId);
     const data = await loadSessions();
     setSessions(data.sessions);
   }, []);
@@ -1084,6 +1092,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         onClearAll: handleClearAllSessions,
         onNewSession: handleNewSession,
         onTogglePin: handleTogglePin,
+        onToggleFavorite: handleToggleFavorite,
         onRename: handleRenameSession,
       }),
       // More Menu (Settings, Memory, Clear)
