@@ -860,19 +860,34 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       onSuggestionClick: (text: string) => handleSend(text),
     });
   } else {
-    const messageElements = messages.map((m, i) => {
+    // 构建 tool 结果映射：toolCallId -> { content, name }
+    const toolResultsMap = new Map<string, { content: string; name: string }>();
+    messages.forEach((m) => {
+      if (m.role === "tool" && m.tool_call_id) {
+        toolResultsMap.set(m.tool_call_id, { content: m.content, name: m.name || "" });
+      }
+    });
+
+    const messageElements: any[] = [];
+    messages.forEach((m, i) => {
+      // 跳过 tool 消息，它们会被合并到 assistant 消息的工具调用区域
+      if (m.role === "tool") return;
+
       // Determine if this is the last message that should offer regeneration (Last AI message)
-      const isLastAi = m.role === 'assistant' && i === messages.length - 1;
-      
-      return createElement(MessageItem, {
-        key: m.id,
-        message: m,
-        isLastAiMessage: isLastAi,
-        isStreaming: streamingMessageId === m.id,
-        onRegenerate: isLastAi ? handleRegenerate : undefined,
-        onDelete: () => handleDeleteMessage(m.id),
-        onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
-      });
+      const isLastAi = m.role === "assistant" && i === messages.length - 1;
+
+      messageElements.push(
+        createElement(MessageItem, {
+          key: m.id,
+          message: m,
+          isLastAiMessage: isLastAi,
+          isStreaming: streamingMessageId === m.id,
+          onRegenerate: isLastAi ? handleRegenerate : undefined,
+          onDelete: () => handleDeleteMessage(m.id),
+          onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
+          toolResults: m.tool_calls ? toolResultsMap : undefined,
+        })
+      );
     });
 
     // Add loading dots if waiting for response
@@ -895,7 +910,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         )
       );
     }
-    
+
     messageListContent = messageElements;
   }
 

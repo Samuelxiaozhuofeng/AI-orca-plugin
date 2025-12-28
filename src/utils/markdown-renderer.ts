@@ -32,10 +32,16 @@ export type GalleryImage = {
   caption?: string;
 };
 
+// 列表项类型，支持嵌套
+export type ListItem = {
+  content: MarkdownInlineNode[];
+  children?: ListItem[]; // 嵌套子列表
+};
+
 export type MarkdownNode =
   | { type: "paragraph"; children: MarkdownInlineNode[] }
   | { type: "heading"; level: number; children: MarkdownInlineNode[] }
-  | { type: "list"; ordered: boolean; items: MarkdownInlineNode[][] }
+  | { type: "list"; ordered: boolean; items: ListItem[] }
   | { type: "checklist"; items: CheckboxItem[] }
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
@@ -322,7 +328,11 @@ export function parseMarkdown(text: string): MarkdownNode[] {
   let codeBlockLines: string[] = [];
 
   let paragraphLines: string[] = [];
-  let currentList: { ordered: boolean; items: MarkdownInlineNode[][] } | null = null;
+  let currentList: {
+    ordered: boolean;
+    items: ListItem[];
+    indentStack?: { indent: number; items: ListItem[] }[];
+  } | null = null;
   let currentChecklist: CheckboxItem[] | null = null;
 
   const flushParagraph = () => {
@@ -336,10 +346,12 @@ export function parseMarkdown(text: string): MarkdownNode[] {
 
   const flushList = () => {
     if (!currentList) return;
+    // 从 indentStack 的根层级获取 items
+    const rootItems = currentList.indentStack?.[0]?.items ?? currentList.items;
     nodes.push({
       type: "list",
       ordered: currentList.ordered,
-      items: currentList.items,
+      items: rootItems,
     });
     currentList = null;
   };
@@ -584,21 +596,45 @@ export function parseMarkdown(text: string): MarkdownNode[] {
       continue;
     }
 
-    // Lists (group consecutive items)
-    const orderedMatch = rawLine.match(/^\s*(\d+)\.\s+(.*)$/);
-    const unorderedMatch = rawLine.match(/^\s*([-*+])\s+(.*)$/);
+    // Lists (group consecutive items with nesting support)
+    const orderedMatch = rawLine.match(/^(\s*)(\d+)\.\s+(.*)$/);
+    const unorderedMatch = rawLine.match(/^(\s*)([-*+])\s+(.*)$/);
     if (orderedMatch || unorderedMatch) {
       flushParagraph();
       flushChecklist();
+      const indent = (orderedMatch ? orderedMatch[1] : unorderedMatch?.[1])?.length ?? 0;
       const ordered = !!orderedMatch;
-      const itemText = (orderedMatch ? orderedMatch[2] : unorderedMatch?.[2]) ?? "";
+      const itemText = (orderedMatch ? orderedMatch[3] : unorderedMatch?.[3]) ?? "";
 
       if (!currentList || currentList.ordered !== ordered) {
         flushList();
-        currentList = { ordered, items: [] };
+        currentList = { ordered, items: [], indentStack: [{ indent: 0, items: [] }] };
       }
 
-      currentList.items.push(parseInlineMarkdown(itemText));
+      // 处理缩进层级
+      const stack = currentList.indentStack!;
+      const newItem: { content: MarkdownInlineNode[]; children?: any[] } = {
+        content: parseInlineMarkdown(itemText),
+      };
+
+      // 找到合适的父级
+      while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+        stack.pop();
+      }
+
+      if (indent > stack[stack.length - 1].indent) {
+        // 创建新的嵌套层级
+        const parent = stack[stack.length - 1].items;
+        const lastItem = parent[parent.length - 1];
+        if (lastItem && !lastItem.children) {
+          lastItem.children = [];
+        }
+        if (lastItem) {
+          stack.push({ indent, items: lastItem.children! });
+        }
+      }
+
+      stack[stack.length - 1].items.push(newItem);
       continue;
     }
 

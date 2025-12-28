@@ -305,6 +305,20 @@ export const chatAnimations = `
     list-style-type: disc;
 }
 
+/* 嵌套列表样式 */
+.md-list-nested {
+    margin: 4px 0;
+    padding-left: 20px;
+}
+
+.md-list-nested.md-list-unordered {
+    list-style-type: circle;
+}
+
+.md-list-nested .md-list-nested.md-list-unordered {
+    list-style-type: square;
+}
+
 .md-list-unordered .md-list-item::marker {
     font-size: 1.3em;
 }

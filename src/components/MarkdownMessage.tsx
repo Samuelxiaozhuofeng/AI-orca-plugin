@@ -900,22 +900,35 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
     case "list": {
       const ListTag = (node.ordered ? "ol" : "ul") as any;
       const listClass = node.ordered ? "md-list md-list-ordered" : "md-list md-list-unordered";
+
+      // 递归渲染列表项
+      const renderListItem = (item: any, itemIndex: number): any => {
+        return createElement(
+          "li",
+          {
+            key: itemIndex,
+            className: "md-list-item",
+          },
+          // 渲染项目内容
+          ...item.content.map((child: any, i: number) => renderInlineNode(child, i)),
+          // 渲染嵌套子列表
+          item.children && item.children.length > 0 && createElement(
+            ListTag,
+            {
+              className: listClass + " md-list-nested",
+            },
+            ...item.children.map((subItem: any, subIndex: number) => renderListItem(subItem, subIndex))
+          )
+        );
+      };
+
       return createElement(
         ListTag,
         {
           key,
           className: listClass,
         },
-        ...node.items.map((item, itemIndex) =>
-          createElement(
-            "li",
-            {
-              key: itemIndex,
-              className: "md-list-item",
-            },
-            ...item.map((child, i) => renderInlineNode(child, i)),
-          ),
-        ),
+        ...node.items.map((item, itemIndex) => renderListItem(item, itemIndex)),
       );
     }
 
