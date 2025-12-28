@@ -34,12 +34,12 @@ interface ModeConfig {
 
 const MODE_CONFIGS: Record<ChatMode, ModeConfig> = {
   agent: {
-    icon: "⚡",
+    icon: "ti ti-bolt",
     label: "Agent",
     description: "AI 自动执行工具调用，无需确认",
   },
   ask: {
-    icon: "💬",
+    icon: "ti ti-message-circle",
     label: "Ask",
     description: "AI 仅回答问题，不执行任何操作",
   },
@@ -152,7 +152,7 @@ export default function ModeSelectorButton() {
           },
         },
         // Icon
-        createElement("span", { style: menuItemIconStyle }, config.icon),
+        createElement("i", { className: config.icon, style: menuItemIconStyle }),
         // Content
         createElement(
           "div",
@@ -203,7 +203,7 @@ export default function ModeSelectorButton() {
           title: `${currentConfig.label}: ${currentConfig.description}`,
           style: selectorButtonStyle,
         },
-        createElement("span", null, currentConfig.icon)
+        createElement("i", { className: currentConfig.icon })
       )
   );
 }
