@@ -67,6 +67,7 @@ export type SavedSession = {
   createdAt: number;
   updatedAt: number;
   pinned?: boolean; // 置顶标记
+  favorited?: boolean; // 收藏标记
 };
 
 /**
@@ -318,6 +319,21 @@ export async function toggleSessionPinned(sessionId: string): Promise<boolean> {
   await saveSessions(data);
   console.log("[session-service] Session pinned toggled:", sessionId, session.pinned);
   return session.pinned;
+}
+
+/**
+ * Toggle session favorited status
+ */
+export async function toggleSessionFavorited(sessionId: string): Promise<boolean> {
+  const data = await loadSessions();
+  const session = data.sessions.find((s) => s.id === sessionId);
+  if (!session) return false;
+
+  session.favorited = !session.favorited;
+
+  await saveSessions(data);
+  console.log("[session-service] Session favorited toggled:", sessionId, session.favorited);
+  return session.favorited;
 }
 
 /**

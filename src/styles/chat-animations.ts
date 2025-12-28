@@ -303,61 +303,14 @@ export const chatAnimations = `
 /* 暗色模式适配 */
 @media (prefers-color-scheme: dark) {
     .md-list {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.15);
-    }
-    
-    .md-list-item {
-        color: var(--orca-color-text-1, #e0e0e0);
+        background: rgba(255, 255, 255, 0.03);
+        border-color: rgba(255, 255, 255, 0.1);
     }
     
     /* 标题在暗色模式下的优化 */
     h1, h2, h3, h4, h5, h6 {
-        background: rgba(255, 255, 255, 0.05) !important;
+        background: rgba(255, 255, 255, 0.03) !important;
         border-left-color: var(--orca-color-primary) !important;
-        color: var(--orca-color-text-1, #e0e0e0) !important;
-    }
-    
-    /* 时间线暗色模式 */
-    .md-timeline-content {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: rgba(255, 255, 255, 0.15);
-    }
-    
-    .md-timeline-desc {
-        color: var(--orca-color-text-2, #aaa);
-    }
-    
-    /* 对比视图暗色模式 */
-    .md-compare {
-        background: rgba(255, 255, 255, 0.03);
-        border-color: rgba(255, 255, 255, 0.15);
-    }
-    
-    .md-compare-header {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    /* 清单暗色模式 */
-    .md-checklist-item {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    .md-checklist-item:hover {
-        background: rgba(255, 255, 255, 0.08);
-    }
-    
-    /* 图库暗色模式 */
-    .md-gallery {
-        background: rgba(255, 255, 255, 0.03);
-    }
-    
-    .md-gallery-list-item {
-        background: rgba(255, 255, 255, 0.05);
-    }
-    
-    .md-gallery-list-item:hover {
-        background: rgba(255, 255, 255, 0.08);
     }
 }
 

@@ -1008,7 +1008,25 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
 }
 
 export default function MarkdownMessage({ content, role }: Props) {
-  const nodes = useMemo(() => parseMarkdown(content), [content]);
+  // 预处理：清理 AI 输出中多余的标注符号
+  const cleanedContent = useMemo(() => {
+    let text = content;
+    
+    // 清理引用标注：【引用】、[引用]、（引用）、(引用)
+    text = text.replace(/【([^】]+)】/g, '$1');
+    text = text.replace(/\[([^\]]+)\]/g, (match, p1) => {
+      // 保留 Markdown 链接语法 [text](url) 和图片 ![alt](url)
+      if (match.match(/\[([^\]]+)\]\([^)]+\)/)) return match;
+      // 保留任务列表 [ ] 和 [x]
+      if (p1.trim() === '' || p1.trim().toLowerCase() === 'x') return match;
+      return p1;
+    });
+    text = text.replace(/（([^）]+)）/g, '$1');
+    
+    return text;
+  }, [content]);
+  
+  const nodes = useMemo(() => parseMarkdown(cleanedContent), [cleanedContent]);
 
   return createElement(
     "div",
