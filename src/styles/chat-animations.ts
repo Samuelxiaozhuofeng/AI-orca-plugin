@@ -477,22 +477,22 @@ export const chatAnimations = `
 /* Block reference dot (inline) */
 .md-block-dot {
     display: inline-block;
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     cursor: pointer;
-    vertical-align: middle;
-    margin: 0 3px;
+    vertical-align: super;
+    margin: 0 2px;
     transition: transform 0.2s, box-shadow 0.2s;
-    /* 增大点击区域 */
-    padding: 4px;
+    /* 稍微增大点击区域 */
+    padding: 2px;
     background-clip: content-box;
     box-sizing: content-box;
 }
 
 .md-block-dot:hover {
-    transform: scale(1.3);
-    box-shadow: 0 0 10px currentColor;
+    transform: scale(1.4);
+    box-shadow: 0 0 8px currentColor;
 }
 
 /* Hide br tags adjacent to block dots */
