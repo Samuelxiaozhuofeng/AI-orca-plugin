@@ -41,25 +41,22 @@ const { createElement, useState, useCallback, useMemo, useEffect, Fragment } = R
 function formatMessageTime(timestamp: number): string {
   const date = new Date(timestamp);
   const now = new Date();
-  
+
   // 获取今天和昨天的日期边界
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
   const dateTime = date.getTime();
-  
+
   if (dateTime >= todayStart) {
     // 今天：只显示时间
     return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   } else if (dateTime >= yesterdayStart) {
     // 昨天
     return "昨天 " + date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  } else if (date.getFullYear() === now.getFullYear()) {
-    // 今年：显示月日+时间
-    return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) + " " + 
-           date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   } else {
-    // 往年：显示完整日期
-    return date.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
+    // 更早：显示日期
+    return `${date.getMonth() + 1}月${date.getDate()}日 ` +
+      date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   }
 }
 

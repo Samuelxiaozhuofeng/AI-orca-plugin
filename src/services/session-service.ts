@@ -268,24 +268,28 @@ export function shouldAutoSave(): boolean {
  * Format a timestamp for display
  */
 export function formatSessionTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
   const date = new Date(timestamp);
+  const now = new Date();
+
+  // 获取今天和昨天的日期边界
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
 
   // Today
-  if (diff < 24 * 60 * 60 * 1000) {
+  if (timestamp >= todayStart) {
     const hours = date.getHours().toString().padStart(2, "0");
     const minutes = date.getMinutes().toString().padStart(2, "0");
     return `今天 ${hours}:${minutes}`;
   }
 
   // Yesterday
-  if (diff < 48 * 60 * 60 * 1000) {
+  if (timestamp >= yesterdayStart) {
     return "昨天";
   }
 
   // This week
-  if (diff < 7 * 24 * 60 * 60 * 1000) {
+  if (timestamp >= weekStart) {
     const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
     return days[date.getDay()];
   }
