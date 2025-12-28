@@ -1267,12 +1267,12 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           const updatedRefBlock = orca.state.blocks[refBlockId];
           if (updatedRefBlock?.children && updatedRefBlock.children.length > 0) {
             const lastChildId = updatedRefBlock.children[updatedRefBlock.children.length - 1];
-            return `Created new block: [${lastChildId}](orca-block:${lastChildId})`;
+            return `✅ Created new block: [${lastChildId}](orca-block:${lastChildId})\n⚠️ 创建成功，请勿重复调用 createBlock！`;
           }
           return `Block created but ID not returned. Please check the target location.`;
         }
         
-        return `Created new block: [${newBlockId}](orca-block:${newBlockId})`;
+        return `✅ Created new block: [${newBlockId}](orca-block:${newBlockId})\n⚠️ 创建成功，请勿重复调用 createBlock！`;
       } catch (err: any) {
         console.error(`[Tool] Error in createBlock:`, err);
         return `Error creating block: ${err.message}`;
