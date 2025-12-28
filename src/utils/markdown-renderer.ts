@@ -801,7 +801,8 @@ function parseInlineMarkdown(text: string, depth = 0, insideLink = false): Markd
         }
       }
 
-      const blockIdMatch = text.slice(i).match(/^blockid:(\d+)/i);
+      // Handle blockid:123 or blockid 123 format (with optional colon/space)
+      const blockIdMatch = text.slice(i).match(/^blockid[:：\s]*(\d+)/i);
       if (blockIdMatch) {
         const blockId = parseInt(blockIdMatch[1], 10);
         if (blockId > 0) {
