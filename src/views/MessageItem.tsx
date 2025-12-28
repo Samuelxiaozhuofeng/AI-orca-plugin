@@ -192,7 +192,7 @@ function CollapsibleToolCalls({
   isStreaming?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(true);
-  
+
   // 检查是否所有工具调用都已完成
   const allCompleted = useMemo(() => {
     if (!toolResults) return false;
@@ -208,76 +208,97 @@ function CollapsibleToolCalls({
   }, [isStreaming, allCompleted]);
 
   const toolCount = toolCalls.length;
-  const completedCount = toolResults ? toolCalls.filter((tc) => toolResults.has(tc.id)).length : 0;
+  const completedCount = toolResults
+    ? toolCalls.filter((tc) => toolResults.has(tc.id)).length
+    : 0;
 
-  return createElement(
+  // 折叠状态的摘要头部
+  const collapsedHeader = createElement(
     "div",
-    { style: { marginTop: "12px" } },
-    // 折叠头部
-    !isExpanded && createElement(
+    {
+      onClick: () => setIsExpanded(true),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        background: "var(--orca-color-bg-2)",
+        border: "1px solid var(--orca-color-border)",
+        cursor: "pointer",
+        fontSize: "12px",
+        color: "var(--orca-color-text-2)",
+      },
+    },
+    createElement("i", {
+      className: "ti ti-tools",
+      style: { fontSize: "14px", color: "var(--orca-color-primary)" },
+    }),
+    `已执行 ${completedCount}/${toolCount} 个工具`,
+    createElement("i", {
+      className: "ti ti-chevron-down",
+      style: { fontSize: "12px", marginLeft: "auto" },
+    })
+  );
+
+  // 展开状态的头部（带折叠按钮）
+  const expandedHeader =
+    allCompleted &&
+    !isStreaming &&
+    createElement(
       "div",
       {
-        onClick: () => setIsExpanded(true),
+        onClick: () => setIsExpanded(false),
         style: {
           display: "flex",
           alignItems: "center",
           gap: "6px",
-          padding: "6px 10px",
-          borderRadius: "6px",
-          background: "var(--orca-color-bg-2)",
-          border: "1px solid var(--orca-color-border)",
+          padding: "4px 8px",
+          marginBottom: "4px",
+          borderRadius: "4px",
           cursor: "pointer",
-          fontSize: "12px",
-          color: "var(--orca-color-text-2)",
+          fontSize: "11px",
+          color: "var(--orca-color-text-3)",
         },
       },
       createElement("i", {
         className: "ti ti-tools",
-        style: { fontSize: "14px", color: "var(--orca-color-primary)" },
+        style: { fontSize: "12px" },
       }),
-      `已执行 ${completedCount}/${toolCount} 个工具`,
+      `${completedCount} 个工具调用`,
       createElement("i", {
-        className: "ti ti-chevron-down",
+        className: "ti ti-chevron-up",
         style: { fontSize: "12px", marginLeft: "auto" },
-      })
-    ),
-    // 展开的工具调用列表
-    isExpanded && createElement(
-      "div",
-      { style: { position: "relative" } },
-      // 折叠按钮（仅在完成后显示）
-      allCompleted && !isStreaming && createElement(
-        "button",
-        {
-          onClick: () => setIsExpanded(false),
-          style: {
-            position: "absolute",
-            top: "0",
-            right: "0",
-            padding: "2px 6px",
-            fontSize: "11px",
-            color: "var(--orca-color-text-3)",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "2px",
-          },
-          title: "折叠工具调用",
-        },
-        createElement("i", { className: "ti ti-chevron-up", style: { fontSize: "12px" } }),
-        "折叠"
-      ),
-      ...toolCalls.map((tc) =>
-        createElement(ToolCallWithResult, {
-          key: tc.id,
-          toolCall: tc,
-          result: toolResults?.get(tc.id),
-          isLoading: isStreaming || !toolResults?.has(tc.id),
-        })
-      )
-    )
+      }),
+      "折叠"
+    );
+
+  // 工具调用列表
+  const toolList = toolCalls.map((tc) =>
+    createElement(ToolCallWithResult, {
+      key: tc.id,
+      toolCall: tc,
+      result: toolResults?.get(tc.id),
+      isLoading: isStreaming || !toolResults?.has(tc.id),
+    })
+  );
+
+  return createElement(
+    "div",
+    {
+      style: {
+        marginTop: "12px",
+        overflow: "hidden",
+      },
+    },
+    isExpanded
+      ? createElement(
+          "div",
+          null,
+          expandedHeader,
+          ...toolList
+        )
+      : collapsedHeader
   );
 }
 
