@@ -62,27 +62,26 @@ export const cardActionsStyle: React.CSSProperties = {
 // ============================================================================
 
 export const userAvatarStyle: React.CSSProperties = {
-  width: "48px",
-  height: "48px",
+  width: "40px",
+  height: "40px",
   borderRadius: "50%",
-  background: "var(--orca-color-primary, #007bff)",
-  color: "#fff",
+  background: "var(--orca-color-bg-3)",
+  color: "var(--orca-color-text-1)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontSize: "20px",
-  fontWeight: 600,
+  fontSize: "18px",
+  fontWeight: 500,
   cursor: "pointer",
-  transition: "transform 0.2s ease, box-shadow 0.2s ease",
-  border: "2px solid var(--orca-color-bg-1)",
-  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.15)",
+  transition: "transform 0.2s ease, background 0.2s ease",
+  border: "1px solid var(--orca-color-border)",
   flexShrink: 0,
 };
 
 export const userAvatarHoverStyle: React.CSSProperties = {
   ...userAvatarStyle,
   transform: "scale(1.05)",
-  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)",
+  background: "var(--orca-color-bg-2)",
 };
 
 export const userInfoContainerStyle: React.CSSProperties = {

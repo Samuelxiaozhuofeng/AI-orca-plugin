@@ -47,7 +47,7 @@ const { useSnapshot } = (window as any).Valtio as {
 const { Button, CompositionTextArea } = orca.components;
 
 type Props = {
-  onSend: (message: string, files?: FileRef[]) => void;
+  onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void;
   onStop?: () => void;
   disabled?: boolean;
   currentPageId: DbId | null;
@@ -99,6 +99,7 @@ export default function ChatInput({
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const [pendingFiles, setPendingFiles] = useState<FileRef[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [clearContextPending, setClearContextPending] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -132,13 +133,27 @@ export default function ChatInput({
     const trimmed = val.trim();
     if ((!trimmed && pendingFiles.length === 0) || disabled) return;
 
-    onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined);
+    onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
     setText("");
     setPendingFiles([]);
+    setClearContextPending(false);
     if (textareaRef.current) {
       textareaRef.current.value = "";
     }
-  }, [disabled, onSend, text, pendingFiles]);
+  }, [disabled, onSend, text, pendingFiles, clearContextPending]);
+
+  // 处理清除上下文按钮点击
+  const handleClearContextClick = useCallback(() => {
+    if (clearContextPending) {
+      // 如果已经是清除上下文状态，且没有输入内容，则撤销
+      const val = textareaRef.current?.value || text;
+      if (!val.trim() && pendingFiles.length === 0) {
+        setClearContextPending(false);
+      }
+    } else {
+      setClearContextPending(true);
+    }
+  }, [clearContextPending, text, pendingFiles]);
 
   const handleKeyDown = useCallback(
     (e: any) => {
@@ -630,6 +645,31 @@ export default function ChatInput({
         )
       ),
 
+      // 清除上下文提示标签
+      clearContextPending && createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "4px 10px",
+            marginBottom: "8px",
+            background: "var(--orca-color-warning-bg, rgba(255, 193, 7, 0.1))",
+            border: "1px solid var(--orca-color-warning, #ffc107)",
+            borderRadius: "6px",
+            fontSize: "12px",
+            color: "var(--orca-color-warning, #ffc107)",
+            cursor: "pointer",
+          },
+          onClick: handleClearContextClick,
+          title: "点击撤销清除上下文",
+        },
+        createElement("i", { className: "ti ti-refresh", style: { fontSize: "14px" } }),
+        "清除上下文",
+        createElement("span", { style: { color: "var(--orca-color-text-3)", marginLeft: "4px" } }, "(点击撤销)")
+      ),
+
       // Row 1: TextArea
       createElement(CompositionTextArea as any, {
         ref: textareaRef as any,
@@ -651,7 +691,7 @@ export default function ChatInput({
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         
-        // Left Tools: @ Button + File Button + Model Selector + Injection Mode Selector
+        // Left Tools: @ Button + File Button + Clear Context + Model Selector + Injection Mode Selector
         createElement(
           "div",
           { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -695,6 +735,20 @@ export default function ChatInput({
               },
               createElement("i", { className: isUploading ? "ti ti-loader" : "ti ti-paperclip" })
             )
+          ),
+          // 清除上下文按钮
+          createElement(
+            Button,
+            {
+              variant: "plain",
+              onClick: handleClearContextClick,
+              title: clearContextPending ? "撤销清除上下文" : "清除上下文（开始新对话）",
+              style: { 
+                padding: "4px",
+                color: clearContextPending ? "var(--orca-color-warning, #ffc107)" : undefined,
+              },
+            },
+            createElement("i", { className: "ti ti-refresh" })
           ),
           createElement(ModelSelectorButton, {
             modelOptions,

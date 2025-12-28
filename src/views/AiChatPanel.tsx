@@ -953,7 +953,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }),
     // Chat Input
     createElement(ChatInput, {
-      onSend: (text: string, files?: FileRef[]) => handleSend(text, files),
+      onSend: (text: string, files?: FileRef[], clearContext?: boolean) => {
+        if (clearContext) {
+          // 清除上下文：清空消息历史，开始新对话
+          setMessages([]);
+          contextStore.selected = [];
+        }
+        handleSend(text, files, clearContext ? [] : undefined);
+      },
       onStop: stop,
       disabled: sending,
       currentPageId: rootBlockId,

@@ -958,8 +958,6 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         activeUserId: storeSnap.activeUserId,
         totalMemoryCount: totalCount,
         enabledMemoryCount: enabledCount,
-        injectionMode: storeSnap.injectionMode,
-        selectedUserIds: storeSnap.selectedUserIds || [],
         onUserChange: handleUserChange,
         onAddUser: handleAddUser,
         onEditUser: handleEditUser,
@@ -967,10 +965,7 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         onAvatarClick: handleAvatarClick,
         onSetAsSelf: (id: string | null) => memoryStore.setUserAsSelf(id),
         onToggleUserDisabled: (id: string) => memoryStore.toggleUserDisabled(id),
-        onToggleUserSelection: (id: string) => memoryStore.toggleUserSelection(id),
-        onSetInjectionMode: (mode: any) => memoryStore.setInjectionMode(mode),
-        onSelectAllUsers: () => memoryStore.selectAllUsers(),
-        onDeselectAllUsers: () => memoryStore.deselectAllUsers(),
+        getMemoryCountForUser: (userId: string) => storeSnap.memories.filter(m => m.userId === userId).length,
       }),
       // User Portrait Card
       createElement(UserPortraitCard, {

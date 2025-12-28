@@ -97,6 +97,17 @@ export interface MemoryStoreData {
   activeUserId: string;
   injectionMode: InjectionMode;
   selectedUserIds: string[];  // User IDs selected for SELECTED mode
+  selectionPresets: SelectionPreset[];  // Saved selection presets
+}
+
+/**
+ * Selection preset - saved user selection for quick switching
+ */
+export interface SelectionPreset {
+  id: string;
+  name: string;
+  userIds: string[];
+  createdAt: number;
 }
 
 /**
@@ -158,6 +169,7 @@ export const DEFAULT_STATE: MemoryStoreData = {
   activeUserId: 'default-user',
   injectionMode: 'ALL',
   selectedUserIds: [],
+  selectionPresets: [],
 };
 
 // ============================================================================
@@ -203,7 +215,7 @@ function validateContent(content: string): boolean {
  * Create the memory store state
  */
 function createMemoryStoreState(): MemoryStoreData {
-  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [], selectedUserIds: [] };
+  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [], selectedUserIds: [], selectionPresets: [] };
 }
 
 export const memoryStoreState = proxy<MemoryStoreData>(createMemoryStoreState());
@@ -396,6 +408,94 @@ export function selectAllUsers(): void {
 export function deselectAllUsers(): void {
   memoryStoreState.selectedUserIds = [];
   saveMemoryStore();
+}
+
+// ============================================================================
+// Selection Preset Functions
+// ============================================================================
+
+/**
+ * Save current selection as a preset
+ * @param name - Preset name
+ * @returns Created preset or null if no users selected
+ */
+export function saveSelectionPreset(name: string): SelectionPreset | null {
+  if (!name.trim() || memoryStoreState.selectedUserIds.length === 0) {
+    return null;
+  }
+
+  const preset: SelectionPreset = {
+    id: generateId(),
+    name: name.trim(),
+    userIds: [...memoryStoreState.selectedUserIds],
+    createdAt: Date.now(),
+  };
+
+  memoryStoreState.selectionPresets = [...(memoryStoreState.selectionPresets || []), preset];
+  saveMemoryStore();
+  return preset;
+}
+
+/**
+ * Load a selection preset
+ * @param presetId - Preset ID to load
+ * @returns true if loaded successfully
+ */
+export function loadSelectionPreset(presetId: string): boolean {
+  const preset = (memoryStoreState.selectionPresets || []).find(p => p.id === presetId);
+  if (!preset) {
+    return false;
+  }
+
+  // Filter to only include valid, non-disabled user IDs
+  const validUserIds = preset.userIds.filter(id => {
+    const user = memoryStoreState.users.find(u => u.id === id);
+    return user && !user.isDisabled;
+  });
+
+  memoryStoreState.selectedUserIds = validUserIds;
+  memoryStoreState.injectionMode = 'SELECTED';
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Delete a selection preset
+ * @param presetId - Preset ID to delete
+ * @returns true if deleted successfully
+ */
+export function deleteSelectionPreset(presetId: string): boolean {
+  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
+  if (index === -1) {
+    return false;
+  }
+
+  memoryStoreState.selectionPresets = memoryStoreState.selectionPresets.filter(p => p.id !== presetId);
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Rename a selection preset
+ * @param presetId - Preset ID to rename
+ * @param newName - New name
+ * @returns true if renamed successfully
+ */
+export function renameSelectionPreset(presetId: string, newName: string): boolean {
+  if (!newName.trim()) {
+    return false;
+  }
+
+  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
+  if (index === -1) {
+    return false;
+  }
+
+  const updatedPresets = [...memoryStoreState.selectionPresets];
+  updatedPresets[index] = { ...updatedPresets[index], name: newName.trim() };
+  memoryStoreState.selectionPresets = updatedPresets;
+  saveMemoryStore();
+  return true;
 }
 
 /**
@@ -1631,6 +1731,7 @@ export async function saveMemoryStore(): Promise<void> {
       activeUserId: memoryStoreState.activeUserId,
       injectionMode: memoryStoreState.injectionMode,
       selectedUserIds: memoryStoreState.selectedUserIds,
+      selectionPresets: memoryStoreState.selectionPresets || [],
     };
     await orca.plugins.setData(pluginName, STORAGE_KEY, JSON.stringify(data));
   } catch (error) {
@@ -1694,6 +1795,7 @@ export async function loadMemoryStore(): Promise<void> {
     memoryStoreState.activeUserId = data.activeUserId || 'default-user';
     memoryStoreState.injectionMode = data.injectionMode || 'ALL';
     memoryStoreState.selectedUserIds = data.selectedUserIds || [];
+    memoryStoreState.selectionPresets = data.selectionPresets || [];
   } catch (error) {
     console.error('[MemoryStore] Failed to load:', error);
     // Keep default state on error
@@ -1763,6 +1865,12 @@ export const memoryStore = {
   getMemoryText,
   getPortraitText,
   getFullMemoryText,
+
+  // Selection Presets
+  saveSelectionPreset,
+  loadSelectionPreset,
+  deleteSelectionPreset,
+  renameSelectionPreset,
 
   // Persistence
   save: saveMemoryStore,
