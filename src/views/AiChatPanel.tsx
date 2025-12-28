@@ -759,6 +759,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     if (abortRef.current) abortRef.current.abort();
   }
 
+  // 删除单条消息
+  const handleDeleteMessage = useCallback((messageId: string) => {
+    setMessages((prev) => prev.filter((m) => m.id !== messageId));
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Derived State
   // ─────────────────────────────────────────────────────────────────────────
@@ -828,6 +833,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         isLastAiMessage: isLastAi,
         isStreaming: streamingMessageId === m.id,
         onRegenerate: isLastAi ? handleRegenerate : undefined,
+        onDelete: () => handleDeleteMessage(m.id),
       });
     });
 

@@ -52,6 +52,7 @@ interface MessageItemProps {
   isLastAiMessage?: boolean;
   isStreaming?: boolean;
   onRegenerate?: () => void;
+  onDelete?: () => void;
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
   // Conversation context for memory extraction (all messages up to this point)
@@ -110,6 +111,7 @@ export default function MessageItem({
   isLastAiMessage,
   isStreaming,
   onRegenerate,
+  onDelete,
   toolResults,
   conversationContext,
   onExtractMemory,
@@ -327,6 +329,18 @@ export default function MessageItem({
           },
           createElement("i", { className: "ti ti-copy" })
         ),
+        // Delete Button
+        onDelete &&
+          !isStreaming &&
+          createElement(
+            "button",
+            {
+              style: actionButtonStyle,
+              onClick: onDelete,
+              title: "删除此消息",
+            },
+            createElement("i", { className: "ti ti-trash" })
+          ),
         // Extract Memory Button (Only for AI messages with content)
         isAssistant &&
           message.content &&
