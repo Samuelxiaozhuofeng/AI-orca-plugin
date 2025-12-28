@@ -94,13 +94,23 @@ function safeDeltaFromEvent(obj: any): StreamChunk {
   }
 
   const delta = obj?.choices?.[0]?.delta;
+  const choice = obj?.choices?.[0];
+
+  // 调试：打印完整的 choice 对象（只打印一次，当有新字段时）
+  if (delta && Object.keys(delta).length > 0) {
+    const keys = Object.keys(delta);
+    if (keys.some(k => !["content", "role", "tool_calls"].includes(k))) {
+      console.log("[safeDeltaFromEvent] Delta keys:", keys);
+      console.log("[safeDeltaFromEvent] Delta object:", JSON.stringify(delta, null, 2));
+    }
+  }
 
   // Check for tool calls in delta
   if (delta?.tool_calls) {
     console.log("[safeDeltaFromEvent] Detected tool_calls in delta:");
     console.log("[safeDeltaFromEvent] tool_calls count:", delta.tool_calls.length);
     console.log("[safeDeltaFromEvent] tool_calls raw:", JSON.stringify(delta.tool_calls, null, 2));
-    
+
     // Log each tool call detail
     delta.tool_calls.forEach((tc: any, idx: number) => {
       console.log(`[safeDeltaFromEvent] tool_calls[${idx}]:`, {
@@ -112,16 +122,21 @@ function safeDeltaFromEvent(obj: any): StreamChunk {
         arguments_preview: tc.function?.arguments?.substring(0, 100),
       });
     });
-    
+
     return {
       type: "tool_calls",
       tool_calls: delta.tool_calls,
     };
   }
 
-  // Check for reasoning content (DeepSeek/Claude thinking)
-  // DeepSeek uses reasoning_content, some models use thinking or reasoning
-  const reasoning = delta?.reasoning_content || delta?.thinking || delta?.reasoning;
+  // Check for reasoning content (DeepSeek/Claude/OpenAI thinking)
+  // 尝试多种可能的字段名
+  const reasoning =
+    delta?.reasoning_content ||
+    delta?.thinking ||
+    delta?.reasoning ||
+    choice?.reasoning_content ||
+    choice?.thinking;
   if (typeof reasoning === "string" && reasoning) {
     console.log("[safeDeltaFromEvent] Detected reasoning:", reasoning.substring(0, 100));
     return {
@@ -191,6 +206,10 @@ export async function* openAIChatCompletionsStream(
     temperature: args.temperature,
     max_tokens: args.maxTokens,
     stream: true,
+    // 启用推理内容返回（DeepSeek/OpenAI-compatible APIs）
+    stream_options: {
+      include_usage: true,
+    },
   };
 
   // Add tools if provided
