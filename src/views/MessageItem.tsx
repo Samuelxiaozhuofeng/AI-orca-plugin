@@ -66,9 +66,6 @@ function formatMessageTime(timestamp: number): string {
  */
 function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [translatedText, setTranslatedText] = useState<string | null>(null); // 缓存翻译结果
-  const [showTranslation, setShowTranslation] = useState(false); // 控制显示原文还是译文
   const [showActions, setShowActions] = useState(false);
   
   if (!reasoning) return null;
@@ -78,71 +75,12 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
 
   // 复制功能
   const handleCopy = useCallback(() => {
-    const textToCopy = showTranslation && translatedText ? translatedText : reasoning;
-    navigator.clipboard.writeText(textToCopy).then(() => {
+    navigator.clipboard.writeText(reasoning).then(() => {
       if (typeof orca !== "undefined" && orca.notify) {
         orca.notify("success", "已复制推理内容");
       }
     });
-  }, [reasoning, translatedText, showTranslation]);
-
-  // 翻译功能
-  const handleTranslate = useCallback(async () => {
-    // 如果已有翻译结果，只是切换显示
-    if (translatedText) {
-      setShowTranslation(!showTranslation);
-      return;
-    }
-
-    // 第一次翻译，需要调用 API
-    setIsTranslating(true);
-    try {
-      // 使用 AI 翻译（调用当前的 AI 服务）
-      const { getAiChatSettings, resolveAiModel } = await import("../settings/ai-chat-settings");
-      const { getAiChatPluginName } = await import("../ui/ai-chat-ui");
-      const { openAIChatCompletionsStream } = await import("../services/openai-client");
-      
-      const pluginName = getAiChatPluginName();
-      const settings = getAiChatSettings(pluginName);
-      const model = resolveAiModel(settings);
-
-      let translated = "";
-      for await (const chunk of openAIChatCompletionsStream({
-        apiUrl: settings.apiUrl,
-        apiKey: settings.apiKey,
-        model,
-        messages: [
-          {
-            role: "system",
-            content: "你是一个专业的翻译助手。请将用户提供的英文内容翻译成简洁易懂的中文。保持原文的段落结构和格式。",
-          },
-          {
-            role: "user",
-            content: `请将以下内容翻译成中文：\n\n${reasoning}`,
-          },
-        ],
-        temperature: 0.3,
-        maxTokens: 2000,
-      })) {
-        if (chunk.type === "content" && chunk.content) {
-          translated += chunk.content;
-          // 实时更新翻译内容
-          setTranslatedText(translated);
-        }
-      }
-      // 翻译完成后自动切换到显示译文
-      setShowTranslation(true);
-    } catch (err: any) {
-      console.error("[ReasoningBlock] Translation error:", err);
-      if (typeof orca !== "undefined" && orca.notify) {
-        orca.notify("error", `翻译失败: ${err.message || "未知错误"}`);
-      }
-    } finally {
-      setIsTranslating(false);
-    }
-  }, [reasoning, translatedText, showTranslation]);
-
-  const displayText = showTranslation && translatedText ? translatedText : reasoning;
+  }, [reasoning]);
 
   return createElement(
     "div",
@@ -216,36 +154,6 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
           },
           onClick: (e: any) => e.stopPropagation(), // 防止触发折叠
         },
-        // 翻译按钮
-        createElement(
-          "button",
-          {
-            onClick: handleTranslate,
-            disabled: isTranslating,
-            style: {
-              padding: "4px 8px",
-              border: showTranslation ? "1px solid var(--orca-color-primary)" : "none",
-              borderRadius: "4px",
-              background: showTranslation ? "rgba(var(--orca-color-primary-rgb, 59, 130, 246), 0.1)" : "var(--orca-color-bg-4)",
-              color: showTranslation ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
-              cursor: isTranslating ? "wait" : "pointer",
-              fontSize: "12px",
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              transition: "all 0.2s",
-            },
-            title: showTranslation ? "显示原文" : (translatedText ? "显示译文" : "翻译成中文"),
-          },
-          createElement("i", {
-            className: isTranslating ? "ti ti-loader" : "ti ti-language",
-            style: {
-              fontSize: "14px",
-              animation: isTranslating ? "spin 1s linear infinite" : undefined,
-            },
-          }),
-          showTranslation ? "原文" : (translatedText ? "译文" : "翻译")
-        ),
         // 复制按钮
         createElement(
           "button",
@@ -280,7 +188,7 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
         },
       })
     ),
-    // Content - 推理内容（可展开查看）
+    // Content - 推理内容（可展开查看，支持 Markdown 渲染）
     isExpanded && createElement(
       "div",
       {
@@ -289,13 +197,12 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
           fontSize: "13px",
           color: "var(--orca-color-text-2)",
           lineHeight: 1.6,
-          whiteSpace: "pre-wrap",
           maxHeight: "400px",
           overflowY: "auto",
           borderTop: "1px solid var(--orca-color-border)",
         },
       },
-      displayText
+      createElement(MarkdownMessage, { content: reasoning, role: "assistant" })
     )
   );
 }

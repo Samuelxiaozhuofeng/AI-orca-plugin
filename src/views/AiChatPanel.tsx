@@ -172,7 +172,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       {
         id: nowId(),
         role: "assistant",
-        content: "New conversation started. How can I help?",
+        content: "新对话已开始，有什么可以帮你的吗？",
         createdAt: Date.now(),
         localOnly: true,
       },
