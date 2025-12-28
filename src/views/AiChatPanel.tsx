@@ -35,7 +35,7 @@ import {
   autoCacheSession,
   type SavedSession,
   type Message,
-  type ImageRef,
+  type FileRef,
 } from "../services/session-service";
 import { sessionStore, updateSessionStore, markSessionSaved, clearSessionStore } from "../store/session-store";
 import { TOOLS, executeTool } from "../services/ai-tools";
@@ -307,8 +307,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Chat Send Logic
   // ─────────────────────────────────────────────────────────────────────────
 
-	  async function handleSend(content: string, images?: ImageRef[], historyOverride?: Message[]) {
-	    if ((!content && (!images || images.length === 0)) || sending) return;
+  async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
+    if ((!content && (!files || files.length === 0)) || sending) return;
 
 	    const pluginName = getAiChatPluginName();
 	    const settings = getAiChatSettings(pluginName);
@@ -448,7 +448,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       role: "user", 
       content, 
       createdAt: Date.now(),
-      images: images && images.length > 0 ? images : undefined,
+      files: files && files.length > 0 ? files : undefined,
     };
     // 发送给 API 的消息使用处理后的内容（去掉指令）
     const userMsgForApi: Message = { 
@@ -456,7 +456,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       role: "user", 
       content: processedContent, 
       createdAt: userMsg.createdAt,
-      images: userMsg.images,
+      files: userMsg.files,
     };
 
     // Use override if provided (for regeneration), otherwise append to current state
@@ -767,7 +767,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         const content = lastUserMsg.content || "";
         const historyBeforeUser = messages.slice(0, lastUserIdx);
         // Resend using the history BEFORE the last user message, and re-using the last user content.
-        handleSend(content, lastUserMsg.images, historyBeforeUser);
+        handleSend(content, lastUserMsg.files, historyBeforeUser);
     }
   }, [messages, sending]);
 
@@ -932,7 +932,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }),
     // Chat Input
     createElement(ChatInput, {
-      onSend: (text: string, images?: ImageRef[]) => handleSend(text, images),
+      onSend: (text: string, files?: FileRef[]) => handleSend(text, files),
       onStop: stop,
       disabled: sending,
       currentPageId: rootBlockId,

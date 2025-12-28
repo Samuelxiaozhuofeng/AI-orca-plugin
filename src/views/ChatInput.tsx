@@ -1,13 +1,20 @@
 /**
  * ChatInput - 整合输入区域组件
- * 包含: Context Chips + @ 触发按钮 + 输入框 + 发送按钮 + 模型选择器 + 图片上传
+ * 包含: Context Chips + @ 触发按钮 + 输入框 + 发送按钮 + 模型选择器 + 文件上传
  */
 
 import type { DbId } from "../orca.d.ts";
 import type { AiModelOption } from "../settings/ai-chat-settings";
-import type { ImageRef } from "../services/session-service";
+import type { FileRef } from "../services/session-service";
 import { contextStore } from "../store/context-store";
-import { createImageRefFromFile, getImageDisplayUrl, ocrImage } from "../services/image-service";
+import { 
+  uploadFile, 
+  getFileDisplayUrl, 
+  getFileIcon, 
+  isImageFile, 
+  getSupportedExtensions,
+  isSupportedFile,
+} from "../services/file-service";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
 import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton } from "./chat-input";
@@ -44,7 +51,7 @@ const { useSnapshot } = (window as any).Valtio as {
 const { Button, CompositionTextArea } = orca.components;
 
 type Props = {
-  onSend: (message: string, images?: ImageRef[]) => void;
+  onSend: (message: string, files?: FileRef[]) => void;
   onStop?: () => void;
   disabled?: boolean;
   currentPageId: DbId | null;
@@ -94,7 +101,7 @@ export default function ChatInput({
   const [isFocused, setIsFocused] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashMenuIndex, setSlashMenuIndex] = useState(0);
-  const [pendingImages, setPendingImages] = useState<ImageRef[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<FileRef[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -122,20 +129,20 @@ export default function ChatInput({
     loadFromStorage();
   }, []);
 
-  const canSend = (text.trim().length > 0 || pendingImages.length > 0) && !disabled;
+  const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled;
 
   const handleSend = useCallback(() => {
     const val = textareaRef.current?.value || text;
     const trimmed = val.trim();
-    if ((!trimmed && pendingImages.length === 0) || disabled) return;
+    if ((!trimmed && pendingFiles.length === 0) || disabled) return;
 
-    onSend(trimmed, pendingImages.length > 0 ? pendingImages : undefined);
+    onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined);
     setText("");
-    setPendingImages([]);
+    setPendingFiles([]);
     if (textareaRef.current) {
       textareaRef.current.value = "";
     }
-  }, [disabled, onSend, text]);
+  }, [disabled, onSend, text, pendingFiles]);
 
   const handleKeyDown = useCallback(
     (e: any) => {
@@ -196,60 +203,63 @@ export default function ChatInput({
     }, 0);
   }, []);
 
-  // 处理图片文件选择
-  const handleImageSelect = useCallback(async (files: FileList | null) => {
+  // 处理文件选择
+  const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     
     setIsUploading(true);
-    const newImages: ImageRef[] = [];
+    const newFiles: FileRef[] = [];
     
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.type.startsWith("image/")) {
-        const imageRef = await createImageRefFromFile(file);
-        if (imageRef) {
-          newImages.push(imageRef);
+      if (isSupportedFile(file)) {
+        const fileRef = await uploadFile(file);
+        if (fileRef) {
+          newFiles.push(fileRef);
         }
+      } else {
+        orca.notify("warn", `不支持的文件类型: ${file.name}`);
       }
     }
     
-    if (newImages.length > 0) {
-      setPendingImages(prev => [...prev, ...newImages]);
+    if (newFiles.length > 0) {
+      setPendingFiles(prev => [...prev, ...newFiles]);
     }
     setIsUploading(false);
   }, []);
 
-  // 点击图片按钮
-  const handleImageButtonClick = useCallback(() => {
+  // 点击文件按钮
+  const handleFileButtonClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  // 移除待发送的图片
-  const handleRemoveImage = useCallback((index: number) => {
-    setPendingImages(prev => prev.filter((_, i) => i !== index));
+  // 移除待发送的文件
+  const handleRemoveFile = useCallback((index: number) => {
+    setPendingFiles(prev => prev.filter((_, i) => i !== index));
   }, []);
 
-  // 处理粘贴事件
+  // 处理粘贴事件（支持图片粘贴）
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
-    const imageFiles: File[] = [];
+    const pastedFiles: File[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
+      // 支持图片粘贴
       if (item.type.startsWith("image/")) {
         const file = item.getAsFile();
-        if (file) imageFiles.push(file);
+        if (file) pastedFiles.push(file);
       }
     }
 
-    if (imageFiles.length > 0) {
+    if (pastedFiles.length > 0) {
       e.preventDefault();
       setIsUploading(true);
-      for (const file of imageFiles) {
-        const imageRef = await createImageRefFromFile(file);
-        if (imageRef) {
-          setPendingImages(prev => [...prev, imageRef]);
+      for (const file of pastedFiles) {
+        const fileRef = await uploadFile(file);
+        if (fileRef) {
+          setPendingFiles(prev => [...prev, fileRef]);
         }
       }
       setIsUploading(false);
@@ -263,9 +273,9 @@ export default function ChatInput({
     
     const files = e.dataTransfer?.files;
     if (files) {
-      await handleImageSelect(files);
+      await handleFileSelect(files);
     }
-  }, [handleImageSelect]);
+  }, [handleFileSelect]);
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -348,8 +358,8 @@ export default function ChatInput({
         )
       ),
 
-      // 图片预览区域
-      pendingImages.length > 0 && createElement(
+      // 文件预览区域
+      pendingFiles.length > 0 && createElement(
         "div",
         {
           style: {
@@ -359,36 +369,67 @@ export default function ChatInput({
             marginBottom: "8px",
           },
         },
-        ...pendingImages.map((img, index) =>
-          createElement(
+        ...pendingFiles.map((file, index) => {
+          const isImage = file.category === "image";
+          return createElement(
             "div",
             {
-              key: `${img.path}-${index}`,
+              key: `${file.path}-${index}`,
               style: {
                 position: "relative",
-                width: "60px",
-                height: "60px",
+                width: isImage ? "60px" : "auto",
+                height: isImage ? "60px" : "auto",
+                minWidth: isImage ? undefined : "80px",
+                maxWidth: isImage ? undefined : "150px",
                 borderRadius: "8px",
                 overflow: "hidden",
                 border: "1px solid var(--orca-color-border)",
+                background: isImage ? undefined : "var(--orca-color-bg-3)",
+                padding: isImage ? undefined : "8px 12px",
+                display: "flex",
+                flexDirection: isImage ? undefined : "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: isImage ? undefined : "4px",
               },
             },
-            createElement("img", {
-              src: getImageDisplayUrl(img),
-              alt: img.name,
-              style: {
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-              },
-              onError: (e: any) => {
-                e.target.style.display = "none";
-              },
-            }),
+            isImage
+              ? createElement("img", {
+                  src: getFileDisplayUrl(file),
+                  alt: file.name,
+                  style: {
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  },
+                  onError: (e: any) => {
+                    e.target.style.display = "none";
+                  },
+                })
+              : [
+                  createElement("i", {
+                    key: "icon",
+                    className: getFileIcon(file.name, file.mimeType),
+                    style: { fontSize: "20px", color: "var(--orca-color-primary)" },
+                  }),
+                  createElement("span", {
+                    key: "name",
+                    style: {
+                      fontSize: "10px",
+                      color: "var(--orca-color-text-2)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      maxWidth: "100%",
+                      textAlign: "center",
+                    },
+                    title: file.name,
+                  }, file.name.length > 12 ? file.name.slice(0, 10) + "..." : file.name),
+                ],
             createElement(
               "button",
               {
-                onClick: () => handleRemoveImage(index),
+                onClick: () => handleRemoveFile(index),
                 style: {
                   position: "absolute",
                   top: "2px",
@@ -405,12 +446,12 @@ export default function ChatInput({
                   justifyContent: "center",
                   fontSize: "10px",
                 },
-                title: "移除图片",
+                title: "移除文件",
               },
               createElement("i", { className: "ti ti-x" })
             )
-          )
-        ),
+          );
+        }),
         isUploading && createElement(
           "div",
           {
@@ -432,7 +473,7 @@ export default function ChatInput({
       // Row 1: TextArea
       createElement(CompositionTextArea as any, {
         ref: textareaRef as any,
-        placeholder: pendingImages.length > 0 ? "描述图片或直接发送..." : "Ask AI...",
+        placeholder: pendingFiles.length > 0 ? "描述文件或直接发送..." : "Ask AI...",
         value: text,
         onChange: (e: any) => setText(e.target.value),
         onKeyDown: handleKeyDown,
@@ -450,7 +491,7 @@ export default function ChatInput({
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         
-        // Left Tools: @ Button + Image Button + Model Selector + Injection Mode Selector
+        // Left Tools: @ Button + File Button + Model Selector + Injection Mode Selector
         createElement(
           "div",
           { style: { display: "flex", gap: 8, alignItems: "center" } },
@@ -471,28 +512,28 @@ export default function ChatInput({
               createElement("i", { className: "ti ti-at" })
             )
           ),
-          // 图片上传按钮
+          // 文件上传按钮
           createElement(
             "div",
             { style: { display: "flex", alignItems: "center" } },
             createElement("input", {
               ref: fileInputRef as any,
               type: "file",
-              accept: "image/*",
+              accept: getSupportedExtensions(),
               multiple: true,
               style: { display: "none" },
-              onChange: (e: any) => handleImageSelect(e.target.files),
+              onChange: (e: any) => handleFileSelect(e.target.files),
             }),
             createElement(
               Button,
               {
                 variant: "plain",
-                onClick: handleImageButtonClick,
-                title: "添加图片",
+                onClick: handleFileButtonClick,
+                title: "添加文件 (图片、文档、代码等)",
                 style: { padding: "4px" },
                 disabled: isUploading,
               },
-              createElement("i", { className: isUploading ? "ti ti-loader" : "ti ti-photo" })
+              createElement("i", { className: isUploading ? "ti ti-loader" : "ti ti-paperclip" })
             )
           ),
           createElement(ModelSelectorButton, {

@@ -4,11 +4,24 @@ import type { ContextRef } from "../store/context-store";
 
 /**
  * Image reference for messages (stores path, not base64)
+ * @deprecated Use FileRef instead
  */
 export type ImageRef = {
   path: string; // 本地文件路径
   name: string; // 文件名
   mimeType: string; // image/png, image/jpeg 等
+};
+
+/**
+ * File reference for messages (stores path, not content)
+ * Supports images, videos, audio, documents, code files, and data files
+ */
+export type FileRef = {
+  path: string; // 本地文件路径
+  name: string; // 文件名
+  mimeType: string; // MIME 类型
+  size?: number; // 文件大小 (bytes)
+  category?: "image" | "video" | "audio" | "document" | "code" | "data" | "other"; // 文件分类
 };
 
 /**
@@ -20,7 +33,8 @@ export type Message = {
   content: string;
   createdAt: number;
   localOnly?: boolean;
-  images?: ImageRef[]; // 图片引用（存路径）
+  images?: ImageRef[]; // 图片引用（存路径）- 兼容旧版
+  files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型
   tool_calls?: Array<{
     id: string;
     type: "function";

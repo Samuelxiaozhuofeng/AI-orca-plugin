@@ -9,6 +9,7 @@ import type { OpenAIChatMessage } from "./openai-client";
 import type { Message } from "./session-service";
 import type { ChatMode } from "../store/chat-mode-store";
 import { buildImageContent } from "./image-service";
+import { buildFileContentForApi, getFileTypeConfig } from "./file-service";
 
 export interface MessageBuildParams {
   messages: Message[];
@@ -66,7 +67,7 @@ function messageToApi(m: Message): OpenAIChatMessage {
  * Convert internal Message to OpenAI API format with image support (async)
  */
 async function messageToApiWithImages(m: Message): Promise<OpenAIChatMessage> {
-  // Handle messages with images (multimodal)
+  // Handle messages with images (multimodal) - legacy support
   if (m.images && m.images.length > 0 && m.role === "user") {
     const contentParts: any[] = [];
     
@@ -80,6 +81,31 @@ async function messageToApiWithImages(m: Message): Promise<OpenAIChatMessage> {
       const imageContent = await buildImageContent(img);
       if (imageContent) {
         contentParts.push(imageContent);
+      }
+    }
+    
+    if (contentParts.length > 0) {
+      return {
+        role: "user",
+        content: contentParts as any,
+      };
+    }
+  }
+
+  // Handle messages with files (new format - supports all file types)
+  if (m.files && m.files.length > 0 && m.role === "user") {
+    const contentParts: any[] = [];
+    
+    // Add text content if present
+    if (m.content) {
+      contentParts.push({ type: "text", text: m.content });
+    }
+    
+    // Add file content
+    for (const file of m.files) {
+      const fileContent = await buildFileContentForApi(file);
+      if (fileContent) {
+        contentParts.push(fileContent);
       }
     }
     

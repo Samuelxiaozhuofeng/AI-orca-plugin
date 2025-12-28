@@ -5,6 +5,7 @@
  * - Markdown content rendering
  * - Tool call status indicators (semantic, animated)
  * - Action bar (copy, regenerate, extract memory)
+ * - File attachments (images, documents, code, data)
  *
  * Gemini UX Review: Tool calls now use inline status flow instead of technical cards
  */
@@ -13,7 +14,7 @@ import MarkdownMessage from "../components/MarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
 import ExtractMemoryButton from "./ExtractMemoryButton";
 import type { ExtractedMemory } from "../services/memory-extraction";
-import { getImageDisplayUrl } from "../services/image-service";
+import { getFileDisplayUrl, getFileIcon } from "../services/file-service";
 import {
   messageRowStyle,
   messageBubbleStyle,
@@ -156,9 +157,80 @@ export default function MessageItem({
       {
         style: messageBubbleStyle(message.role),
       },
-      // 图片显示（如果有）
+      // 文件显示（图片和其他文件）
+      message.files &&
+        message.files.length > 0 &&
+        createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "8px",
+              marginBottom: message.content ? "8px" : "0",
+            },
+          },
+          ...message.files.map((file, index) => {
+            const isImage = file.category === "image";
+            return createElement(
+              "div",
+              {
+                key: `${file.path}-${index}`,
+                style: {
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  maxWidth: isImage ? "200px" : "180px",
+                  cursor: "pointer",
+                  border: isImage ? undefined : "1px solid var(--orca-color-border)",
+                  background: isImage ? undefined : "var(--orca-color-bg-2)",
+                  padding: isImage ? undefined : "8px 12px",
+                  display: isImage ? undefined : "flex",
+                  alignItems: isImage ? undefined : "center",
+                  gap: isImage ? undefined : "8px",
+                },
+                onClick: () => {
+                  orca.invokeBackend("shell-open", file.path);
+                },
+                title: file.name,
+              },
+              isImage
+                ? createElement("img", {
+                    src: getFileDisplayUrl(file),
+                    alt: file.name,
+                    style: {
+                      maxWidth: "100%",
+                      maxHeight: "200px",
+                      objectFit: "contain",
+                      display: "block",
+                    },
+                    onError: (e: any) => {
+                      e.target.style.display = "none";
+                    },
+                  })
+                : [
+                    createElement("i", {
+                      key: "icon",
+                      className: getFileIcon(file.name, file.mimeType),
+                      style: { fontSize: "18px", color: "var(--orca-color-primary)" },
+                    }),
+                    createElement("span", {
+                      key: "name",
+                      style: {
+                        fontSize: "12px",
+                        color: "var(--orca-color-text-1)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    }, file.name),
+                  ]
+            );
+          })
+        ),
+      // 兼容旧版 images 字段
       message.images &&
         message.images.length > 0 &&
+        !message.files &&
         createElement(
           "div",
           {
@@ -181,13 +253,12 @@ export default function MessageItem({
                   cursor: "pointer",
                 },
                 onClick: () => {
-                  // 点击在系统中打开图片
                   orca.invokeBackend("shell-open", img.path);
                 },
                 title: img.name,
               },
               createElement("img", {
-                src: getImageDisplayUrl(img),
+                src: getFileDisplayUrl(img),
                 alt: img.name,
                 style: {
                   maxWidth: "100%",
