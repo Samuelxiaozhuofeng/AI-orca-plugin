@@ -491,6 +491,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
       // Stream initial response with timeout protection
       let currentContent = "";
+      let currentReasoning = "";
       let toolCalls: ToolCallInfo[] = [];
 
       // Get memory text for injection based on current injection mode
@@ -521,6 +522,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         if (chunk.type === "content") {
           currentContent += chunk.content;
           updateMessage(assistantId, { content: currentContent });
+        } else if (chunk.type === "reasoning") {
+          currentReasoning += chunk.reasoning;
+          updateMessage(assistantId, { reasoning: currentReasoning });
         } else if (chunk.type === "tool_calls") {
           toolCalls = chunk.toolCalls;
         }
@@ -537,6 +541,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        role: "assistant",
 	        content: currentContent,
 	        createdAt: assistantCreatedAt,
+	        reasoning: currentReasoning || undefined,
 	        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
 	      });
 
@@ -647,6 +652,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         queueMicrotask(scrollToBottom);
 
         let nextContent = "";
+        let nextReasoning = "";
         let nextToolCalls: ToolCallInfo[] = [];
         const enableTools = toolRound < MAX_TOOL_ROUNDS;
 
@@ -668,6 +674,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             if (chunk.type === "content") {
               nextContent += chunk.content;
               updateMessage(nextAssistantId, { content: nextContent });
+            } else if (chunk.type === "reasoning") {
+              nextReasoning += chunk.reasoning;
+              updateMessage(nextAssistantId, { reasoning: nextReasoning });
             } else if (chunk.type === "tool_calls" && enableTools) {
               nextToolCalls = chunk.toolCalls;
             }
@@ -696,6 +705,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           role: "assistant",
           content: nextContent,
           createdAt: nextAssistantCreatedAt,
+          reasoning: nextReasoning || undefined,
           tool_calls: nextToolCalls.length > 0 ? nextToolCalls : undefined,
         });
 

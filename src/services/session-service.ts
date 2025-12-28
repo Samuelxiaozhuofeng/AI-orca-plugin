@@ -42,6 +42,7 @@ export type Message = {
   localOnly?: boolean;
   images?: ImageRef[]; // 图片引用（存路径）- 兼容旧版
   files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型
+  reasoning?: string; // AI 推理过程（DeepSeek/Claude thinking）
   tool_calls?: Array<{
     id: string;
     type: "function";

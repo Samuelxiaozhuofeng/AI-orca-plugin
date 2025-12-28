@@ -74,8 +74,9 @@ async function readErrorMessage(res: Response): Promise<string> {
 }
 
 type StreamChunk = {
-  type: "content" | "tool_calls";
+  type: "content" | "tool_calls" | "reasoning";
   content?: string;
+  reasoning?: string;
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -118,6 +119,16 @@ function safeDeltaFromEvent(obj: any): StreamChunk {
     };
   }
 
+  // Check for reasoning content (DeepSeek/Claude thinking)
+  // DeepSeek uses reasoning_content, some models use thinking
+  const reasoning = delta?.reasoning_content || delta?.thinking;
+  if (typeof reasoning === "string" && reasoning) {
+    return {
+      type: "reasoning",
+      reasoning,
+    };
+  }
+
   // Check for content in delta
   if (delta && typeof delta.content === "string") {
     return {
@@ -136,6 +147,14 @@ function safeDeltaFromEvent(obj: any): StreamChunk {
       return {
         type: "tool_calls",
         tool_calls: msg.tool_calls,
+      };
+    }
+    // Check reasoning in non-streaming message
+    const msgReasoning = msg.reasoning_content || msg.thinking;
+    if (typeof msgReasoning === "string" && msgReasoning) {
+      return {
+        type: "reasoning",
+        reasoning: msgReasoning,
       };
     }
     if (typeof msg.content === "string") {

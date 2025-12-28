@@ -26,6 +26,7 @@ export interface StreamOptions {
 export interface StreamResult {
   content: string;
   toolCalls: ToolCallInfo[];
+  reasoning?: string;
 }
 
 export interface ToolCallInfo {
@@ -39,6 +40,7 @@ export interface ToolCallInfo {
 
 export type StreamChunk =
   | { type: "content"; content: string }
+  | { type: "reasoning"; reasoning: string }
   | { type: "tool_calls"; toolCalls: ToolCallInfo[] }
   | { type: "done"; result: StreamResult };
 
@@ -147,6 +149,7 @@ export async function* streamChatCompletion(
   options: StreamOptions
 ): AsyncGenerator<StreamChunk, void, unknown> {
   let content = "";
+  let reasoning = "";
   let toolCalls: ToolCallInfo[] = [];
 
   for await (const chunk of openAIChatCompletionsStream({
@@ -162,6 +165,9 @@ export async function* streamChatCompletion(
     if (chunk.type === "content" && chunk.content) {
       content += chunk.content;
       yield { type: "content", content: chunk.content };
+    } else if (chunk.type === "reasoning" && chunk.reasoning) {
+      reasoning += chunk.reasoning;
+      yield { type: "reasoning", reasoning: chunk.reasoning };
     } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
       console.log("[streamChatCompletion] Received tool_calls chunk, merging...");
       const oldCount = toolCalls.length;
@@ -171,7 +177,7 @@ export async function* streamChatCompletion(
     }
   }
 
-  yield { type: "done", result: { content, toolCalls } };
+  yield { type: "done", result: { content, toolCalls, reasoning: reasoning || undefined } };
 }
 
 /**
@@ -190,6 +196,7 @@ export async function* streamChatWithRetry(
 ): AsyncGenerator<StreamChunk, void, unknown> {
   const timeoutMs = options.timeoutMs ?? 30000;
   let content = "";
+  let reasoning = "";
   let toolCalls: ToolCallInfo[] = [];
   let usedFallback = false;
 
@@ -239,6 +246,9 @@ export async function* streamChatWithRetry(
         if (chunk.type === "content" && chunk.content) {
           content += chunk.content;
           yield { type: "content", content: chunk.content };
+        } else if (chunk.type === "reasoning" && chunk.reasoning) {
+          reasoning += chunk.reasoning;
+          yield { type: "reasoning", reasoning: chunk.reasoning };
         } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
           console.log("[streamChatWithRetry] Received tool_calls chunk, merging...");
           const oldCount = toolCalls.length;
@@ -286,5 +296,5 @@ export async function* streamChatWithRetry(
     console.log(`[streamChatWithRetry] Response complete with ${toolCalls.length} tool call(s)`);
   }
 
-  yield { type: "done", result: { content, toolCalls } };
+  yield { type: "done", result: { content, toolCalls, reasoning: reasoning || undefined } };
 }

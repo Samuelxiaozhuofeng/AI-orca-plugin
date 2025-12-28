@@ -3,7 +3,8 @@
  *
  * Renders individual chat messages with:
  * - Markdown content rendering
- * - Tool call status indicators (semantic, animated)
+ * - Reasoning/thinking display (collapsible)
+ * - Tool call status indicators (semantic, animated, auto-collapse when done)
  * - Action bar (copy, regenerate, extract memory)
  * - File attachments (images, documents, code, data)
  *
@@ -31,9 +32,10 @@ const React = window.React as unknown as {
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
   useMemo: <T>(factory: () => T, deps: any[]) => T;
+  useEffect: (effect: () => void | (() => void), deps?: any[]) => void;
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback, useMemo, Fragment } = React;
+const { createElement, useState, useCallback, useMemo, useEffect, Fragment } = React;
 
 // 格式化消息时间
 function formatMessageTime(timestamp: number): string {
@@ -45,6 +47,86 @@ function formatMessageTime(timestamp: number): string {
     return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * ReasoningBlock - 显示 AI 推理过程（可折叠）
+ */
+function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  // 流式传输时自动展开，完成后自动折叠
+  useEffect(() => {
+    if (!isStreaming && reasoning) {
+      // 延迟折叠，让用户看到完成状态
+      const timer = setTimeout(() => setIsExpanded(false), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, reasoning]);
+
+  if (!reasoning) return null;
+
+  return createElement(
+    "div",
+    {
+      style: {
+        marginBottom: "8px",
+        borderRadius: "8px",
+        border: "1px solid var(--orca-color-border)",
+        background: "var(--orca-color-bg-2)",
+        overflow: "hidden",
+      },
+    },
+    // Header
+    createElement(
+      "div",
+      {
+        onClick: () => setIsExpanded(!isExpanded),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "8px 12px",
+          cursor: "pointer",
+          background: "var(--orca-color-bg-3)",
+          userSelect: "none",
+        },
+      },
+      createElement("i", {
+        className: isStreaming ? "ti ti-loader" : "ti ti-brain",
+        style: {
+          fontSize: "14px",
+          color: "var(--orca-color-primary)",
+          animation: isStreaming ? "spin 1s linear infinite" : undefined,
+        },
+      }),
+      createElement(
+        "span",
+        { style: { fontSize: "12px", fontWeight: 500, color: "var(--orca-color-text-2)" } },
+        isStreaming ? "思考中..." : "思考过程"
+      ),
+      createElement("i", {
+        className: isExpanded ? "ti ti-chevron-up" : "ti ti-chevron-down",
+        style: { fontSize: "12px", color: "var(--orca-color-text-3)", marginLeft: "auto" },
+      })
+    ),
+    // Content
+    isExpanded && createElement(
+      "div",
+      {
+        style: {
+          padding: "8px 12px",
+          fontSize: "13px",
+          color: "var(--orca-color-text-2)",
+          lineHeight: 1.5,
+          whiteSpace: "pre-wrap",
+          maxHeight: "300px",
+          overflowY: "auto",
+        },
+      },
+      reasoning
+    )
+  );
 }
 
 interface MessageItemProps {
@@ -83,6 +165,109 @@ function ToolCallWithResult({
     args: toolCall.function.arguments,
     result: result?.content,
   });
+}
+
+/**
+ * CollapsibleToolCalls - 可折叠的工具调用列表
+ * 流式传输时展开，完成后自动折叠
+ */
+function CollapsibleToolCalls({
+  toolCalls,
+  toolResults,
+  isStreaming,
+}: {
+  toolCalls: ToolCallInfo[];
+  toolResults?: Map<string, { content: string; name: string }>;
+  isStreaming?: boolean;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  // 检查是否所有工具调用都已完成
+  const allCompleted = useMemo(() => {
+    if (!toolResults) return false;
+    return toolCalls.every((tc) => toolResults.has(tc.id));
+  }, [toolCalls, toolResults]);
+
+  // 流式传输时展开，完成后自动折叠
+  useEffect(() => {
+    if (!isStreaming && allCompleted) {
+      const timer = setTimeout(() => setIsExpanded(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, allCompleted]);
+
+  const toolCount = toolCalls.length;
+  const completedCount = toolResults ? toolCalls.filter((tc) => toolResults.has(tc.id)).length : 0;
+
+  return createElement(
+    "div",
+    { style: { marginTop: "12px" } },
+    // 折叠头部
+    !isExpanded && createElement(
+      "div",
+      {
+        onClick: () => setIsExpanded(true),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "6px 10px",
+          borderRadius: "6px",
+          background: "var(--orca-color-bg-2)",
+          border: "1px solid var(--orca-color-border)",
+          cursor: "pointer",
+          fontSize: "12px",
+          color: "var(--orca-color-text-2)",
+        },
+      },
+      createElement("i", {
+        className: "ti ti-tools",
+        style: { fontSize: "14px", color: "var(--orca-color-primary)" },
+      }),
+      `已执行 ${completedCount}/${toolCount} 个工具`,
+      createElement("i", {
+        className: "ti ti-chevron-down",
+        style: { fontSize: "12px", marginLeft: "auto" },
+      })
+    ),
+    // 展开的工具调用列表
+    isExpanded && createElement(
+      "div",
+      { style: { position: "relative" } },
+      // 折叠按钮（仅在完成后显示）
+      allCompleted && !isStreaming && createElement(
+        "button",
+        {
+          onClick: () => setIsExpanded(false),
+          style: {
+            position: "absolute",
+            top: "0",
+            right: "0",
+            padding: "2px 6px",
+            fontSize: "11px",
+            color: "var(--orca-color-text-3)",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "2px",
+          },
+          title: "折叠工具调用",
+        },
+        createElement("i", { className: "ti ti-chevron-up", style: { fontSize: "12px" } }),
+        "折叠"
+      ),
+      ...toolCalls.map((tc) =>
+        createElement(ToolCallWithResult, {
+          key: tc.id,
+          toolCall: tc,
+          result: toolResults?.get(tc.id),
+          isLoading: isStreaming || !toolResults?.has(tc.id),
+        })
+      )
+    )
+  );
 }
 
 /**
@@ -277,6 +462,12 @@ export default function MessageItem({
             )
           )
         ),
+      // Reasoning/Thinking (显示 AI 推理过程)
+      message.reasoning && createElement(ReasoningBlock, {
+        reasoning: message.reasoning,
+        isStreaming,
+      }),
+
       // Content
       createElement(MarkdownMessage, { content: message.content || "", role: message.role }),
 
@@ -286,22 +477,14 @@ export default function MessageItem({
           style: cursorStyle,
         }),
 
-      // Tool Calls with Results (unified display)
-      // Gemini UX Review: Single status flow instead of separate call/result cards
+      // Tool Calls with Results (unified display, auto-collapse when done)
       message.tool_calls &&
         message.tool_calls.length > 0 &&
-        createElement(
-          "div",
-          { style: { marginTop: "12px" } },
-          ...message.tool_calls.map((tc) =>
-            createElement(ToolCallWithResult, {
-              key: tc.id,
-              toolCall: tc,
-              result: toolResults?.get(tc.id),
-              isLoading: isStreaming || !toolResults?.has(tc.id),
-            })
-          )
-        ),
+        createElement(CollapsibleToolCalls, {
+          toolCalls: message.tool_calls,
+          toolResults,
+          isStreaming,
+        }),
 
       // Message Time
       message.createdAt &&
