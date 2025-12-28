@@ -522,6 +522,40 @@ function toFiniteNumber(val: any): number | undefined {
 }
 
 /**
+ * 从 block.content 提取纯文本内容
+ * block.content 可能是字符串或 ContentFragment[] 数组
+ */
+function extractBlockText(content: any): string {
+  if (!content) return "";
+  
+  // 如果已经是字符串，直接返回
+  if (typeof content === "string") return content;
+  
+  // 如果是数组（ContentFragment[]），提取每个 fragment 的文本
+  if (Array.isArray(content)) {
+    return content.map((fragment: any) => {
+      if (!fragment) return "";
+      // fragment.v 是值，可能是字符串或其他类型
+      if (typeof fragment.v === "string") return fragment.v;
+      if (typeof fragment.v === "number") return String(fragment.v);
+      // 对于复杂类型（如嵌套对象），尝试提取
+      if (fragment.v && typeof fragment.v === "object") {
+        // 可能是链接等，尝试获取显示文本
+        return fragment.v.text || fragment.v.title || fragment.v.name || "";
+      }
+      return "";
+    }).join("");
+  }
+  
+  // 其他情况，尝试转字符串
+  try {
+    return String(content);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 规范化日记偏移量。
  */
 function normalizeJournalOffset(val: any, defaultVal: number): number {
@@ -1073,8 +1107,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           return `${year}-${month}-${day} ${hour}:${min}`;
         };
 
-        // Build content
-        let content = block.content || "";
+        // Build content - extract text from content (may be string or ContentFragment[])
+        let content = extractBlockText(block.content);
         // Ensure content is a string before splitting
         const contentStr = typeof content === "string" ? content : "";
         let title = block.alias?.[0] || contentStr.split("\n")[0]?.substring(0, 50) || `Block #${blockId}`;
@@ -1087,7 +1121,10 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
           for (const childId of block.children) {
             const childBlock = orca.state.blocks[childId] || await orca.invokeBackend("get-block", childId);
             if (childBlock && childBlock.content) {
-              childContents.push(`  - ${childBlock.content}`);
+              const childText = extractBlockText(childBlock.content);
+              if (childText) {
+                childContents.push(`  - ${childText}`);
+              }
             }
           }
           if (childContents.length > 0) {
