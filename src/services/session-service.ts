@@ -332,6 +332,7 @@ export async function renameSession(sessionId: string, newTitle: string): Promis
  * Auto-cache current session (called on message changes)
  * This saves without requiring manual action
  * Only generates title on first message, preserves existing title afterwards
+ * Only updates position (updatedAt) when new messages are added
  */
 export async function autoCacheSession(session: SavedSession): Promise<void> {
   const data = await loadSessions();
@@ -357,11 +358,16 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     title = generateSessionTitle(filteredMessages);
   }
 
+  // Only update updatedAt when message count changes (new message added)
+  // This prevents reordering when just switching sessions
+  const hasNewMessages = !existingSession || filteredMessages.length > existingSession.messages.length;
+  const updatedAt = hasNewMessages ? Date.now() : (existingSession?.updatedAt || Date.now());
+
   const sessionToSave: SavedSession = {
     ...session,
     messages: filteredMessages,
     title: title || "",
-    updatedAt: Date.now(),
+    updatedAt,
   };
 
   if (existingIndex >= 0) {
