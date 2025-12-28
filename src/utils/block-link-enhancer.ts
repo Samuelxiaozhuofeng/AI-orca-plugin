@@ -80,8 +80,20 @@ export function formatBlockResult(block: {
   title: string;
   content?: string;
   fullContent?: string;
+  tags?: string[];  // aliases are stored in tags field
 }, index: number): string {
-  let linkTitle = block.title.replace(/[\[\]]/g, '');  // Escape brackets
+  // Priority: tags (aliases) > title > Block #id
+  let linkTitle: string;
+  
+  if (Array.isArray(block.tags) && block.tags.length > 0) {
+    // tags field contains aliases (page names)
+    const validTags = block.tags.filter((t: any) => typeof t === "string" && t.trim());
+    linkTitle = validTags.length > 0 ? validTags.join(" / ") : block.title;
+  } else {
+    linkTitle = block.title;
+  }
+  
+  linkTitle = linkTitle.replace(/[\[\]]/g, '');  // Escape brackets
   
   // Use block ID format for untitled blocks to prevent AI from calling getPage
   if (!linkTitle || linkTitle === '(untitled)' || linkTitle.trim() === '') {

@@ -581,7 +581,16 @@ function buildLimitWarning(resultCount: number, maxResults: number, actualLimit:
  */
 function formatBriefResult(result: any, index: number): string {
   // 清理标题中的链接格式，避免嵌套
-  let title = result.title || `Block #${result.id}`;
+  // 优先使用 tags (aliases)，然后是 title
+  let title: string;
+  if (Array.isArray(result.tags) && result.tags.length > 0) {
+    // tags 字段存储的是 aliases
+    const validTags = result.tags.filter((t: any) => typeof t === "string" && t.trim());
+    title = validTags.length > 0 ? validTags.join(" / ") : (result.title || `Block #${result.id}`);
+  } else {
+    title = result.title || `Block #${result.id}`;
+  }
+  
   title = title.replace(/\[([^\]]+)\]\(orca-block:\d+\)/g, "$1"); // 移除已有的 block link
   title = title.replace(/[\[\]]/g, ""); // 移除方括号
   
@@ -1111,7 +1120,20 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         let content = extractBlockText(block.content);
         // Ensure content is a string before splitting
         const contentStr = typeof content === "string" ? content : "";
-        let title = block.alias?.[0] || contentStr.split("\n")[0]?.substring(0, 50) || `Block #${blockId}`;
+        
+        // Extract title: priority is aliases > first line of content
+        let title: string;
+        if (Array.isArray(block.aliases) && block.aliases.length > 0) {
+          // Use aliases (page names) joined with " / "
+          const validAliases = block.aliases
+            .map((a: any) => String(a).trim())
+            .filter((a: string) => a.length > 0);
+          title = validAliases.length > 0 
+            ? validAliases.join(" / ")
+            : contentStr.split("\n")[0]?.substring(0, 50) || `Block #${blockId}`;
+        } else {
+          title = contentStr.split("\n")[0]?.substring(0, 50) || `Block #${blockId}`;
+        }
         title = title.replace(/[\[\]]/g, "");
 
         // Get children content if requested

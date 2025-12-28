@@ -179,19 +179,56 @@ export async function fetchBlockTrees(blocks: any[]): Promise<{ block: any; tree
         const payload = unwrapBackendResult<any>(result);
         throwIfBackendError(payload, "get-block-tree");
 
-        // If input was just an ID, use the tree's root block as the block object
-        // Otherwise, prefer the original block object
-        const block = typeof blockOrId === "number"
-          ? (payload?.block ?? { id: blockId })
-          : blockOrId;
+        // get-block-tree may return empty array [] for some blocks (e.g., alias blocks)
+        // In that case, fall back to get-block for complete block info
+        let treeBlock = payload?.block;
+        let tree = payload;
+        
+        // Check if payload is empty or invalid
+        const isEmptyTree = !payload || (Array.isArray(payload) && payload.length === 0) || !treeBlock;
+        
+        if (isEmptyTree) {
+          // Fallback: use get-block to get complete block info including aliases
+          try {
+            const blockResult = await orca.invokeBackend("get-block", blockId);
+            const blockPayload = unwrapBackendResult<any>(blockResult);
+            if (blockPayload && blockPayload.id) {
+              treeBlock = blockPayload;
+            }
+          } catch (blockErr) {
+            console.warn("[fetchBlockTrees] get-block fallback failed:", blockId, blockErr);
+          }
+          tree = null; // No valid tree
+        }
 
-        return { block, tree: payload };
+        let block: any;
+        if (typeof blockOrId === "number") {
+          block = treeBlock ?? { id: blockId };
+        } else {
+          // Merge: fetched block takes priority for aliases
+          block = treeBlock 
+            ? { ...blockOrId, ...treeBlock }
+            : blockOrId;
+        }
+
+        return { block, tree };
       } catch (err) {
         console.warn("[fetchBlockTrees] Failed to load block tree:", {
           id: blockId,
           err,
         });
-        // Ensure block has an id even on error
+        
+        // Last resort: try get-block directly
+        try {
+          const blockResult = await orca.invokeBackend("get-block", blockId);
+          const blockPayload = unwrapBackendResult<any>(blockResult);
+          if (blockPayload && blockPayload.id) {
+            return { block: blockPayload, tree: null };
+          }
+        } catch {
+          // Ignore
+        }
+        
         const block = typeof blockOrId === "number"
           ? { id: blockOrId }
           : blockOrId;

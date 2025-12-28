@@ -102,9 +102,25 @@ export function safeText(block: any): string {
 }
 
 /**
- * Extract title from block (first line or first 50 characters)
+ * Extract title from block
+ * Priority: aliases (page names, joined) > first line of content > "(untitled)"
+ * Multiple aliases are joined with " / "
  */
 export function extractTitle(block: any): string {
+  // Priority 1: Use page aliases if available
+  if (Array.isArray(block?.aliases) && block.aliases.length > 0) {
+    const validAliases = block.aliases
+      .map((a: any) => String(a).trim())
+      .filter((a: string) => a.length > 0);
+    
+    if (validAliases.length > 0) {
+      // Join multiple aliases with " / "
+      const joined = validAliases.join(" / ");
+      return joined.length > 60 ? joined.substring(0, 60) + "..." : joined;
+    }
+  }
+
+  // Priority 2: Use content text
   const text = safeText(block);
   if (!text) return "(untitled)";
 
