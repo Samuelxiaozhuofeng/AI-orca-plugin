@@ -288,12 +288,15 @@ export const chatAnimations = `
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   List Styles
+   List Styles (公众号风格)
    ─────────────────────────────────────────────────────────────────────────── */
 
 .md-list {
-    margin: 12px 0;
-    padding-left: 24px;
+    margin: 20px 0;
+    padding: 15px 15px 15px 35px;
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 10px;
+    border: 1px dashed rgba(0, 0, 0, 0.1);
     color: inherit;
 }
 
@@ -307,8 +310,11 @@ export const chatAnimations = `
 
 /* 嵌套列表样式 */
 .md-list-nested {
-    margin: 4px 0;
+    margin: 8px 0;
     padding-left: 20px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
 }
 
 .md-list-nested.md-list-unordered {
