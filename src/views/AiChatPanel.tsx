@@ -482,17 +482,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       
       const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsgWithContextAssets];
 
-      // Create assistant message placeholder
-      const assistantId = nowId();
-      const assistantCreatedAt = Date.now();
-      setStreamingMessageId(assistantId);
-      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "", createdAt: assistantCreatedAt }]);
-      queueMicrotask(scrollToBottom);
-
       // Stream initial response with timeout protection
       let currentContent = "";
       let currentReasoning = "";
       let toolCalls: ToolCallInfo[] = [];
+      let reasoningMessageId: string | null = null;
+      let reasoningCreatedAt: number | null = null;
 
       // Get memory text for injection based on current injection mode
       // Uses getFullMemoryText which combines portrait (higher priority) + unextracted memories
@@ -519,12 +514,58 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         apiMessages,
         apiMessagesFallback,
       )) {
-        if (chunk.type === "content") {
-          currentContent += chunk.content;
-          updateMessage(assistantId, { content: currentContent });
-        } else if (chunk.type === "reasoning") {
+        if (chunk.type === "reasoning") {
+          // 第一次收到 reasoning 时，创建独立的 reasoning 消息
+          if (!reasoningMessageId) {
+            reasoningMessageId = nowId();
+            reasoningCreatedAt = Date.now();
+            setStreamingMessageId(reasoningMessageId);
+            setMessages((prev) => [...prev, { 
+              id: reasoningMessageId!, 
+              role: "assistant", 
+              content: "", 
+              reasoning: chunk.reasoning,
+              createdAt: reasoningCreatedAt!,
+            }]);
+          } else {
+            currentReasoning += chunk.reasoning;
+            updateMessage(reasoningMessageId, { reasoning: currentReasoning });
+          }
           currentReasoning += chunk.reasoning;
-          updateMessage(assistantId, { reasoning: currentReasoning });
+        } else if (chunk.type === "content") {
+          // 第一次收到 content 时，创建 assistant 消息（如果还没有 reasoning 消息，或者 reasoning 已完成）
+          if (!reasoningMessageId) {
+            // 没有 reasoning，直接创建 assistant 消息
+            const assistantId = nowId();
+            const assistantCreatedAt = Date.now();
+            setStreamingMessageId(assistantId);
+            setMessages((prev) => [...prev, { 
+              id: assistantId, 
+              role: "assistant", 
+              content: chunk.content, 
+              createdAt: assistantCreatedAt 
+            }]);
+            currentContent = chunk.content;
+            reasoningMessageId = assistantId; // 复用这个 ID 作为 assistant ID
+          } else if (currentContent === "") {
+            // reasoning 完成，创建新的 assistant 消息
+            setStreamingMessageId(null); // 停止 reasoning 的流式状态
+            const assistantId = nowId();
+            const assistantCreatedAt = Date.now();
+            setStreamingMessageId(assistantId);
+            setMessages((prev) => [...prev, { 
+              id: assistantId, 
+              role: "assistant", 
+              content: chunk.content, 
+              createdAt: assistantCreatedAt 
+            }]);
+            currentContent = chunk.content;
+            reasoningMessageId = assistantId; // 更新为 assistant ID
+          } else {
+            // 继续追加 content
+            currentContent += chunk.content;
+            updateMessage(reasoningMessageId, { content: currentContent });
+          }
         } else if (chunk.type === "tool_calls") {
           toolCalls = chunk.toolCalls;
         }
@@ -532,8 +573,36 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
       setStreamingMessageId(null);
 
+      // 如果只有 reasoning 没有 content，需要创建 assistant 消息
+      const assistantId = currentContent ? reasoningMessageId! : nowId();
+      const assistantCreatedAt = currentContent ? (reasoningCreatedAt || Date.now()) : Date.now();
+      
       if (!currentContent && toolCalls.length === 0) {
-        updateMessage(assistantId, { content: "(empty response)" });
+        if (reasoningMessageId && currentReasoning) {
+          // 有 reasoning 但没有 content，创建空的 assistant 消息
+          setMessages((prev) => [...prev, { 
+            id: assistantId, 
+            role: "assistant", 
+            content: "(empty response)", 
+            createdAt: assistantCreatedAt 
+          }]);
+        } else {
+          // 完全空响应
+          setMessages((prev) => [...prev, { 
+            id: assistantId, 
+            role: "assistant", 
+            content: "(empty response)", 
+            createdAt: assistantCreatedAt 
+          }]);
+        }
+      } else if (!currentContent && toolCalls.length > 0) {
+        // 只有 tool calls，创建空 content 的 assistant 消息
+        setMessages((prev) => [...prev, { 
+          id: assistantId, 
+          role: "assistant", 
+          content: "", 
+          createdAt: assistantCreatedAt 
+        }]);
       }
 
 	      conversation.push({
@@ -541,7 +610,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        role: "assistant",
 	        content: currentContent,
 	        createdAt: assistantCreatedAt,
-	        reasoning: currentReasoning || undefined,
 	        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
 	      });
 
@@ -644,16 +712,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           chatMode: currentChatMode,
         });
 
-        // Create assistant message for next response
-        const nextAssistantId = nowId();
-        const nextAssistantCreatedAt = Date.now();
-        setStreamingMessageId(nextAssistantId);
-        setMessages((prev) => [...prev, { id: nextAssistantId, role: "assistant", content: "", createdAt: nextAssistantCreatedAt }]);
-        queueMicrotask(scrollToBottom);
-
+        // Stream next response with reasoning support
         let nextContent = "";
         let nextReasoning = "";
         let nextToolCalls: ToolCallInfo[] = [];
+        let nextReasoningMessageId: string | null = null;
+        let nextReasoningCreatedAt: number | null = null;
         const enableTools = toolRound < MAX_TOOL_ROUNDS;
 
         try {
@@ -671,12 +735,58 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             fallback,
             () => console.log(`[AI] [Round ${toolRound}] Retrying with fallback format...`)
           )) {
-            if (chunk.type === "content") {
-              nextContent += chunk.content;
-              updateMessage(nextAssistantId, { content: nextContent });
-            } else if (chunk.type === "reasoning") {
+            if (chunk.type === "reasoning") {
+              // 第一次收到 reasoning 时，创建独立的 reasoning 消息
+              if (!nextReasoningMessageId) {
+                nextReasoningMessageId = nowId();
+                nextReasoningCreatedAt = Date.now();
+                setStreamingMessageId(nextReasoningMessageId);
+                setMessages((prev) => [...prev, { 
+                  id: nextReasoningMessageId!, 
+                  role: "assistant", 
+                  content: "", 
+                  reasoning: chunk.reasoning,
+                  createdAt: nextReasoningCreatedAt!,
+                }]);
+              } else {
+                nextReasoning += chunk.reasoning;
+                updateMessage(nextReasoningMessageId, { reasoning: nextReasoning });
+              }
               nextReasoning += chunk.reasoning;
-              updateMessage(nextAssistantId, { reasoning: nextReasoning });
+            } else if (chunk.type === "content") {
+              // 第一次收到 content 时，创建 assistant 消息
+              if (!nextReasoningMessageId) {
+                // 没有 reasoning，直接创建 assistant 消息
+                const nextAssistantId = nowId();
+                const nextAssistantCreatedAt = Date.now();
+                setStreamingMessageId(nextAssistantId);
+                setMessages((prev) => [...prev, { 
+                  id: nextAssistantId, 
+                  role: "assistant", 
+                  content: chunk.content, 
+                  createdAt: nextAssistantCreatedAt 
+                }]);
+                nextContent = chunk.content;
+                nextReasoningMessageId = nextAssistantId;
+              } else if (nextContent === "") {
+                // reasoning 完成，创建新的 assistant 消息
+                setStreamingMessageId(null);
+                const nextAssistantId = nowId();
+                const nextAssistantCreatedAt = Date.now();
+                setStreamingMessageId(nextAssistantId);
+                setMessages((prev) => [...prev, { 
+                  id: nextAssistantId, 
+                  role: "assistant", 
+                  content: chunk.content, 
+                  createdAt: nextAssistantCreatedAt 
+                }]);
+                nextContent = chunk.content;
+                nextReasoningMessageId = nextAssistantId;
+              } else {
+                // 继续追加 content
+                nextContent += chunk.content;
+                updateMessage(nextReasoningMessageId, { content: nextContent });
+              }
             } else if (chunk.type === "tool_calls" && enableTools) {
               nextToolCalls = chunk.toolCalls;
             }
@@ -688,15 +798,38 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
         setStreamingMessageId(null);
 
-        if (nextToolCalls.length > 0) {
-          updateMessage(nextAssistantId, { tool_calls: nextToolCalls });
+        // 确定 assistant 消息的 ID
+        const nextAssistantId = nextReasoningMessageId || nowId();
+        const nextAssistantCreatedAt = nextReasoningCreatedAt || Date.now();
+
+        // 如果只有 reasoning 没有 content，需要创建 assistant 消息
+        if (!nextContent && toolCalls.length === 0 && !nextReasoningMessageId) {
+          setMessages((prev) => [...prev, { 
+            id: nextAssistantId, 
+            role: "assistant", 
+            content: "(empty response)", 
+            createdAt: nextAssistantCreatedAt 
+          }]);
+        }
+
+        if (nextToolCalls.length > 0 && nextReasoningMessageId) {
+          updateMessage(nextReasoningMessageId, { tool_calls: nextToolCalls });
         }
 
         // If the model returned nothing, surface tool outputs so the user isn't left with an empty bubble.
         if (nextContent.trim().length === 0 && nextToolCalls.length === 0) {
           const toolFallback = allToolResultMessages.map((m) => m.content).join("\n\n").trim();
           const fallbackText = toolFallback || "(empty response from API)";
-          updateMessage(nextAssistantId, { content: fallbackText });
+          if (nextReasoningMessageId) {
+            updateMessage(nextReasoningMessageId, { content: fallbackText });
+          } else {
+            setMessages((prev) => [...prev, { 
+              id: nextAssistantId, 
+              role: "assistant", 
+              content: fallbackText, 
+              createdAt: nextAssistantCreatedAt 
+            }]);
+          }
           nextContent = fallbackText;
         }
 
@@ -705,7 +838,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           role: "assistant",
           content: nextContent,
           createdAt: nextAssistantCreatedAt,
-          reasoning: nextReasoning || undefined,
           tool_calls: nextToolCalls.length > 0 ? nextToolCalls : undefined,
         });
 
@@ -727,7 +859,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             ]
               .join("")
               .trim();
-            updateMessage(nextAssistantId, { content: warning || "_[已达到最大工具调用轮数限制]_" });
+            if (nextReasoningMessageId) {
+              updateMessage(nextReasoningMessageId, { content: warning || "_[已达到最大工具调用轮数限制]_" });
+            }
           }
 
           console.log(`[AI] Tool calling complete after ${toolRound} round(s) (${nextContent.length} chars)`);

@@ -62,33 +62,102 @@ function formatMessageTime(timestamp: number): string {
 
 /**
  * ReasoningBlock - 显示 AI 推理过程（可折叠）
+ * 类似 Cherry Studio 的显示方式：显示为独立的消息块
  */
 function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translatedText, setTranslatedText] = useState<string | null>(null); // 缓存翻译结果
+  const [showTranslation, setShowTranslation] = useState(false); // 控制显示原文还是译文
+  const [showActions, setShowActions] = useState(false);
   
-  // 流式传输时自动展开，完成后自动折叠
-  useEffect(() => {
-    if (!isStreaming && reasoning) {
-      // 延迟折叠，让用户看到完成状态
-      const timer = setTimeout(() => setIsExpanded(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [isStreaming, reasoning]);
-
   if (!reasoning) return null;
+
+  // 计算推理时间（简单估算：每100字符约1秒）
+  const estimatedSeconds = Math.max(1, Math.round(reasoning.length / 100));
+
+  // 复制功能
+  const handleCopy = useCallback(() => {
+    const textToCopy = showTranslation && translatedText ? translatedText : reasoning;
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      if (typeof orca !== "undefined" && orca.notify) {
+        orca.notify("success", "已复制推理内容");
+      }
+    });
+  }, [reasoning, translatedText, showTranslation]);
+
+  // 翻译功能
+  const handleTranslate = useCallback(async () => {
+    // 如果已有翻译结果，只是切换显示
+    if (translatedText) {
+      setShowTranslation(!showTranslation);
+      return;
+    }
+
+    // 第一次翻译，需要调用 API
+    setIsTranslating(true);
+    try {
+      // 使用 AI 翻译（调用当前的 AI 服务）
+      const { getAiChatSettings, resolveAiModel } = await import("../settings/ai-chat-settings");
+      const { getAiChatPluginName } = await import("../ui/ai-chat-ui");
+      const { openAIChatCompletionsStream } = await import("../services/openai-client");
+      
+      const pluginName = getAiChatPluginName();
+      const settings = getAiChatSettings(pluginName);
+      const model = resolveAiModel(settings);
+
+      let translated = "";
+      for await (const chunk of openAIChatCompletionsStream({
+        apiUrl: settings.apiUrl,
+        apiKey: settings.apiKey,
+        model,
+        messages: [
+          {
+            role: "system",
+            content: "你是一个专业的翻译助手。请将用户提供的英文内容翻译成简洁易懂的中文。保持原文的段落结构和格式。",
+          },
+          {
+            role: "user",
+            content: `请将以下内容翻译成中文：\n\n${reasoning}`,
+          },
+        ],
+        temperature: 0.3,
+        maxTokens: 2000,
+      })) {
+        if (chunk.type === "content" && chunk.content) {
+          translated += chunk.content;
+          // 实时更新翻译内容
+          setTranslatedText(translated);
+        }
+      }
+      // 翻译完成后自动切换到显示译文
+      setShowTranslation(true);
+    } catch (err: any) {
+      console.error("[ReasoningBlock] Translation error:", err);
+      if (typeof orca !== "undefined" && orca.notify) {
+        orca.notify("error", `翻译失败: ${err.message || "未知错误"}`);
+      }
+    } finally {
+      setIsTranslating(false);
+    }
+  }, [reasoning, translatedText, showTranslation]);
+
+  const displayText = showTranslation && translatedText ? translatedText : reasoning;
 
   return createElement(
     "div",
     {
       style: {
-        marginBottom: "8px",
+        marginBottom: "12px",
         borderRadius: "8px",
         border: "1px solid var(--orca-color-border)",
         background: "var(--orca-color-bg-2)",
         overflow: "hidden",
       },
+      onMouseEnter: () => setShowActions(true),
+      onMouseLeave: () => setShowActions(false),
     },
-    // Header
+    // Header - 显示 "已深度思考 (用时 X 秒)"
     createElement(
       "div",
       {
@@ -96,46 +165,137 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
         style: {
           display: "flex",
           alignItems: "center",
-          gap: "6px",
-          padding: "8px 12px",
+          gap: "8px",
+          padding: "10px 14px",
           cursor: "pointer",
           background: "var(--orca-color-bg-3)",
           userSelect: "none",
+          transition: "background 0.2s",
+          position: "relative",
+        },
+        onMouseEnter: (e: any) => {
+          e.currentTarget.style.background = "var(--orca-color-bg-4)";
+        },
+        onMouseLeave: (e: any) => {
+          e.currentTarget.style.background = "var(--orca-color-bg-3)";
         },
       },
       createElement("i", {
         className: isStreaming ? "ti ti-loader" : "ti ti-brain",
         style: {
-          fontSize: "14px",
+          fontSize: "16px",
           color: "var(--orca-color-primary)",
           animation: isStreaming ? "spin 1s linear infinite" : undefined,
         },
       }),
       createElement(
         "span",
-        { style: { fontSize: "12px", fontWeight: 500, color: "var(--orca-color-text-2)" } },
-        isStreaming ? "思考中..." : "思考过程"
+        { 
+          style: { 
+            fontSize: "13px", 
+            fontWeight: 500, 
+            color: "var(--orca-color-text-1)",
+            flex: 1,
+          } 
+        },
+        isStreaming 
+          ? "深度思考中..." 
+          : `已深度思考 (用时约 ${estimatedSeconds} 秒)`
+      ),
+      // 操作按钮（始终占据空间，通过透明度控制显示）
+      !isStreaming && createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            gap: "4px",
+            marginRight: "8px",
+            opacity: showActions ? 1 : 0,
+            pointerEvents: showActions ? "auto" : "none",
+            transition: "opacity 0.2s",
+          },
+          onClick: (e: any) => e.stopPropagation(), // 防止触发折叠
+        },
+        // 翻译按钮
+        createElement(
+          "button",
+          {
+            onClick: handleTranslate,
+            disabled: isTranslating,
+            style: {
+              padding: "4px 8px",
+              border: showTranslation ? "1px solid var(--orca-color-primary)" : "none",
+              borderRadius: "4px",
+              background: showTranslation ? "rgba(var(--orca-color-primary-rgb, 59, 130, 246), 0.1)" : "var(--orca-color-bg-4)",
+              color: showTranslation ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
+              cursor: isTranslating ? "wait" : "pointer",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              transition: "all 0.2s",
+            },
+            title: showTranslation ? "显示原文" : (translatedText ? "显示译文" : "翻译成中文"),
+          },
+          createElement("i", {
+            className: isTranslating ? "ti ti-loader" : "ti ti-language",
+            style: {
+              fontSize: "14px",
+              animation: isTranslating ? "spin 1s linear infinite" : undefined,
+            },
+          }),
+          showTranslation ? "原文" : (translatedText ? "译文" : "翻译")
+        ),
+        // 复制按钮
+        createElement(
+          "button",
+          {
+            onClick: handleCopy,
+            style: {
+              padding: "4px 8px",
+              border: "none",
+              borderRadius: "4px",
+              background: "var(--orca-color-bg-4)",
+              color: "var(--orca-color-text-2)",
+              cursor: "pointer",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              transition: "all 0.2s",
+            },
+            title: "复制推理内容",
+          },
+          createElement("i", {
+            className: "ti ti-copy",
+            style: { fontSize: "14px" },
+          })
+        )
       ),
       createElement("i", {
         className: isExpanded ? "ti ti-chevron-up" : "ti ti-chevron-down",
-        style: { fontSize: "12px", color: "var(--orca-color-text-3)", marginLeft: "auto" },
+        style: { 
+          fontSize: "14px", 
+          color: "var(--orca-color-text-3)",
+        },
       })
     ),
-    // Content
+    // Content - 推理内容（可展开查看）
     isExpanded && createElement(
       "div",
       {
         style: {
-          padding: "8px 12px",
+          padding: "12px 14px",
           fontSize: "13px",
           color: "var(--orca-color-text-2)",
-          lineHeight: 1.5,
+          lineHeight: 1.6,
           whiteSpace: "pre-wrap",
-          maxHeight: "300px",
+          maxHeight: "400px",
           overflowY: "auto",
+          borderTop: "1px solid var(--orca-color-border)",
         },
       },
-      reasoning
+      displayText
     )
   );
 }
@@ -489,8 +649,8 @@ export default function MessageItem({
             )
           )
         ),
-      // Reasoning/Thinking (显示 AI 推理过程)
-      message.reasoning && createElement(ReasoningBlock, {
+      // Reasoning/Thinking (显示 AI 推理过程) - 只在 assistant 消息中显示
+      isAssistant && message.reasoning && createElement(ReasoningBlock, {
         reasoning: message.reasoning,
         isStreaming,
       }),

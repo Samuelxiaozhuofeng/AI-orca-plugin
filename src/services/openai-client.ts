@@ -245,7 +245,7 @@ export async function* openAIChatCompletionsStream(
   if (!res.body || contentType.includes("application/json")) {
     const json = await res.json();
     const chunk = safeDeltaFromEvent(json);
-    if (chunk.content || chunk.tool_calls) {
+    if (chunk.content || chunk.tool_calls || chunk.reasoning) {
       yield chunk;
     }
     return;
@@ -283,7 +283,7 @@ export async function* openAIChatCompletionsStream(
         continue;
       }
       const chunk = safeDeltaFromEvent(obj);
-      if (chunk.content || chunk.tool_calls) {
+      if (chunk.content || chunk.tool_calls || chunk.reasoning) {
         yield chunk;
       }
     }
