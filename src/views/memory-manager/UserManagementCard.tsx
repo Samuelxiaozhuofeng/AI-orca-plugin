@@ -1,10 +1,11 @@
 /**
  * UserManagementCard - Card component for user profile management
  * Displays user avatar with emoji, user selector, and action buttons
+ * Supports multi-select mode and user disable functionality
  * Requirements: 9.1, 9.3, 12.3, 12.4
  */
 
-import type { UserProfile } from "../../store/memory-store";
+import type { UserProfile, InjectionMode } from "../../store/memory-store";
 import {
   cardStyle,
   cardHeaderStyle,
@@ -55,6 +56,52 @@ const userTabActiveStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const userTabDisabledStyle: React.CSSProperties = {
+  ...userTabStyle,
+  opacity: 0.5,
+  textDecoration: "line-through",
+};
+
+const userTabSelectedStyle: React.CSSProperties = {
+  ...userTabStyle,
+  borderColor: "var(--orca-color-success, #28a745)",
+  background: "rgba(40, 167, 69, 0.1)",
+};
+
+const injectionModeContainerStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  marginTop: "12px",
+  padding: "8px 12px",
+  background: "var(--orca-color-bg-2)",
+  borderRadius: "6px",
+};
+
+const injectionModeLabelStyle: React.CSSProperties = {
+  fontSize: "12px",
+  color: "var(--orca-color-text-2)",
+  marginRight: "8px",
+};
+
+const injectionModeButtonStyle: React.CSSProperties = {
+  padding: "4px 10px",
+  borderRadius: "4px",
+  border: "1px solid var(--orca-color-border)",
+  background: "var(--orca-color-bg-1)",
+  color: "var(--orca-color-text-2)",
+  fontSize: "12px",
+  cursor: "pointer",
+  transition: "all 0.15s ease",
+};
+
+const injectionModeButtonActiveStyle: React.CSSProperties = {
+  ...injectionModeButtonStyle,
+  borderColor: "var(--orca-color-primary, #007bff)",
+  background: "var(--orca-color-primary, #007bff)",
+  color: "#fff",
+};
+
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
@@ -72,12 +119,19 @@ interface UserManagementCardProps {
   activeUserId: string;
   totalMemoryCount: number;
   enabledMemoryCount: number;
+  injectionMode: InjectionMode;
+  selectedUserIds: string[];
   onUserChange: (userId: string) => void;
   onAddUser: (name: string) => void;
   onEditUser: (id: string, name: string) => void;
   onDeleteUser: (id: string) => void;
   onAvatarClick: () => void;
   onSetAsSelf?: (id: string | null) => void;
+  onToggleUserDisabled?: (id: string) => void;
+  onToggleUserSelection?: (id: string) => void;
+  onSetInjectionMode?: (mode: InjectionMode) => void;
+  onSelectAllUsers?: () => void;
+  onDeselectAllUsers?: () => void;
 }
 
 // ============================================================================
@@ -90,12 +144,19 @@ export default function UserManagementCard({
   activeUserId,
   totalMemoryCount,
   enabledMemoryCount,
+  injectionMode,
+  selectedUserIds,
   onUserChange,
   onAddUser,
   onEditUser,
   onDeleteUser,
   onAvatarClick,
   onSetAsSelf,
+  onToggleUserDisabled,
+  onToggleUserSelection,
+  onSetInjectionMode,
+  onSelectAllUsers,
+  onDeselectAllUsers,
 }: UserManagementCardProps) {
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newUserName, setNewUserName] = useState("");
@@ -281,33 +342,88 @@ export default function UserManagementCard({
   const renderUserTabs = () => {
     if (users.length <= 1) return null;
 
+    const isSelectMode = injectionMode === 'SELECTED';
+
     return createElement(
       "div",
       { style: userTabsContainerStyle },
       users.map((user) => {
         const isActive = user.id === activeUserId;
+        const isDisabled = user.isDisabled;
+        const isSelected = selectedUserIds.includes(user.id);
+        
+        // Determine style based on state
+        let tabStyle = userTabStyle;
+        if (isDisabled) {
+          tabStyle = userTabDisabledStyle;
+        } else if (isSelectMode && isSelected) {
+          tabStyle = userTabSelectedStyle;
+        } else if (isActive) {
+          tabStyle = userTabActiveStyle;
+        }
+
         return createElement(
           "button",
           {
             key: user.id,
-            style: isActive ? userTabActiveStyle : userTabStyle,
-            onClick: () => !isActive && onUserChange(user.id),
-            title: user.isDefault ? `${user.name} (默认)` : user.name,
+            style: tabStyle,
+            onClick: (e: any) => {
+              // Ctrl/Cmd + click to toggle selection in SELECTED mode
+              if (isSelectMode && (e.ctrlKey || e.metaKey) && onToggleUserSelection) {
+                onToggleUserSelection(user.id);
+              } else if (!isActive) {
+                onUserChange(user.id);
+              }
+            },
+            onContextMenu: (e: any) => {
+              e.preventDefault();
+              // Right-click to toggle disabled
+              if (onToggleUserDisabled) {
+                onToggleUserDisabled(user.id);
+              }
+            },
+            title: isDisabled 
+              ? `${user.name} (已禁用 - 右键启用)` 
+              : isSelectMode 
+                ? `${user.name} (Ctrl+点击切换选中, 右键禁用)` 
+                : `${user.name} (右键禁用)`,
             onMouseEnter: (e: any) => {
-              if (!isActive) {
+              if (!isActive && !isDisabled) {
                 e.currentTarget.style.background = "var(--orca-color-bg-3)";
                 e.currentTarget.style.borderColor = "var(--orca-color-primary, #007bff)";
               }
             },
             onMouseLeave: (e: any) => {
-              if (!isActive) {
+              if (!isActive && !isDisabled && !(isSelectMode && isSelected)) {
                 e.currentTarget.style.background = "var(--orca-color-bg-1)";
                 e.currentTarget.style.borderColor = "var(--orca-color-border)";
               }
             },
           },
+          // Checkbox for SELECTED mode
+          isSelectMode && createElement(
+            "span",
+            { 
+              style: { 
+                width: "14px", 
+                height: "14px", 
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              } 
+            },
+            createElement("i", { 
+              className: isSelected ? "ti ti-checkbox" : "ti ti-square",
+              style: { fontSize: "14px" }
+            })
+          ),
           createElement("span", null, user.emoji),
-          createElement("span", null, user.name)
+          createElement("span", null, user.name),
+          // Disabled indicator
+          isDisabled && createElement("i", { 
+            className: "ti ti-ban", 
+            style: { fontSize: "12px", marginLeft: "2px" } 
+          })
         );
       })
     );
@@ -390,6 +506,73 @@ export default function UserManagementCard({
     );
   };
 
+  // Render injection mode selector
+  const renderInjectionModeSelector = () => {
+    if (!onSetInjectionMode) return null;
+
+    const modes: { value: InjectionMode; label: string; icon: string }[] = [
+      { value: 'ALL', label: '全部', icon: 'ti ti-users' },
+      { value: 'CURRENT', label: '当前', icon: 'ti ti-user' },
+      { value: 'SELECTED', label: '多选', icon: 'ti ti-list-check' },
+    ];
+
+    return createElement(
+      "div",
+      { style: injectionModeContainerStyle },
+      createElement("span", { style: injectionModeLabelStyle }, "注入模式:"),
+      ...modes.map(mode => 
+        createElement(
+          "button",
+          {
+            key: mode.value,
+            style: injectionMode === mode.value ? injectionModeButtonActiveStyle : injectionModeButtonStyle,
+            onClick: () => onSetInjectionMode(mode.value),
+            title: mode.value === 'ALL' 
+              ? '注入所有用户的记忆' 
+              : mode.value === 'CURRENT' 
+                ? '只注入当前用户的记忆'
+                : '注入选中用户的记忆 (Ctrl+点击用户标签选择)',
+            onMouseEnter: (e: any) => {
+              if (injectionMode !== mode.value) {
+                e.currentTarget.style.background = "var(--orca-color-bg-3)";
+              }
+            },
+            onMouseLeave: (e: any) => {
+              if (injectionMode !== mode.value) {
+                e.currentTarget.style.background = "var(--orca-color-bg-1)";
+              }
+            },
+          },
+          createElement("i", { className: mode.icon, style: { marginRight: "4px" } }),
+          mode.label
+        )
+      ),
+      // Select all / Deselect all buttons for SELECTED mode
+      injectionMode === 'SELECTED' && onSelectAllUsers && onDeselectAllUsers && createElement(
+        "div",
+        { style: { marginLeft: "auto", display: "flex", gap: "4px" } },
+        createElement(
+          "button",
+          {
+            style: { ...injectionModeButtonStyle, padding: "4px 8px" },
+            onClick: onSelectAllUsers,
+            title: "全选",
+          },
+          createElement("i", { className: "ti ti-checks" })
+        ),
+        createElement(
+          "button",
+          {
+            style: { ...injectionModeButtonStyle, padding: "4px 8px" },
+            onClick: onDeselectAllUsers,
+            title: "取消全选",
+          },
+          createElement("i", { className: "ti ti-square" })
+        )
+      )
+    );
+  };
+
   return createElement(
     "div",
     { style: cardStyle },
@@ -428,6 +611,7 @@ export default function UserManagementCard({
           )
         )
       ),
+      renderInjectionModeSelector(),
       renderUserTabs(),
       renderAddUserForm()
     )

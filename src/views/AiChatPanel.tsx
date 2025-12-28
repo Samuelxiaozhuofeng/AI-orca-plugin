@@ -450,11 +450,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     abortRef.current = aborter;
 
     try {
-      // Build context
+      // Build context (now returns text + assets)
       let contextText = "";
+      let contextAssets: FileRef[] = [];
       try {
         const contexts = contextStore.selected;
-        if (contexts.length) contextText = await buildContextForSend(contexts);
+        if (contexts.length) {
+          const result = await buildContextForSend(contexts);
+          contextText = result.text;
+          contextAssets = result.assets;
+        }
       } catch (err: any) {
         orca.notify("warn", `Context build failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
@@ -462,7 +467,20 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       // Maintain an in-memory conversation so multi-round tool calls include prior tool results.
       // Use historyOverride if available to build conversation
       const baseMessages = historyOverride || messages;
-      const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsgForApi];
+      
+      // Merge context assets with user message files
+      const userMsgWithContextAssets: Message = {
+        ...userMsgForApi,
+        files: [
+          ...(userMsgForApi.files || []),
+          ...contextAssets,
+        ].length > 0 ? [
+          ...(userMsgForApi.files || []),
+          ...contextAssets,
+        ] : undefined,
+      };
+      
+      const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsgWithContextAssets];
 
       // Create assistant message placeholder
       const assistantId = nowId();

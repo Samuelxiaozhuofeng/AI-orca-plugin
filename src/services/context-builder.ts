@@ -1,5 +1,7 @@
 import type { Block, DbId } from "../orca.d.ts";
 import { ContextRef, normalizeTagName } from "../store/context-store";
+import type { FileRef } from "./session-service";
+import { getFileCategory } from "./file-service";
 
 /**
  * Simplified context builder - only builds context for sending to AI
@@ -11,7 +13,26 @@ type BuildOptions = {
   maxChars?: number;
   maxDepth?: number;
   maxTagRoots?: number;
+  maxAssets?: number;
 };
+
+/**
+ * Context build result with text and assets
+ */
+export interface ContextBuildResult {
+  text: string;
+  assets: FileRef[];
+}
+
+/**
+ * Asset info extracted from block
+ */
+interface BlockAssetInfo {
+  type: "image" | "video" | "audio" | "file";
+  src: string;
+  caption?: string;
+  mimeType?: string;
+}
 
 type BlockResolver = (id: DbId) => Block | undefined;
 
@@ -53,6 +74,114 @@ function safeTextFromBlockLike(block: any): string {
   return "";
 }
 
+/**
+ * Extract asset info from block's _repr property
+ */
+function extractAssetFromBlock(block: any): BlockAssetInfo | null {
+  if (!block || !Array.isArray(block.properties)) return null;
+  
+  const reprProp = block.properties.find((p: any) => p.name === "_repr");
+  if (!reprProp || !reprProp.value) return null;
+  
+  const repr = reprProp.value;
+  
+  // Image block
+  if (repr.type === "image" && repr.src) {
+    return {
+      type: "image",
+      src: repr.src,
+      caption: repr.cap || undefined,
+      mimeType: guessMimeType(repr.src, "image"),
+    };
+  }
+  
+  // Video block
+  if (repr.type === "video" && repr.src) {
+    return {
+      type: "video",
+      src: repr.src,
+      caption: repr.cap || undefined,
+      mimeType: guessMimeType(repr.src, "video"),
+    };
+  }
+  
+  // Audio block
+  if (repr.type === "audio" && repr.src) {
+    return {
+      type: "audio",
+      src: repr.src,
+      caption: repr.cap || undefined,
+      mimeType: guessMimeType(repr.src, "audio"),
+    };
+  }
+  
+  // File/attachment block
+  if ((repr.type === "file" || repr.type === "attachment") && repr.src) {
+    return {
+      type: "file",
+      src: repr.src,
+      caption: repr.cap || repr.name || undefined,
+      mimeType: repr.mimeType || guessMimeType(repr.src, "file"),
+    };
+  }
+  
+  return null;
+}
+
+/**
+ * Guess MIME type from file extension
+ */
+function guessMimeType(src: string, category: string): string {
+  const ext = src.split(".").pop()?.toLowerCase() || "";
+  
+  const mimeMap: Record<string, string> = {
+    // Images
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+    svg: "image/svg+xml",
+    // Videos
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+    avi: "video/x-msvideo",
+    mkv: "video/x-matroska",
+    // Audio
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    m4a: "audio/mp4",
+    flac: "audio/flac",
+  };
+  
+  if (mimeMap[ext]) return mimeMap[ext];
+  
+  // Fallback by category
+  switch (category) {
+    case "image": return "image/png";
+    case "video": return "video/mp4";
+    case "audio": return "audio/mpeg";
+    default: return "application/octet-stream";
+  }
+}
+
+/**
+ * Convert BlockAssetInfo to FileRef
+ */
+function assetToFileRef(asset: BlockAssetInfo): FileRef {
+  const name = asset.src.split("/").pop() || asset.src;
+  return {
+    path: asset.src,
+    name: asset.caption || name,
+    mimeType: asset.mimeType || "application/octet-stream",
+    size: 0, // Unknown
+    category: getFileCategory(name, asset.mimeType),
+  };
+}
+
 function treeChildren(tree: any): any[] {
   if (!tree) return [];
   if (Array.isArray(tree)) return tree;
@@ -88,7 +217,7 @@ function truncate(text: string, maxChars: number): string {
 function blockTreeToLines(
   tree: any,
   opts: Required<BuildOptions>,
-  state: { blocks: number; depth: number; hitLimit: boolean },
+  state: { blocks: number; depth: number; hitLimit: boolean; assets: BlockAssetInfo[] },
   out: string[],
   resolveById: BlockResolver,
 ): void {
@@ -112,10 +241,20 @@ function blockTreeToLines(
 
   const nodeId = extractNodeId(node);
   const resolved = nodeId != null ? resolveById(nodeId) : undefined;
+  const blockData = resolved ?? node;
 
   if (isBlockLike(node) || resolved) {
-    const text = safeTextFromBlockLike(resolved ?? node);
-    if (text) appendLine(out, `${"  ".repeat(state.depth)}- ${text}`);
+    // Extract asset from block
+    const asset = extractAssetFromBlock(blockData);
+    if (asset && state.assets.length < (opts.maxAssets || 20)) {
+      state.assets.push(asset);
+      // Add placeholder text for the asset
+      const assetLabel = asset.caption || asset.src.split("/").pop() || "附件";
+      appendLine(out, `${"  ".repeat(state.depth)}- [${asset.type}: ${assetLabel}]`);
+    } else {
+      const text = safeTextFromBlockLike(blockData);
+      if (text) appendLine(out, `${"  ".repeat(state.depth)}- ${text}`);
+    }
     state.blocks += 1;
   }
 
@@ -232,19 +371,22 @@ async function buildResolverFromTree(
 /**
  * Build context text for sending to AI
  * Only supports page and tag types
+ * Returns both text and extracted assets (images, videos, etc.)
  */
 export async function buildContextForSend(
   contexts: ContextRef[],
   opts?: BuildOptions,
-): Promise<string> {
+): Promise<ContextBuildResult> {
   const options: Required<BuildOptions> = {
     maxBlocks: opts?.maxBlocks ?? 300,
     maxChars: opts?.maxChars ?? 60_000,
     maxDepth: opts?.maxDepth ?? 10,
     maxTagRoots: opts?.maxTagRoots ?? 50,
+    maxAssets: opts?.maxAssets ?? 20,
   };
 
   const sections: string[] = [];
+  const allAssets: BlockAssetInfo[] = [];
 
   for (const ctx of contexts) {
     try {
@@ -258,10 +400,13 @@ export async function buildContextForSend(
         const tree = await getBlockTree(ctx.rootBlockId);
         const resolveById = await buildResolverFromTree(tree, options);
         const lines: string[] = [];
-        const state = { blocks: 0, depth: 0, hitLimit: false };
+        const state = { blocks: 0, depth: 0, hitLimit: false, assets: [] as BlockAssetInfo[] };
         blockTreeToLines(tree, options, state, lines, resolveById);
         if (state.hitLimit) lines.push(`- …(maxBlocks=${options.maxBlocks} reached)`);
         sections.push(lines.join("\n") || "(empty)");
+        
+        // Collect assets
+        allAssets.push(...state.assets);
         continue;
       }
 
@@ -272,13 +417,23 @@ export async function buildContextForSend(
         const blocks = await getBlocksWithTags(tagName);
         const roots = blocks.slice(0, options.maxTagRoots);
         const lines: string[] = [];
-        const state = { blocks: 0, depth: 0, hitLimit: false };
+        const state = { blocks: 0, depth: 0, hitLimit: false, assets: [] as BlockAssetInfo[] };
 
         for (const b of roots) {
           if (state.blocks >= options.maxBlocks) break;
-          const title = safeTextFromBlockLike(b) || `(Block ${b.id})`;
-          appendLine(lines, `- ${title}`);
-          state.blocks += 1; // Count the root block title line
+          
+          // Check if root block has asset
+          const rootAsset = extractAssetFromBlock(b);
+          if (rootAsset && state.assets.length < options.maxAssets) {
+            state.assets.push(rootAsset);
+            const assetLabel = rootAsset.caption || rootAsset.src.split("/").pop() || "附件";
+            appendLine(lines, `- [${rootAsset.type}: ${assetLabel}]`);
+          } else {
+            const title = safeTextFromBlockLike(b) || `(Block ${b.id})`;
+            appendLine(lines, `- ${title}`);
+          }
+          state.blocks += 1;
+          
           if (state.blocks >= options.maxBlocks) {
             state.hitLimit = true;
             break;
@@ -305,6 +460,9 @@ export async function buildContextForSend(
         if (state.hitLimit) lines.push(`- …(maxBlocks=${options.maxBlocks} reached)`);
 
         sections.push(lines.join("\n") || "(empty)");
+        
+        // Collect assets
+        allAssets.push(...state.assets);
         continue;
       }
     } catch (err: any) {
@@ -314,5 +472,14 @@ export async function buildContextForSend(
   }
 
   const merged = sections.join("\n\n");
-  return truncate(merged, options.maxChars);
+  
+  // Convert assets to FileRef, limit to maxAssets
+  const assets = allAssets
+    .slice(0, options.maxAssets)
+    .map(assetToFileRef);
+  
+  return {
+    text: truncate(merged, options.maxChars),
+    assets,
+  };
 }
