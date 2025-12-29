@@ -303,56 +303,72 @@ export default function ChatInput({
     if (!dataTransfer) return;
     
     // 1. 检查是否是 Orca 块拖拽
-    // Orca 块拖拽通常包含 text/plain 数据，格式可能是 blockId 或 orca-block:xxx
-    const textData = dataTransfer.getData("text/plain");
-    if (textData) {
-      // 尝试解析 blockId
-      const blockIdMatch = textData.match(/^(?:orca-block:|blockid:)?(\d+)$/i);
-      if (blockIdMatch) {
-        const blockId = parseInt(blockIdMatch[1], 10);
-        if (blockId > 0) {
-          // 获取块信息并添加到输入框
+    // Orca 使用自定义类型 "orca/xxx"，数据格式为 {"blocks":[blockId]}
+    let blockIds: number[] = [];
+    
+    // 查找 orca/ 开头的数据类型
+    for (const type of dataTransfer.types) {
+      if (type.startsWith("orca/")) {
+        const data = dataTransfer.getData(type);
+        if (data) {
           try {
-            let block = orca.state.blocks[blockId];
-            if (!block) {
-              block = await orca.invokeBackend("get-block", blockId);
+            const parsed = JSON.parse(data);
+            if (parsed.blocks && Array.isArray(parsed.blocks)) {
+              blockIds = parsed.blocks;
+              break;
             }
-            if (block) {
-              // 获取块标题
-              let title = "";
-              if (block.aliases && Array.isArray(block.aliases) && block.aliases.length > 0) {
-                title = block.aliases[0];
-              } else {
-                const rawText = block.text || block.content || "";
-                title = typeof rawText === "string" ? rawText.split("\n")[0]?.trim() || "" : "";
-                title = title.replace(/^#+\s*/, "").replace(/^[-*+]\s*/, "").trim();
-              }
-              if (!title) title = `Block ${blockId}`;
-              if (title.length > 30) title = title.substring(0, 30) + "...";
-              
-              // 插入块引用到输入框
-              const blockRef = `[[${title}]](orca-block:${blockId})`;
-              const currentText = textareaRef.current?.value || text;
-              const newText = currentText ? `${currentText} ${blockRef}` : blockRef;
-              setText(newText);
-              if (textareaRef.current) {
-                textareaRef.current.value = newText;
-                textareaRef.current.focus();
-              }
-              return;
-            }
-          } catch (err) {
-            console.warn("[ChatInput] Failed to get block info:", err);
+          } catch {}
+        }
+      }
+    }
+    
+    // 如果没找到 orca/ 类型，尝试其他格式
+    if (blockIds.length === 0) {
+      const textData = dataTransfer.getData("text/plain");
+      if (textData) {
+        const blockIdMatch = textData.match(/(?:orca-block:|blockid:|block:)?(\d+)/i);
+        if (blockIdMatch) {
+          blockIds = [parseInt(blockIdMatch[1], 10)];
+        }
+      }
+    }
+    
+    // 处理找到的块
+    if (blockIds.length > 0) {
+      const insertedRefs: string[] = [];
+      
+      for (const blockId of blockIds) {
+        if (blockId <= 0) continue;
+        
+        try {
+          let block = orca.state.blocks[blockId];
+          if (!block) {
+            block = await orca.invokeBackend("get-block", blockId);
           }
+          if (block) {
+            // 获取块标题
+            let title = "";
+            if (block.aliases && Array.isArray(block.aliases) && block.aliases.length > 0) {
+              title = block.aliases[0];
+            } else {
+              const rawText = block.text || block.content || "";
+              title = typeof rawText === "string" ? rawText.split("\n")[0]?.trim() || "" : "";
+              title = title.replace(/^#+\s*/, "").replace(/^[-*+]\s*/, "").trim();
+            }
+            if (!title) title = `Block ${blockId}`;
+            if (title.length > 30) title = title.substring(0, 30) + "...";
+            
+            insertedRefs.push(`[[${title}]](orca-block:${blockId})`);
+          }
+        } catch (err) {
+          console.warn("[ChatInput] Failed to get block info:", blockId, err);
         }
       }
       
-      // 检查是否是 [[页面名称]] 格式
-      const pageRefMatch = textData.match(/^\[\[([^\]]+)\]\]$/);
-      if (pageRefMatch) {
-        const pageName = pageRefMatch[1];
+      if (insertedRefs.length > 0) {
+        const blockRefText = insertedRefs.join(" ");
         const currentText = textareaRef.current?.value || text;
-        const newText = currentText ? `${currentText} [[${pageName}]]` : `[[${pageName}]]`;
+        const newText = currentText ? `${currentText} ${blockRefText}` : blockRefText;
         setText(newText);
         if (textareaRef.current) {
           textareaRef.current.value = newText;
