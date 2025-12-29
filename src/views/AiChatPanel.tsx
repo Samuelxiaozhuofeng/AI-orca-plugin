@@ -22,6 +22,7 @@ import { injectChatStyles } from "../styles/chat-animations";
 import {
   buildAiModelOptions,
   getAiChatSettings,
+  getModelApiConfig,
   resolveAiModel,
   updateAiChatSettings,
   validateAiChatSettingsWithModel,
@@ -533,6 +534,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      
 	      console.log("[Flashcard] API messages built:", apiMessages.length);
 	      
+	      // 获取模型特定的 API 配置
+	      const apiConfig = getModelApiConfig(settings, model);
+	      
 	      // 调用 AI 生成闪卡
 	      let fullContent = "";
 	      const aborter = new AbortController();
@@ -541,8 +545,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      try {
 	        for await (const chunk of streamChatWithRetry(
 	          {
-	            apiUrl: settings.apiUrl,
-	            apiKey: settings.apiKey,
+	            apiUrl: apiConfig.apiUrl,
+	            apiKey: apiConfig.apiKey,
 	            model,
 	            temperature: settings.temperature,
 	            maxTokens: settings.maxTokens,
@@ -690,10 +694,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         chatMode: currentChatMode,
       });
 
+      // 获取模型特定的 API 配置
+      const apiConfig = getModelApiConfig(settings, model);
+
       for await (const chunk of streamChatWithRetry(
         {
-          apiUrl: settings.apiUrl,
-          apiKey: settings.apiKey,
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
           model,
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
@@ -909,11 +916,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         let nextReasoningCreatedAt: number | null = null;
         const enableTools = toolRound < MAX_TOOL_ROUNDS;
 
+        // 获取模型特定的 API 配置
+        const toolApiConfig = getModelApiConfig(settings, model);
+
         try {
           for await (const chunk of streamChatWithRetry(
             {
-              apiUrl: settings.apiUrl,
-              apiKey: settings.apiKey,
+              apiUrl: toolApiConfig.apiUrl,
+              apiKey: toolApiConfig.apiKey,
               model,
               temperature: settings.temperature,
               maxTokens: settings.maxTokens,

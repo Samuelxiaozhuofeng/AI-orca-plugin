@@ -78,14 +78,30 @@ export async function registerAiChatSettingsSchema(
       defaultValue: "",
     },
     customModels: {
-      label: "Saved Custom Models",
-      description:
-        "Saved model names for quick switching in Chat Panel (models share the same API URL/Key for now). You can also add models from the Chat Panel model picker.",
+      label: isZh ? "自定义模型" : "Custom Models",
+      description: isZh
+        ? "添加自定义模型，每个模型可配置独立的 API 地址和密钥"
+        : "Add custom models with optional independent API URL and Key",
       type: "array",
       defaultValue: [],
       arrayItemSchema: {
         model: {
-          label: "Model Name",
+          label: isZh ? "模型名称" : "Model Name",
+          type: "string",
+          defaultValue: "",
+        },
+        label: {
+          label: isZh ? "显示名称（可选）" : "Display Name (optional)",
+          type: "string",
+          defaultValue: "",
+        },
+        apiUrl: {
+          label: isZh ? "API 地址（留空使用全局）" : "API URL (empty = use global)",
+          type: "string",
+          defaultValue: "",
+        },
+        apiKey: {
+          label: isZh ? "API 密钥（留空使用全局）" : "API Key (empty = use global)",
           type: "string",
           defaultValue: "",
         },
@@ -212,6 +228,10 @@ export const MODEL_CAPABILITY_LABELS: Record<ModelCapability, { label: string; i
 export type AiModelPreset = {
   label?: string;
   model: string;
+  /** 自定义 API URL（留空则使用全局设置） */
+  apiUrl?: string;
+  /** 自定义 API Key（留空则使用全局设置） */
+  apiKey?: string;
   /** 输入价格，单位：每百万Token */
   inputPrice?: number;
   /** 输出价格，单位：每百万Token */
@@ -257,6 +277,8 @@ function toModelPresets(value: unknown, fallback: AiModelPreset[]): AiModelPrese
     if (!item || typeof item !== "object") continue;
     const rawLabel = (item as any).label;
     const rawModel = (item as any).model;
+    const rawApiUrl = (item as any).apiUrl;
+    const rawApiKey = (item as any).apiKey;
     const rawInputPrice = (item as any).inputPrice;
     const rawOutputPrice = (item as any).outputPrice;
     const rawCapabilities = (item as any).capabilities;
@@ -264,6 +286,8 @@ function toModelPresets(value: unknown, fallback: AiModelPreset[]): AiModelPrese
     const model = typeof rawModel === "string" ? rawModel.trim() : "";
     if (!model) continue;
     const label = typeof rawLabel === "string" ? rawLabel.trim() : "";
+    const apiUrl = typeof rawApiUrl === "string" ? rawApiUrl.trim() : undefined;
+    const apiKey = typeof rawApiKey === "string" ? rawApiKey.trim() : undefined;
     const inputPrice = typeof rawInputPrice === "number" && rawInputPrice >= 0 ? rawInputPrice : undefined;
     const outputPrice = typeof rawOutputPrice === "number" && rawOutputPrice >= 0 ? rawOutputPrice : undefined;
     const capabilities = Array.isArray(rawCapabilities) 
@@ -272,7 +296,7 @@ function toModelPresets(value: unknown, fallback: AiModelPreset[]): AiModelPrese
         )
       : undefined;
     
-    out.push({ label, model, inputPrice, outputPrice, capabilities });
+    out.push({ label, model, apiUrl: apiUrl || undefined, apiKey: apiKey || undefined, inputPrice, outputPrice, capabilities });
   }
 
   const seen = new Set<string>();
@@ -336,6 +360,10 @@ export type AiModelOption = {
   value: string;
   label: string;
   group?: string;
+  /** 自定义 API URL */
+  apiUrl?: string;
+  /** 自定义 API Key */
+  apiKey?: string;
   /** 输入价格，单位：每百万Token */
   inputPrice?: number;
   /** 输出价格，单位：每百万Token */
@@ -371,6 +399,8 @@ export function buildAiModelOptions(
       value: item.model,
       label: item.label || item.model,
       group: "Custom",
+      apiUrl: item.apiUrl,
+      apiKey: item.apiKey,
       inputPrice: item.inputPrice,
       outputPrice: item.outputPrice,
       capabilities: item.capabilities,
@@ -405,6 +435,37 @@ export function validateAiChatSettingsWithModel(
   if (!settings.apiUrl.trim()) return "Missing API URL (Settings → API URL)";
   if (!settings.apiKey.trim()) return "Missing API Key (Settings → API Key)";
   if (!modelOverride.trim()) return "Missing model (Select a model or check Settings)";
+  return null;
+}
+
+/**
+ * 获取指定模型的 API 配置
+ * 如果模型有自定义配置则使用，否则使用全局配置
+ */
+export function getModelApiConfig(
+  settings: AiChatSettings,
+  modelName: string,
+): { apiUrl: string; apiKey: string } {
+  // 查找自定义模型配置
+  const customModel = settings.customModels.find(m => m.model === modelName);
+  
+  return {
+    apiUrl: (customModel?.apiUrl?.trim() || settings.apiUrl).trim(),
+    apiKey: (customModel?.apiKey?.trim() || settings.apiKey).trim(),
+  };
+}
+
+/**
+ * 验证模型的 API 配置是否完整
+ */
+export function validateModelApiConfig(
+  settings: AiChatSettings,
+  modelName: string,
+): string | null {
+  const config = getModelApiConfig(settings, modelName);
+  if (!config.apiUrl) return "Missing API URL";
+  if (!config.apiKey) return "Missing API Key";
+  if (!modelName.trim()) return "Missing model name";
   return null;
 }
 
