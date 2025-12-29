@@ -193,12 +193,19 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [nodes, setNodes] = useState([] as GraphNode[]);
   const [links, setLinks] = useState([] as GraphLink[]);
-  const [draggedNode, setDraggedNode] = useState(null as GraphNode | null);
   const [graphData, setGraphData] = useState({ nodes: [] as GraphNode[], links: [] as GraphLink[] });
   const [loading, setLoading] = useState(true);
   const simulationRef = useRef(null) as any;
-  const isDraggingRef = useRef(false);
-  const lastMouseRef = useRef({ x: 0, y: 0 });
+  
+  // 使用 ref 存储拖拽状态，避免闭包问题
+  const dragStateRef = useRef({
+    isDragging: false,
+    draggedNode: null as GraphNode | null,
+    isPanning: false,
+    panStart: { x: 0, y: 0 },
+  });
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
 
   // 加载图谱数据
   useEffect(() => {
@@ -269,53 +276,61 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
     };
   }, [graphData, dimensions]);
 
-  // 节点拖拽
+  // 节点拖拽 - 使用 ref 避免闭包问题
   const handleNodeMouseDown = useCallback((e: any, node: GraphNode) => {
     e.stopPropagation();
-    isDraggingRef.current = true;
-    setDraggedNode(node);
+    e.preventDefault();
     
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    lastMouseRef.current = {
-      x: (e.clientX - rect.left - transform.x) / transform.scale,
-      y: (e.clientY - rect.top - transform.y) / transform.scale,
-    };
+    dragStateRef.current.isDragging = true;
+    dragStateRef.current.draggedNode = node;
 
     node.fx = node.x;
     node.fy = node.y;
     simulationRef.current?.alphaTarget(0.3).restart();
-  }, [transform]);
+  }, []);
 
   const handleMouseMove = useCallback((e: any) => {
-    if (!isDraggingRef.current || !draggedNode) return;
-    
     const svg = svgRef.current;
     if (!svg) return;
+    
     const rect = svg.getBoundingClientRect();
-    const x = (e.clientX - rect.left - transform.x) / transform.scale;
-    const y = (e.clientY - rect.top - transform.y) / transform.scale;
+    const currentTransform = transformRef.current;
+    const x = (e.clientX - rect.left - currentTransform.x) / currentTransform.scale;
+    const y = (e.clientY - rect.top - currentTransform.y) / currentTransform.scale;
 
-    draggedNode.fx = x;
-    draggedNode.fy = y;
-  }, [draggedNode, transform]);
+    // 处理节点拖拽
+    if (dragStateRef.current.isDragging && dragStateRef.current.draggedNode) {
+      const node = dragStateRef.current.draggedNode;
+      node.fx = x;
+      node.fy = y;
+      // 强制更新节点位置
+      setNodes((prev: GraphNode[]) => [...prev]);
+      return;
+    }
+    
+    // 处理画布平移
+    if (dragStateRef.current.isPanning) {
+      const panStart = dragStateRef.current.panStart;
+      setTransform((prev: { x: number; y: number; scale: number }) => ({
+        ...prev,
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y,
+      }));
+    }
+  }, []);
 
   const handleMouseUp = useCallback(() => {
-    if (draggedNode) {
-      draggedNode.fx = null;
-      draggedNode.fy = null;
+    if (dragStateRef.current.draggedNode) {
+      dragStateRef.current.draggedNode.fx = null;
+      dragStateRef.current.draggedNode.fy = null;
       simulationRef.current?.alphaTarget(0);
     }
-    isDraggingRef.current = false;
-    setDraggedNode(null);
-  }, [draggedNode]);
+    dragStateRef.current.isDragging = false;
+    dragStateRef.current.draggedNode = null;
+    dragStateRef.current.isPanning = false;
+  }, []);
 
-  // 缩放 - 使用 ref 存储最新的 transform.scale
-  const transformRef = useRef(transform);
-  transformRef.current = transform;
-
-  // 用原生事件监听处理滚轮，确保能阻止冒泡
+  // 缩放 - 使用原生事件监听，确保能阻止冒泡和默认行为
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -326,7 +341,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
       
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const currentScale = transformRef.current.scale;
-      const newScale = Math.max(0.3, Math.min(3, currentScale * delta));
+      const newScale = Math.max(0.2, Math.min(4, currentScale * delta));
       
       const rect = svg.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
@@ -339,38 +354,29 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
       }));
     };
 
-    svg.addEventListener("wheel", handleWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", handleWheel);
+    // 使用 capture 阶段捕获事件，确保优先处理
+    svg.addEventListener("wheel", handleWheel, { passive: false, capture: true });
+    return () => svg.removeEventListener("wheel", handleWheel, { capture: true });
   }, []);
 
-  // 平移
-  const [isPanning, setIsPanning] = useState(false);
-  const panStartRef = useRef({ x: 0, y: 0 });
-
+  // 平移 - 背景拖拽
   const handleBackgroundMouseDown = useCallback((e: any) => {
-    if (e.target === svgRef.current || e.target.tagName === "svg") {
-      setIsPanning(true);
-      panStartRef.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    // 只有点击 SVG 背景时才触发平移
+    if (e.target === svgRef.current || e.target.tagName === "svg" || e.target.tagName === "rect") {
+      e.preventDefault();
+      dragStateRef.current.isPanning = true;
+      dragStateRef.current.panStart = { 
+        x: e.clientX - transformRef.current.x, 
+        y: e.clientY - transformRef.current.y 
+      };
     }
-  }, [transform]);
-
-  const handlePanMove = useCallback((e: any) => {
-    if (isPanning) {
-      setTransform((prev: { x: number; y: number; scale: number }) => ({
-        ...prev,
-        x: e.clientX - panStartRef.current.x,
-        y: e.clientY - panStartRef.current.y,
-      }));
-    }
-  }, [isPanning]);
-
-  const handlePanEnd = useCallback(() => {
-    setIsPanning(false);
   }, []);
 
   // 点击节点跳转
-  const handleNodeClick = useCallback((nodeId: number) => {
-    if (isDraggingRef.current) return;
+  const handleNodeClick = useCallback((e: any, nodeId: number) => {
+    // 如果刚刚拖拽过，不触发点击
+    if (dragStateRef.current.isDragging) return;
+    e.stopPropagation();
     try {
       orca.nav.openInLastPanel("block", { blockId: nodeId });
     } catch (error) {
@@ -466,16 +472,23 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
         height: isFullscreen ? "calc(100% - 50px)" : height,
         className: "local-graph-svg",
         onMouseDown: handleBackgroundMouseDown,
-        onMouseMove: (e: any) => { handleMouseMove(e); handlePanMove(e); },
-        onMouseUp: () => { handleMouseUp(); handlePanEnd(); },
-        onMouseLeave: () => { handleMouseUp(); handlePanEnd(); },
+        onMouseMove: handleMouseMove,
+        onMouseUp: handleMouseUp,
+        onMouseLeave: handleMouseUp,
         style: { 
-          cursor: isPanning ? "grabbing" : "grab",
+          cursor: dragStateRef.current.isPanning ? "grabbing" : "grab",
           background: "var(--orca-color-bg-2)",
           borderRadius: "8px",
           flex: isFullscreen ? 1 : undefined,
+          touchAction: "none", // 禁止触摸滚动
         },
       },
+      // 背景矩形，用于捕获点击事件
+      createElement("rect", {
+        width: "100%",
+        height: "100%",
+        fill: "transparent",
+      }),
       // 箭头定义
       createElement("defs", null,
         ...Object.entries(linkColors).map(([type, color]) =>
@@ -536,7 +549,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
                 transform: `translate(${node.x}, ${node.y})`,
                 className: "local-graph-node",
                 onMouseDown: (e: any) => handleNodeMouseDown(e, node),
-                onClick: () => handleNodeClick(node.id),
+                onClick: (e: any) => handleNodeClick(e, node.id),
                 style: { cursor: "pointer" },
               },
               // 圆形节点
