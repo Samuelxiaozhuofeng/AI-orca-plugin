@@ -6,7 +6,7 @@
 import type { DbId } from "../orca.d.ts";
 import type { AiModelOption } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
-import { contextStore } from "../store/context-store";
+import { contextStore, addPageById } from "../store/context-store";
 import {
   uploadFile,
   getFileDisplayUrl,
@@ -333,47 +333,25 @@ export default function ChatInput({
       }
     }
     
-    // 处理找到的块
+    // 处理找到的块 - 添加为上下文而不是插入文本
     if (blockIds.length > 0) {
-      const insertedRefs: string[] = [];
+      let addedCount = 0;
       
       for (const blockId of blockIds) {
         if (blockId <= 0) continue;
         
         try {
-          let block = orca.state.blocks[blockId];
-          if (!block) {
-            block = await orca.invokeBackend("get-block", blockId);
-          }
-          if (block) {
-            // 获取块标题
-            let title = "";
-            if (block.aliases && Array.isArray(block.aliases) && block.aliases.length > 0) {
-              title = block.aliases[0];
-            } else {
-              const rawText = block.text || block.content || "";
-              title = typeof rawText === "string" ? rawText.split("\n")[0]?.trim() || "" : "";
-              title = title.replace(/^#+\s*/, "").replace(/^[-*+]\s*/, "").trim();
-            }
-            if (!title) title = `Block ${blockId}`;
-            if (title.length > 30) title = title.substring(0, 30) + "...";
-            
-            insertedRefs.push(`[[${title}]](orca-block:${blockId})`);
-          }
+          // 使用 addPageById 将块添加为上下文
+          const added = addPageById(blockId);
+          if (added) addedCount++;
         } catch (err) {
-          console.warn("[ChatInput] Failed to get block info:", blockId, err);
+          console.warn("[ChatInput] Failed to add block as context:", blockId, err);
         }
       }
       
-      if (insertedRefs.length > 0) {
-        const blockRefText = insertedRefs.join(" ");
-        const currentText = textareaRef.current?.value || text;
-        const newText = currentText ? `${currentText} ${blockRefText}` : blockRefText;
-        setText(newText);
-        if (textareaRef.current) {
-          textareaRef.current.value = newText;
-          textareaRef.current.focus();
-        }
+      if (addedCount > 0) {
+        // 聚焦输入框
+        textareaRef.current?.focus();
         return;
       }
     }
