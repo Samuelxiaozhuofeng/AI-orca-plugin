@@ -190,22 +190,26 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
   const svgRef = useRef(null) as any;
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 100, height: 300 });
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
-  const [nodes, setNodes] = useState([] as GraphNode[]);
-  const [links, setLinks] = useState([] as GraphLink[]);
   const [graphData, setGraphData] = useState({ nodes: [] as GraphNode[], links: [] as GraphLink[] });
   const [loading, setLoading] = useState(true);
-  const simulationRef = useRef(null) as any;
+  const [, forceUpdate] = useState(0); // 用于强制更新
   
-  // 使用 ref 存储拖拽状态，避免闭包问题
+  const simulationRef = useRef(null) as any;
+  const nodesRef = useRef([] as GraphNode[]);
+  const linksRef = useRef([] as GraphLink[]);
+  
+  // 变换状态使用 ref，避免闭包问题
+  const transformRef = useRef({ x: 0, y: 0, scale: 1 });
+  const [transformState, setTransformState] = useState({ x: 0, y: 0, scale: 1 });
+  
+  // 拖拽状态
   const dragStateRef = useRef({
     isDragging: false,
     draggedNode: null as GraphNode | null,
     isPanning: false,
     panStart: { x: 0, y: 0 },
+    hasMoved: false, // 用于区分点击和拖拽
   });
-  const transformRef = useRef(transform);
-  transformRef.current = transform;
 
   // 加载图谱数据
   useEffect(() => {
@@ -255,6 +259,9 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
     const { width, height } = dimensions;
     const nodesCopy: GraphNode[] = graphData.nodes.map((n: GraphNode) => ({ ...n }));
     const linksCopy: GraphLink[] = graphData.links.map((l: GraphLink) => ({ ...l }));
+    
+    nodesRef.current = nodesCopy;
+    linksRef.current = linksCopy;
 
     const simulation = d3Force.forceSimulation<GraphNode>(nodesCopy)
       .force("link", d3Force.forceLink<GraphNode, GraphLink>(linksCopy)
@@ -267,8 +274,8 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
     simulationRef.current = simulation;
 
     simulation.on("tick", () => {
-      setNodes([...nodesCopy]);
-      setLinks([...linksCopy]);
+      // 使用 forceUpdate 触发重新渲染
+      forceUpdate((n: number) => n + 1);
     });
 
     return () => {
@@ -276,61 +283,71 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
     };
   }, [graphData, dimensions]);
 
-  // 节点拖拽 - 使用 ref 避免闭包问题
+  // 节点拖拽
   const handleNodeMouseDown = useCallback((e: any, node: GraphNode) => {
     e.stopPropagation();
     e.preventDefault();
     
     dragStateRef.current.isDragging = true;
     dragStateRef.current.draggedNode = node;
+    dragStateRef.current.hasMoved = false;
 
+    // 固定节点位置
     node.fx = node.x;
     node.fy = node.y;
-    simulationRef.current?.alphaTarget(0.3).restart();
+    
+    // 重新激活模拟
+    if (simulationRef.current) {
+      simulationRef.current.alphaTarget(0.3).restart();
+    }
   }, []);
 
+  // 统一的鼠标移动处理
   const handleMouseMove = useCallback((e: any) => {
     const svg = svgRef.current;
     if (!svg) return;
     
     const rect = svg.getBoundingClientRect();
-    const currentTransform = transformRef.current;
-    const x = (e.clientX - rect.left - currentTransform.x) / currentTransform.scale;
-    const y = (e.clientY - rect.top - currentTransform.y) / currentTransform.scale;
+    const t = transformRef.current;
 
     // 处理节点拖拽
     if (dragStateRef.current.isDragging && dragStateRef.current.draggedNode) {
+      dragStateRef.current.hasMoved = true;
       const node = dragStateRef.current.draggedNode;
-      node.fx = x;
-      node.fy = y;
-      // 强制更新节点位置
-      setNodes((prev: GraphNode[]) => [...prev]);
+      // 计算 SVG 坐标系中的位置
+      node.fx = (e.clientX - rect.left - t.x) / t.scale;
+      node.fy = (e.clientY - rect.top - t.y) / t.scale;
       return;
     }
     
     // 处理画布平移
     if (dragStateRef.current.isPanning) {
       const panStart = dragStateRef.current.panStart;
-      setTransform((prev: { x: number; y: number; scale: number }) => ({
-        ...prev,
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
-      }));
+      const newX = e.clientX - panStart.x;
+      const newY = e.clientY - panStart.y;
+      transformRef.current = { ...t, x: newX, y: newY };
+      setTransformState({ ...t, x: newX, y: newY });
     }
   }, []);
 
   const handleMouseUp = useCallback(() => {
-    if (dragStateRef.current.draggedNode) {
-      dragStateRef.current.draggedNode.fx = null;
-      dragStateRef.current.draggedNode.fy = null;
-      simulationRef.current?.alphaTarget(0);
+    const node = dragStateRef.current.draggedNode;
+    if (node) {
+      // 释放节点，让它可以自由移动
+      node.fx = null;
+      node.fy = null;
     }
+    
+    if (simulationRef.current) {
+      simulationRef.current.alphaTarget(0);
+    }
+    
     dragStateRef.current.isDragging = false;
     dragStateRef.current.draggedNode = null;
     dragStateRef.current.isPanning = false;
   }, []);
 
-  // 缩放 - 使用原生事件监听，确保能阻止冒泡和默认行为
+  // 缩放处理 - 使用原生事件
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -339,44 +356,53 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
       e.preventDefault();
       e.stopPropagation();
       
+      const t = transformRef.current;
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      const currentScale = transformRef.current.scale;
-      const newScale = Math.max(0.2, Math.min(4, currentScale * delta));
+      const newScale = Math.max(0.2, Math.min(4, t.scale * delta));
       
+      // 以鼠标位置为中心缩放
       const rect = svg.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
+      
+      const newX = mouseX - (mouseX - t.x) * (newScale / t.scale);
+      const newY = mouseY - (mouseY - t.y) * (newScale / t.scale);
 
-      setTransform((prev: { x: number; y: number; scale: number }) => ({
-        x: mouseX - (mouseX - prev.x) * (newScale / prev.scale),
-        y: mouseY - (mouseY - prev.y) * (newScale / prev.scale),
-        scale: newScale,
-      }));
+      transformRef.current = { x: newX, y: newY, scale: newScale };
+      setTransformState({ x: newX, y: newY, scale: newScale });
     };
 
-    // 使用 capture 阶段捕获事件，确保优先处理
-    svg.addEventListener("wheel", handleWheel, { passive: false, capture: true });
-    return () => svg.removeEventListener("wheel", handleWheel, { capture: true });
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
   }, []);
 
   // 平移 - 背景拖拽
   const handleBackgroundMouseDown = useCallback((e: any) => {
-    // 只有点击 SVG 背景时才触发平移
-    if (e.target === svgRef.current || e.target.tagName === "svg" || e.target.tagName === "rect") {
+    const target = e.target;
+    const isBackground = target === svgRef.current || 
+                         target.tagName === "svg" || 
+                         target.tagName === "rect" ||
+                         target.classList?.contains("local-graph-svg");
+    
+    if (isBackground) {
       e.preventDefault();
       dragStateRef.current.isPanning = true;
+      const t = transformRef.current;
       dragStateRef.current.panStart = { 
-        x: e.clientX - transformRef.current.x, 
-        y: e.clientY - transformRef.current.y 
+        x: e.clientX - t.x, 
+        y: e.clientY - t.y 
       };
     }
   }, []);
 
   // 点击节点跳转
   const handleNodeClick = useCallback((e: any, nodeId: number) => {
-    // 如果刚刚拖拽过，不触发点击
-    if (dragStateRef.current.isDragging) return;
     e.stopPropagation();
+    // 如果拖拽过，不触发点击
+    if (dragStateRef.current.hasMoved) {
+      dragStateRef.current.hasMoved = false;
+      return;
+    }
     try {
       orca.nav.openInLastPanel("block", { blockId: nodeId });
     } catch (error) {
@@ -386,13 +412,15 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
 
   // 重置视图
   const resetView = useCallback(() => {
-    setTransform({ x: 0, y: 0, scale: 1 });
+    transformRef.current = { x: 0, y: 0, scale: 1 };
+    setTransformState({ x: 0, y: 0, scale: 1 });
   }, []);
 
   // 切换全屏
   const toggleFullscreen = useCallback(() => {
     setIsFullscreen((prev: boolean) => {
-      setTransform({ x: 0, y: 0, scale: 1 });
+      transformRef.current = { x: 0, y: 0, scale: 1 };
+      setTransformState({ x: 0, y: 0, scale: 1 });
       return !prev;
     });
   }, []);
@@ -444,7 +472,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
         }
       },
       createElement("span", { style: { fontSize: "12px", color: "var(--orca-color-text-2)" } },
-        `链接图谱 (${nodes.length} 节点)`
+        `链接图谱 (${nodesRef.current.length} 节点)`
       ),
       createElement(
         "div",
@@ -509,12 +537,12 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
       ),
       createElement(
         "g",
-        { transform: `translate(${transform.x}, ${transform.y}) scale(${transform.scale})` },
+        { transform: `translate(${transformState.x}, ${transformState.y}) scale(${transformState.scale})` },
         // 链接线
         createElement(
           "g",
           { className: "local-graph-links" },
-          ...links.map((link: GraphLink, i: number) => {
+          ...linksRef.current.map((link: GraphLink, i: number) => {
             const source = link.source as GraphNode;
             const target = link.target as GraphNode;
             if (!source.x || !source.y || !target.x || !target.y) return null;
@@ -536,7 +564,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
         createElement(
           "g",
           { className: "local-graph-nodes" },
-          ...nodes.map((node: GraphNode) => {
+          ...nodesRef.current.map((node: GraphNode) => {
             if (!node.x || !node.y) return null;
             
             const isCenter = node.nodeType === "center";
@@ -620,7 +648,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
           borderRadius: "4px",
         } 
       },
-      `${Math.round(transform.scale * 100)}%`
+      `${Math.round(transformState.scale * 100)}%`
     )
   );
 }
