@@ -111,11 +111,9 @@ function injectBlockStyles(): void {
 
 确保 `isEditable` 设置为 `true`。
 
-### 无法拖拽子块
+### 无法将其他块缩进到自定义块下
 
-1. 确保 `useChildren` 设置为 `true`
-2. 确保 `BlockShell` 的 `droppable` 设置为 `true`
-3. 确保渲染了 `childrenJsx`
+**这是 Orca 框架的限制** - 自定义块类型不支持有子块。即使设置了 `useChildren: true`，其他块也无法通过 Tab 缩进到自定义块下。
 
 ### 样式丢失
 
