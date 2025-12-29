@@ -4,8 +4,7 @@
  */
 
 import type { DbId } from "../orca.d.ts";
-import type { AiModelOption } from "../settings/ai-chat-settings";
-import type { CurrencyType } from "../settings/ai-chat-settings";
+import type { AiChatSettings, CurrencyType } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
 import { contextStore, addPageById, clearHighPriorityContexts } from "../store/context-store";
 import { estimateTokens, formatTokenCount, estimateCost, formatCost } from "../utils/token-utils";
@@ -55,10 +54,14 @@ type Props = {
   disabled?: boolean;
   currentPageId: DbId | null;
   currentPageTitle: string;
-  modelOptions: AiModelOption[];
+  /** 新的设置结构 */
+  settings: AiChatSettings;
+  /** 当前选中的模型 ID（可能与 settings.selectedModelId 不同，因为 session 可以覆盖） */
   selectedModel: string;
-  onModelChange: (model: string) => void;
-  onAddModel?: (model: string) => void | Promise<void>;
+  /** 选择模型回调 */
+  onModelSelect: (providerId: string, modelId: string) => void;
+  /** 更新设置回调（用于平台配置修改） */
+  onUpdateSettings: (settings: AiChatSettings) => void;
   /** 币种设置 */
   currency?: CurrencyType;
 };
@@ -92,10 +95,10 @@ export default function ChatInput({
   disabled = false,
   currentPageId,
   currentPageTitle,
-  modelOptions,
+  settings,
   selectedModel,
-  onModelChange,
-  onAddModel,
+  onModelSelect,
+  onUpdateSettings,
   currency = "USD",
 }: Props) {
   const [text, setText] = useState("");
@@ -114,8 +117,18 @@ export default function ChatInput({
 
   // 获取当前选中模型的价格信息
   const selectedModelInfo = useMemo(() => {
-    return modelOptions.find(m => m.value === selectedModel);
-  }, [modelOptions, selectedModel]);
+    // 从 settings.providers 中查找当前选中的模型
+    for (const provider of settings.providers) {
+      const model = provider.models.find(m => m.id === selectedModel);
+      if (model) {
+        return {
+          inputPrice: model.inputPrice,
+          outputPrice: model.outputPrice,
+        };
+      }
+    }
+    return { inputPrice: 0, outputPrice: 0 };
+  }, [settings.providers, selectedModel]);
 
   // 计算 Token 预估
   const tokenEstimate = useMemo(() => {
@@ -839,10 +852,9 @@ export default function ChatInput({
             createElement("i", { className: "ti ti-refresh" })
           ),
           createElement(ModelSelectorButton, {
-            modelOptions,
-            selectedModel,
-            onModelChange,
-            onAddModel,
+            settings,
+            onSelect: onModelSelect,
+            onUpdateSettings,
           }),
           createElement(InjectionModeSelector, null),
           createElement(ModeSelectorButton, null),

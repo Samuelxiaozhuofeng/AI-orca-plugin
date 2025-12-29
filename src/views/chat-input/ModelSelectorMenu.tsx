@@ -1,18 +1,25 @@
 /**
  * ModelSelectorMenu - 模型选择器菜单组件
- * 包含模型过滤、分组显示、添加自定义模型功能
+ * 支持平台分组、模型选择、添加平台/模型
  */
 
-import type { AiModelOption, ModelCapability, AiModelPreset } from "../../settings/ai-chat-settings";
-import { MODEL_CAPABILITY_LABELS } from "../../settings/ai-chat-settings";
+import type { 
+  AiProvider, 
+  ProviderModel, 
+  ModelCapability,
+  AiChatSettings,
+} from "../../settings/ai-chat-settings";
+import { 
+  MODEL_CAPABILITY_LABELS,
+  createProvider,
+  addModelToProvider,
+} from "../../settings/ai-chat-settings";
 import {
   menuContainerStyle,
-  menuFlexStyle,
   modelListPanelStyle,
   modelListScrollStyle,
   addModelPanelStyle,
   addModelTitleStyle,
-  addModelHintStyle,
 } from "./chat-input-styles";
 
 const React = window.React as unknown as {
@@ -25,60 +32,20 @@ const { createElement, useState, useMemo, useCallback } = React;
 
 const { Button, Input } = orca.components;
 
-type ModelGroup = {
-  group: string;
-  options: AiModelOption[];
-};
-
 type Props = {
-  modelOptions: AiModelOption[];
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  onAddModel?: (preset: AiModelPreset) => void | Promise<void>;
-  onDeleteModel?: (model: string) => void | Promise<void>;
+  settings: AiChatSettings;
+  selectedProviderId: string;
+  selectedModelId: string;
+  onSelect: (providerId: string, modelId: string) => void;
+  onUpdateSettings: (settings: AiChatSettings) => void;
   close: () => void;
 };
 
-/**
- * 对模型列表进行分组和过滤
- */
-function useModelGroups(modelOptions: AiModelOption[], filterQuery: string): ModelGroup[] {
-  return useMemo(() => {
-    const q = filterQuery.trim().toLowerCase();
-    
-    // 过滤模型
-    const filtered = q
-      ? modelOptions.filter((o) => {
-          const label = (o.label || "").toLowerCase();
-          const value = (o.value || "").toLowerCase();
-          return label.includes(q) || value.includes(q);
-        })
-      : modelOptions;
+// ═══════════════════════════════════════════════════════════════════════════
+// 子组件
+// ═══════════════════════════════════════════════════════════════════════════
 
-    // 分组模型
-    const order = ["Built-in", "Custom", "Other"];
-    const grouped = new Map<string, AiModelOption[]>();
-    
-    for (const opt of filtered) {
-      const g = opt.group || "Other";
-      const arr = grouped.get(g);
-      if (arr) arr.push(opt);
-      else grouped.set(g, [opt]);
-    }
-
-    // 按预定义顺序排列分组
-    const keys = [
-      ...order.filter((k) => grouped.has(k)),
-      ...[...grouped.keys()].filter((k) => !order.includes(k)).sort(),
-    ];
-
-    return keys.map((k) => ({ group: k, options: grouped.get(k) || [] }));
-  }, [modelOptions, filterQuery]);
-}
-
-/**
- * 能力标签组件
- */
+/** 能力标签 */
 function CapabilityBadge({ capability }: { capability: ModelCapability }) {
   const config = MODEL_CAPABILITY_LABELS[capability];
   if (!config) return null;
@@ -104,263 +71,259 @@ function CapabilityBadge({ capability }: { capability: ModelCapability }) {
   );
 }
 
-/**
- * 模型列表项组件
- */
-function ModelListItem({
-  opt,
+/** 模型列表项 */
+function ModelItem({
+  model,
   isSelected,
+  isDefault,
   onClick,
+  onSetDefault,
+  onDelete,
 }: {
-  opt: AiModelOption;
+  model: ProviderModel;
   isSelected: boolean;
+  isDefault: boolean;
   onClick: () => void;
+  onSetDefault?: () => void;
+  onDelete?: () => void;
 }) {
-  const hasPrice = opt.inputPrice !== undefined || opt.outputPrice !== undefined;
-  const hasCapabilities = opt.capabilities && opt.capabilities.length > 0;
+  const [hovered, setHovered] = useState(false);
+  const hasPrice = model.inputPrice !== undefined || model.outputPrice !== undefined;
+  const hasCapabilities = model.capabilities && model.capabilities.length > 0;
   
   return createElement(
     "div",
     {
       onClick,
+      onMouseEnter: () => setHovered(true),
+      onMouseLeave: () => setHovered(false),
       style: {
-        padding: "8px 12px",
+        padding: "6px 10px",
         cursor: "pointer",
-        background: isSelected ? "var(--orca-color-bg-3)" : "transparent",
+        background: isSelected ? "var(--orca-color-bg-3)" : hovered ? "var(--orca-color-bg-2)" : "transparent",
         borderRadius: "4px",
-        margin: "2px 4px",
-      },
-      onMouseEnter: (e: any) => {
-        if (!isSelected) e.currentTarget.style.background = "var(--orca-color-bg-2)";
-      },
-      onMouseLeave: (e: any) => {
-        if (!isSelected) e.currentTarget.style.background = "transparent";
+        margin: "1px 4px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "8px",
       },
     },
-    // 第一行：模型名称 + 选中标记
     createElement(
       "div",
-      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+      { style: { flex: 1, minWidth: 0 } },
+      // 模型名称
       createElement(
         "div",
-        { style: { display: "flex", alignItems: "center", gap: "6px", flex: 1, minWidth: 0 } },
+        { style: { display: "flex", alignItems: "center", gap: "6px" } },
         createElement(
           "span",
           { 
             style: { 
               fontWeight: 500, 
+              fontSize: "13px",
               color: "var(--orca-color-text-1)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             } 
           },
-          opt.label
+          model.label || model.id
         ),
-        // 能力标签
+        // 默认标记
+        isDefault && createElement(
+          "span",
+          {
+            style: {
+              fontSize: "9px",
+              padding: "1px 4px",
+              borderRadius: "3px",
+              background: "var(--orca-color-primary-bg, rgba(59, 130, 246, 0.1))",
+              color: "var(--orca-color-primary)",
+            },
+          },
+          "默认"
+        ),
         hasCapabilities && createElement(
           "div",
-          { style: { display: "flex", gap: "3px", flexShrink: 0 } },
-          ...opt.capabilities!.slice(0, 3).map((cap) =>
+          { style: { display: "flex", gap: "2px", flexShrink: 0, flexWrap: "wrap" } },
+          ...model.capabilities!.map((cap) =>
             createElement(CapabilityBadge, { key: cap, capability: cap })
-          ),
-          opt.capabilities!.length > 3 && createElement(
-            "span",
-            { style: { fontSize: "10px", color: "var(--orca-color-text-3)" } },
-            `+${opt.capabilities!.length - 3}`
           )
         )
       ),
-      isSelected && createElement("i", { 
-        className: "ti ti-check", 
-        style: { color: "var(--orca-color-primary)", fontSize: "14px" } 
-      })
-    ),
-    // 第二行：模型ID + 价格
-    (opt.label !== opt.value || hasPrice) && createElement(
-      "div",
-      { 
-        style: { 
-          display: "flex", 
-          alignItems: "center", 
-          justifyContent: "space-between",
-          marginTop: "4px",
-          fontSize: "11px",
-          color: "var(--orca-color-text-3)",
-        } 
-      },
-      opt.label !== opt.value 
-        ? createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, opt.value)
-        : createElement("span", null),
+      // 价格
       hasPrice && createElement(
-        "span",
-        { style: { whiteSpace: "nowrap", marginLeft: "8px" } },
-        `$${opt.inputPrice ?? 0}/${opt.outputPrice ?? 0}`
-      )
-    )
-  );
-}
-
-/**
- * 模型列表面板
- */
-function ModelListPanel({
-  modelGroups,
-  selectedModel,
-  onModelChange,
-  modelFilter,
-  onFilterChange,
-  close,
-}: {
-  modelGroups: ModelGroup[];
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  modelFilter: string;
-  onFilterChange: (value: string) => void;
-  close: () => void;
-}) {
-  const listItems: any[] = [];
-
-  if (modelGroups.length === 0) {
-    listItems.push(
-      createElement(
         "div",
-        { key: "empty", style: { padding: "12px", color: "var(--orca-color-text-3)", textAlign: "center" } },
-        "No models found"
+        { style: { fontSize: "10px", color: "var(--orca-color-text-3)", marginTop: "2px" } },
+        `$${model.inputPrice ?? 0}/${model.outputPrice ?? 0} /M`
       )
-    );
-  } else {
-    for (let i = 0; i < modelGroups.length; i++) {
-      const { group, options } = modelGroups[i];
-      
-      // 分组标题
-      listItems.push(
-        createElement(
-          "div",
-          { 
-            key: `t:${group}`, 
-            style: { 
-              padding: "8px 12px 4px", 
-              fontSize: "11px", 
-              fontWeight: 600,
-              color: "var(--orca-color-text-2)",
-              textTransform: "uppercase",
-              letterSpacing: "0.5px",
-            } 
-          },
-          group
-        )
-      );
-      
-      // 模型列表项
-      listItems.push(
-        ...options.map((opt) => {
-          const isSelected = opt.value === selectedModel;
-          return createElement(ModelListItem, {
-            key: opt.value,
-            opt,
-            isSelected,
-            onClick: () => {
-              if (opt.value !== selectedModel) onModelChange(opt.value);
-              close();
-            },
-          });
-        })
-      );
-
-      // 分隔线
-      if (i !== modelGroups.length - 1) {
-        listItems.push(
-          createElement("div", { 
-            key: `s:${group}`, 
-            style: { 
-              height: "1px", 
-              background: "var(--orca-color-border)", 
-              margin: "8px 12px" 
-            } 
-          })
-        );
-      }
-    }
-  }
-
-  return createElement(
-    "div",
-    { style: modelListPanelStyle },
-    createElement(Input as any, {
-      placeholder: "Filter models…",
-      value: modelFilter,
-      onChange: (e: any) => onFilterChange(e.target.value),
-      pre: createElement("i", { className: "ti ti-search" }),
-      style: { width: "100%", maxWidth: "100%", boxSizing: "border-box" },
-    }),
+    ),
+    // 右侧操作区
     createElement(
       "div",
-      { style: modelListScrollStyle },
-      ...listItems
+      { style: { display: "flex", alignItems: "center", gap: "4px" } },
+      // 设为默认按钮（悬停时显示，非默认模型）
+      hovered && !isDefault && onSetDefault && createElement(
+        "i",
+        {
+          className: "ti ti-star",
+          style: { fontSize: "12px", color: "var(--orca-color-text-3)", cursor: "pointer" },
+          onClick: (e: any) => { e.stopPropagation(); onSetDefault(); },
+          title: "设为默认",
+        }
+      ),
+      // 默认模型显示实心星
+      isDefault && createElement(
+        "i",
+        {
+          className: "ti ti-star-filled",
+          style: { fontSize: "12px", color: "var(--orca-color-warning)" },
+          title: "默认模型",
+        }
+      ),
+      // 选中标记
+      isSelected && createElement("i", { className: "ti ti-check", style: { color: "var(--orca-color-primary)", fontSize: "14px" } }),
+      // 删除按钮
+      hovered && onDelete && createElement(
+        "i",
+        {
+          className: "ti ti-x",
+          style: { color: "var(--orca-color-text-3)", fontSize: "12px", cursor: "pointer" },
+          onClick: (e: any) => { e.stopPropagation(); onDelete(); },
+        }
+      )
     )
   );
 }
 
-/** 能力选项 */
-const CAPABILITY_OPTIONS: { value: ModelCapability; label: string }[] = [
-  { value: "vision", label: "视觉" },
-  { value: "web", label: "联网" },
-  { value: "reasoning", label: "推理" },
-  { value: "tools", label: "工具" },
-  { value: "rerank", label: "重排" },
-  { value: "embedding", label: "嵌入" },
-];
-
-/**
- * 添加/编辑模型面板
- */
-function AddModelPanel({
-  onAdd,
-  isAdding,
+/** 平台分组 */
+function ProviderGroup({
+  provider,
+  selectedModelId,
+  defaultModelId,
+  defaultProviderId,
+  onSelectModel,
+  onSetDefaultModel,
+  onDeleteModel,
+  onEditProvider,
+  isExpanded,
+  onToggle,
 }: {
-  onAdd: (preset: AiModelPreset) => void;
-  isAdding: boolean;
+  provider: AiProvider;
+  selectedModelId: string;
+  defaultModelId: string;
+  defaultProviderId: string;
+  onSelectModel: (modelId: string) => void;
+  onSetDefaultModel: (modelId: string) => void;
+  onDeleteModel?: (modelId: string) => void;
+  onEditProvider: () => void;
+  isExpanded: boolean;
+  onToggle: () => void;
 }) {
-  const [model, setModel] = useState("");
-  const [label, setLabel] = useState("");
-  const [apiUrl, setApiUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [inputPrice, setInputPrice] = useState("");
-  const [outputPrice, setOutputPrice] = useState("");
-  const [capabilities, setCapabilities] = useState<ModelCapability[]>([]);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasApiKey = provider.apiKey && provider.apiKey.trim().length > 0;
+  
+  return createElement(
+    "div",
+    { style: { marginBottom: "4px" } },
+    // 平台标题
+    createElement(
+      "div",
+      {
+        onClick: onToggle,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          cursor: "pointer",
+          background: isExpanded ? "var(--orca-color-bg-2)" : "transparent",
+          borderRadius: "6px",
+        },
+      },
+      createElement(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px" } },
+        createElement("i", { 
+          className: isExpanded ? "ti ti-chevron-down" : "ti ti-chevron-right", 
+          style: { fontSize: "12px", color: "var(--orca-color-text-3)" } 
+        }),
+        createElement("span", { style: { fontWeight: 600, fontSize: "13px" } }, provider.name),
+        createElement(
+          "span",
+          { style: { fontSize: "11px", color: "var(--orca-color-text-3)" } },
+          `(${provider.models.length})`
+        ),
+        !hasApiKey && createElement(
+          "span",
+          { 
+            style: { 
+              fontSize: "10px", 
+              color: "var(--orca-color-warning)", 
+              background: "var(--orca-color-warning-bg, rgba(245, 158, 11, 0.1))",
+              padding: "1px 4px",
+              borderRadius: "3px",
+            } 
+          },
+          "未配置"
+        )
+      ),
+      createElement(
+        "i",
+        {
+          className: "ti ti-settings",
+          style: { fontSize: "14px", color: "var(--orca-color-text-3)", cursor: "pointer" },
+          onClick: (e: any) => { e.stopPropagation(); onEditProvider(); },
+          title: "配置平台",
+        }
+      )
+    ),
+    // 模型列表
+    isExpanded && createElement(
+      "div",
+      { style: { marginLeft: "12px", marginTop: "4px" } },
+      provider.models.length === 0
+        ? createElement(
+            "div",
+            { style: { padding: "8px 12px", fontSize: "12px", color: "var(--orca-color-text-3)" } },
+            "暂无模型，点击设置添加"
+          )
+        : provider.models.map((model) =>
+            createElement(ModelItem, {
+              key: model.id,
+              model,
+              isSelected: model.id === selectedModelId,
+              isDefault: provider.id === defaultProviderId && model.id === defaultModelId,
+              onClick: () => onSelectModel(model.id),
+              onSetDefault: () => onSetDefaultModel(model.id),
+              onDelete: !provider.isBuiltin ? () => onDeleteModel?.(model.id) : undefined,
+            })
+          )
+    )
+  );
+}
 
-  const handleAdd = useCallback(() => {
-    if (!model.trim()) return;
-    
-    const preset: AiModelPreset = {
-      model: model.trim(),
-      label: label.trim() || undefined,
-      apiUrl: apiUrl.trim() || undefined,
-      apiKey: apiKey.trim() || undefined,
-      inputPrice: inputPrice ? parseFloat(inputPrice) : undefined,
-      outputPrice: outputPrice ? parseFloat(outputPrice) : undefined,
-      capabilities: capabilities.length > 0 ? capabilities : undefined,
-    };
-    
-    onAdd(preset);
-    
-    // 重置表单
-    setModel("");
-    setLabel("");
-    setApiUrl("");
-    setApiKey("");
-    setInputPrice("");
-    setOutputPrice("");
-    setCapabilities([]);
-  }, [model, label, apiUrl, apiKey, inputPrice, outputPrice, capabilities, onAdd]);
 
-  const toggleCapability = useCallback((cap: ModelCapability) => {
-    setCapabilities(prev => 
-      prev.includes(cap) ? prev.filter(c => c !== cap) : [...prev, cap]
-    );
-  }, []);
+// ═══════════════════════════════════════════════════════════════════════════
+// 模型编辑面板
+// ═══════════════════════════════════════════════════════════════════════════
+
+function ModelEditPanel({
+  model,
+  onUpdate,
+  onClose,
+}: {
+  model: ProviderModel;
+  onUpdate: (model: ProviderModel) => void;
+  onClose: () => void;
+}) {
+  const [label, setLabel] = useState(model.label || model.id);
+  const [inputPrice, setInputPrice] = useState(String(model.inputPrice ?? ""));
+  const [outputPrice, setOutputPrice] = useState(String(model.outputPrice ?? ""));
+  const [temperature, setTemperature] = useState(String(model.temperature ?? ""));
+  const [maxTokens, setMaxTokens] = useState(String(model.maxTokens ?? ""));
+  const [maxToolRounds, setMaxToolRounds] = useState(String(model.maxToolRounds ?? ""));
+  const [capabilities, setCapabilities] = useState<ModelCapability[]>(model.capabilities || []);
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
@@ -381,211 +344,488 @@ function AddModelPanel({
     display: "block",
   };
 
+  const allCapabilities: ModelCapability[] = ["vision", "web", "reasoning", "tools", "rerank", "embedding"];
+
+  const toggleCapability = (cap: ModelCapability) => {
+    if (capabilities.includes(cap)) {
+      setCapabilities(capabilities.filter(c => c !== cap));
+    } else {
+      setCapabilities([...capabilities, cap]);
+    }
+  };
+
+  const handleSave = () => {
+    onUpdate({
+      ...model,
+      label: label.trim() || model.id,
+      inputPrice: inputPrice ? parseFloat(inputPrice) : undefined,
+      outputPrice: outputPrice ? parseFloat(outputPrice) : undefined,
+      temperature: temperature ? parseFloat(temperature) : undefined,
+      maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
+      maxToolRounds: maxToolRounds ? parseInt(maxToolRounds, 10) : undefined,
+      capabilities: capabilities.length > 0 ? capabilities : undefined,
+    });
+    onClose();
+  };
+
   return createElement(
     "div",
-    { style: { ...addModelPanelStyle, minWidth: "280px" } },
-    createElement("div", { style: addModelTitleStyle }, "添加模型"),
-    
-    // 模型名称（必填）
-    createElement("div", { style: { marginBottom: "12px" } },
-      createElement("label", { style: labelStyle }, "模型名称 *"),
-      createElement("input", {
-        type: "text",
-        placeholder: "如 gpt-4o, claude-3-opus",
-        value: model,
-        onChange: (e: any) => setModel(e.target.value),
-        style: inputStyle,
-      })
+    { style: { padding: "16px", minWidth: "320px" } },
+    // 标题
+    createElement(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" } },
+      createElement("div", { style: { fontWeight: 600, fontSize: "14px" } }, `编辑模型: ${model.id}`),
+      createElement("i", { className: "ti ti-x", style: { cursor: "pointer", color: "var(--orca-color-text-3)" }, onClick: onClose })
     ),
-    
+
     // 显示名称
     createElement("div", { style: { marginBottom: "12px" } },
       createElement("label", { style: labelStyle }, "显示名称"),
-      createElement("input", {
-        type: "text",
-        placeholder: "可选，留空使用模型名",
-        value: label,
-        onChange: (e: any) => setLabel(e.target.value),
-        style: inputStyle,
-      })
+      createElement("input", { type: "text", value: label, onChange: (e: any) => setLabel(e.target.value), style: inputStyle })
     ),
-    
-    // API 配置
-    createElement("div", { style: { marginBottom: "12px" } },
-      createElement("label", { style: labelStyle }, "API 地址"),
-      createElement("input", {
-        type: "text",
-        placeholder: "留空使用全局设置",
-        value: apiUrl,
-        onChange: (e: any) => setApiUrl(e.target.value),
-        style: inputStyle,
-      })
-    ),
-    
-    createElement("div", { style: { marginBottom: "12px" } },
-      createElement("label", { style: labelStyle }, "API 密钥"),
-      createElement("input", {
-        type: "password",
-        placeholder: "留空使用全局设置",
-        value: apiKey,
-        onChange: (e: any) => setApiKey(e.target.value),
-        style: inputStyle,
-      })
-    ),
-    
-    // 高级选项折叠
-    createElement(
-      "div",
-      {
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: "4px",
-          cursor: "pointer",
-          color: "var(--orca-color-text-3)",
-          fontSize: "12px",
-          marginBottom: showAdvanced ? "12px" : "0",
-        },
-        onClick: () => setShowAdvanced(!showAdvanced),
-      },
-      createElement("i", { className: showAdvanced ? "ti ti-chevron-down" : "ti ti-chevron-right", style: { fontSize: "12px" } }),
-      "高级选项"
-    ),
-    
-    // 高级选项内容
-    showAdvanced && createElement(
-      "div",
-      { style: { paddingLeft: "8px", borderLeft: "2px solid var(--orca-color-border)" } },
-      
-      // 价格
-      createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
-        createElement("div", { style: { flex: 1 } },
-          createElement("label", { style: labelStyle }, "输入价格 ($/M)"),
-          createElement("input", {
-            type: "number",
-            placeholder: "0",
-            value: inputPrice,
-            onChange: (e: any) => setInputPrice(e.target.value),
-            style: { ...inputStyle, width: "100%" },
-          })
-        ),
-        createElement("div", { style: { flex: 1 } },
-          createElement("label", { style: labelStyle }, "输出价格 ($/M)"),
-          createElement("input", {
-            type: "number",
-            placeholder: "0",
-            value: outputPrice,
-            onChange: (e: any) => setOutputPrice(e.target.value),
-            style: { ...inputStyle, width: "100%" },
-          })
-        )
+
+    // 价格（两列）
+    createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
+      createElement("div", { style: { flex: 1 } },
+        createElement("label", { style: labelStyle }, "输入价格 ($/M)"),
+        createElement("input", { type: "number", step: "0.01", value: inputPrice, onChange: (e: any) => setInputPrice(e.target.value), placeholder: "0", style: inputStyle })
       ),
-      
-      // 能力标签
-      createElement("div", { style: { marginBottom: "8px" } },
-        createElement("label", { style: labelStyle }, "模型能力"),
-        createElement(
-          "div",
-          { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
-          ...CAPABILITY_OPTIONS.map(opt => {
-            const isActive = capabilities.includes(opt.value);
-            const config = MODEL_CAPABILITY_LABELS[opt.value];
-            return createElement(
-              "button",
-              {
-                key: opt.value,
-                onClick: () => toggleCapability(opt.value),
-                style: {
-                  padding: "3px 8px",
-                  fontSize: "11px",
-                  border: `1px solid ${isActive ? config.color : "var(--orca-color-border)"}`,
-                  borderRadius: "4px",
-                  background: isActive ? `${config.color}20` : "transparent",
-                  color: isActive ? config.color : "var(--orca-color-text-2)",
-                  cursor: "pointer",
-                },
-              },
-              opt.label
-            );
-          })
-        )
+      createElement("div", { style: { flex: 1 } },
+        createElement("label", { style: labelStyle }, "输出价格 ($/M)"),
+        createElement("input", { type: "number", step: "0.01", value: outputPrice, onChange: (e: any) => setOutputPrice(e.target.value), placeholder: "0", style: inputStyle })
       )
     ),
-    
-    // 添加按钮
-    createElement(
-      Button,
-      {
-        variant: "solid",
-        disabled: isAdding || !model.trim(),
-        onClick: handleAdd,
-        style: { marginTop: 12, width: "100%", boxSizing: "border-box" },
-      },
-      isAdding ? "添加中..." : "添加模型"
+
+    // 模型参数（三列）
+    createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
+      createElement("div", { style: { flex: 1 } },
+        createElement("label", { style: labelStyle }, "Temperature"),
+        createElement("input", { type: "number", step: "0.1", min: "0", max: "2", value: temperature, onChange: (e: any) => setTemperature(e.target.value), placeholder: "0.7", style: inputStyle })
+      ),
+      createElement("div", { style: { flex: 1 } },
+        createElement("label", { style: labelStyle }, "Max Tokens"),
+        createElement("input", { type: "number", value: maxTokens, onChange: (e: any) => setMaxTokens(e.target.value), placeholder: "4096", style: inputStyle })
+      ),
+      createElement("div", { style: { flex: 1 } },
+        createElement("label", { style: labelStyle }, "工具轮数"),
+        createElement("input", { type: "number", min: "1", max: "10", value: maxToolRounds, onChange: (e: any) => setMaxToolRounds(e.target.value), placeholder: "5", style: inputStyle })
+      )
+    ),
+
+    // 能力标签
+    createElement("div", { style: { marginBottom: "16px" } },
+      createElement("label", { style: labelStyle }, "模型能力"),
+      createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" } },
+        ...allCapabilities.map(cap => {
+          const config = MODEL_CAPABILITY_LABELS[cap];
+          const isSelected = capabilities.includes(cap);
+          return createElement(
+            "button",
+            {
+              key: cap,
+              onClick: () => toggleCapability(cap),
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                padding: "4px 8px",
+                borderRadius: "6px",
+                fontSize: "11px",
+                border: isSelected ? `1px solid ${config.color}` : "1px solid var(--orca-color-border)",
+                background: isSelected ? `${config.color}20` : "var(--orca-color-bg-2)",
+                color: isSelected ? config.color : "var(--orca-color-text-2)",
+                cursor: "pointer",
+              },
+            },
+            createElement("i", { className: config.icon, style: { fontSize: "10px" } }),
+            config.label
+          );
+        })
+      )
+    ),
+
+    // 保存按钮
+    createElement("div", { style: { display: "flex", justifyContent: "flex-end" } },
+      createElement(Button, { variant: "solid", onClick: handleSave }, "保存")
     )
   );
 }
 
-/**
- * ModelSelectorMenu - 主组件
- */
+// ═══════════════════════════════════════════════════════════════════════════
+// 平台配置面板
+// ═══════════════════════════════════════════════════════════════════════════
+
+function ProviderConfigPanel({
+  provider,
+  onUpdate,
+  onDelete,
+  onClose,
+}: {
+  provider: AiProvider;
+  onUpdate: (provider: AiProvider) => void;
+  onDelete?: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(provider.name);
+  const [apiUrl, setApiUrl] = useState(provider.apiUrl);
+  const [apiKey, setApiKey] = useState(provider.apiKey);
+  const [newModelId, setNewModelId] = useState("");
+  const [newModelLabel, setNewModelLabel] = useState("");
+  const [editingModel, setEditingModel] = useState<ProviderModel | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "6px 10px",
+    fontSize: "13px",
+    border: "1px solid var(--orca-color-border)",
+    borderRadius: "6px",
+    background: "var(--orca-color-bg-2)",
+    color: "var(--orca-color-text-1)",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: "11px",
+    color: "var(--orca-color-text-2)",
+    marginBottom: "4px",
+    display: "block",
+  };
+
+  const handleSave = () => {
+    onUpdate({
+      ...provider,
+      name: name.trim() || provider.name,
+      apiUrl: apiUrl.trim(),
+      apiKey: apiKey.trim(),
+    });
+    onClose();
+  };
+
+  // 获取当前编辑状态的 provider（包含本地修改）
+  const getCurrentProvider = (): AiProvider => ({
+    ...provider,
+    name: name.trim() || provider.name,
+    apiUrl: apiUrl.trim(),
+    apiKey: apiKey.trim(),
+  });
+
+  const handleAddModel = () => {
+    if (!newModelId.trim()) return;
+    const currentProvider = getCurrentProvider();
+    const updatedProvider = { ...currentProvider, models: [...currentProvider.models] };
+    addModelToProvider(updatedProvider, newModelId.trim(), newModelLabel.trim() || undefined);
+    onUpdate(updatedProvider);
+    setNewModelId("");
+    setNewModelLabel("");
+  };
+
+  const handleDeleteModel = (modelId: string) => {
+    const currentProvider = getCurrentProvider();
+    const updatedProvider = {
+      ...currentProvider,
+      models: currentProvider.models.filter(m => m.id !== modelId),
+    };
+    onUpdate(updatedProvider);
+  };
+
+  const handleUpdateModel = (updatedModel: ProviderModel) => {
+    const currentProvider = getCurrentProvider();
+    const updatedProvider = {
+      ...currentProvider,
+      models: currentProvider.models.map(m => m.id === updatedModel.id ? updatedModel : m),
+    };
+    onUpdate(updatedProvider);
+  };
+
+  // 如果正在编辑模型，显示模型编辑面板
+  if (editingModel) {
+    return createElement(ModelEditPanel, {
+      model: editingModel,
+      onUpdate: (m: ProviderModel) => { handleUpdateModel(m); setEditingModel(null); },
+      onClose: () => setEditingModel(null),
+    });
+  }
+
+  return createElement(
+    "div",
+    { style: { ...addModelPanelStyle, minWidth: "320px" } },
+    // 标题
+    createElement(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" } },
+      createElement("div", { style: addModelTitleStyle }, `配置 ${provider.name}`),
+      createElement("i", { className: "ti ti-x", style: { cursor: "pointer", color: "var(--orca-color-text-3)" }, onClick: onClose })
+    ),
+
+    // 平台名称
+    !provider.isBuiltin && createElement("div", { style: { marginBottom: "12px" } },
+      createElement("label", { style: labelStyle }, "平台名称"),
+      createElement("input", { type: "text", value: name, onChange: (e: any) => setName(e.target.value), style: inputStyle })
+    ),
+
+    // API URL
+    createElement("div", { style: { marginBottom: "12px" } },
+      createElement("label", { style: labelStyle }, "API 地址"),
+      createElement("input", { type: "text", value: apiUrl, onChange: (e: any) => setApiUrl(e.target.value), placeholder: "https://api.openai.com/v1", style: inputStyle })
+    ),
+
+    // API Key
+    createElement("div", { style: { marginBottom: "16px" } },
+      createElement("label", { style: labelStyle }, "API 密钥"),
+      createElement("input", { type: "password", value: apiKey, onChange: (e: any) => setApiKey(e.target.value), placeholder: "sk-...", style: inputStyle })
+    ),
+
+    // 分隔线
+    createElement("div", { style: { height: "1px", background: "var(--orca-color-border)", margin: "16px 0" } }),
+
+    // 模型列表
+    createElement("div", { style: { marginBottom: "12px" } },
+      createElement("label", { style: { ...labelStyle, marginBottom: "8px" } }, "模型列表（点击编辑）"),
+      provider.models.length === 0
+        ? createElement("div", { style: { fontSize: "12px", color: "var(--orca-color-text-3)", marginBottom: "8px" } }, "暂无模型")
+        : createElement(
+            "div",
+            { style: { maxHeight: "200px", overflowY: "auto", marginBottom: "8px" } },
+            ...provider.models.map(model =>
+              createElement(
+                "div",
+                {
+                  key: model.id,
+                  onClick: () => setEditingModel(model),
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 10px",
+                    background: "var(--orca-color-bg-2)",
+                    borderRadius: "6px",
+                    marginBottom: "4px",
+                    cursor: "pointer",
+                    border: "1px solid transparent",
+                  },
+                  onMouseEnter: (e: any) => { e.currentTarget.style.borderColor = "var(--orca-color-border)"; },
+                  onMouseLeave: (e: any) => { e.currentTarget.style.borderColor = "transparent"; },
+                },
+                createElement("div", { style: { flex: 1 } },
+                  createElement("div", { style: { fontSize: "12px", fontWeight: 500 } }, model.label || model.id),
+                  createElement("div", { style: { fontSize: "10px", color: "var(--orca-color-text-3)", marginTop: "2px" } },
+                    model.inputPrice !== undefined ? `${model.inputPrice}/${model.outputPrice ?? 0} $/M` : "未设置价格"
+                  )
+                ),
+                createElement("div", { style: { display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
+                  model.capabilities && model.capabilities.map(cap =>
+                    createElement(CapabilityBadge, { key: cap, capability: cap })
+                  ),
+                  createElement("i", { className: "ti ti-pencil", style: { fontSize: "12px", color: "var(--orca-color-text-3)", marginLeft: "4px" } }),
+                  createElement("i", {
+                    className: "ti ti-x",
+                    style: { fontSize: "12px", color: "var(--orca-color-text-3)", marginLeft: "4px" },
+                    onClick: (e: any) => { e.stopPropagation(); handleDeleteModel(model.id); },
+                  })
+                )
+              )
+            )
+          )
+    ),
+
+    // 添加模型
+    createElement(
+      "div",
+      { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
+      createElement("input", { type: "text", value: newModelId, onChange: (e: any) => setNewModelId(e.target.value), placeholder: "模型 ID", style: { ...inputStyle, flex: 1 } }),
+      createElement("input", { type: "text", value: newModelLabel, onChange: (e: any) => setNewModelLabel(e.target.value), placeholder: "显示名(可选)", style: { ...inputStyle, flex: 1 } }),
+      createElement(Button, { variant: "outline", disabled: !newModelId.trim(), onClick: handleAddModel, style: { flexShrink: 0 } }, "添加")
+    ),
+
+    // 操作按钮
+    createElement(
+      "div",
+      { style: { display: "flex", gap: "8px", justifyContent: "flex-end" } },
+      !provider.isBuiltin && onDelete && createElement(Button, { variant: "outline", onClick: onDelete, style: { color: "var(--orca-color-danger)" } }, "删除平台"),
+      createElement(Button, { variant: "solid", onClick: handleSave }, "保存")
+    )
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 主组件
+// ═══════════════════════════════════════════════════════════════════════════
+
 export default function ModelSelectorMenu({
-  modelOptions,
-  selectedModel,
-  onModelChange,
-  onAddModel,
-  onDeleteModel,
+  settings,
+  selectedProviderId,
+  selectedModelId,
+  onSelect,
+  onUpdateSettings,
   close,
 }: Props) {
-  const [modelFilter, setModelFilter] = useState("");
-  const [addingModel, setAddingModel] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(() => {
+    // 默认展开当前选中的平台
+    return new Set([selectedProviderId]);
+  });
+  const [editingProvider, setEditingProvider] = useState<AiProvider | null>(null);
 
-  const modelGroups = useModelGroups(modelOptions, modelFilter);
+  // 过滤平台和模型
+  const filteredProviders = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return settings.providers.filter(p => p.enabled);
+    
+    return settings.providers
+      .filter(p => p.enabled)
+      .map(p => ({
+        ...p,
+        models: p.models.filter(m => 
+          m.id.toLowerCase().includes(q) || 
+          (m.label || "").toLowerCase().includes(q) ||
+          p.name.toLowerCase().includes(q)
+        ),
+      }))
+      .filter(p => p.models.length > 0 || p.name.toLowerCase().includes(q));
+  }, [settings.providers, filter]);
 
-  const handleAddModel = useCallback(async (preset: AiModelPreset) => {
-    if (!preset.model) return;
+  const toggleProvider = useCallback((providerId: string) => {
+    setExpandedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(providerId)) {
+        next.delete(providerId);
+      } else {
+        next.add(providerId);
+      }
+      return next;
+    });
+  }, []);
 
-    // If already exists, just select it.
-    if (modelOptions.some((o) => o.value === preset.model)) {
-      onModelChange(preset.model);
-      close();
-      return;
-    }
+  const handleSelectModel = useCallback((providerId: string, modelId: string) => {
+    onSelect(providerId, modelId);
+    close();
+  }, [onSelect, close]);
 
-    if (!onAddModel) {
-      onModelChange(preset.model);
-      close();
-      return;
-    }
+  // 设为默认模型
+  const handleSetDefaultModel = useCallback((providerId: string, modelId: string) => {
+    onUpdateSettings({ 
+      ...settings, 
+      selectedProviderId: providerId, 
+      selectedModelId: modelId 
+    });
+    console.log("[ModelSelectorMenu] Set default model:", providerId, modelId);
+  }, [settings, onUpdateSettings]);
 
-    try {
-      setAddingModel(true);
-      await onAddModel(preset);
-      onModelChange(preset.model);
-      close();
-    } finally {
-      setAddingModel(false);
-    }
-  }, [modelOptions, onAddModel, onModelChange, close]);
+  const handleUpdateProvider = useCallback((updatedProvider: AiProvider) => {
+    console.log("[ModelSelectorMenu] handleUpdateProvider called:", {
+      providerId: updatedProvider.id,
+      apiKey: updatedProvider.apiKey ? `${updatedProvider.apiKey.slice(0, 8)}...` : "(empty)",
+      modelsCount: updatedProvider.models.length,
+    });
+    const newProviders = settings.providers.map(p => 
+      p.id === updatedProvider.id ? updatedProvider : p
+    );
+    console.log("[ModelSelectorMenu] Calling onUpdateSettings with providers:", 
+      newProviders.map(p => ({ id: p.id, apiKey: p.apiKey ? `${p.apiKey.slice(0, 8)}...` : "(empty)", modelsCount: p.models.length }))
+    );
+    onUpdateSettings({ ...settings, providers: newProviders });
+    // 同步更新 editingProvider 状态
+    setEditingProvider(updatedProvider);
+  }, [settings, onUpdateSettings]);
+
+  const handleDeleteProvider = useCallback((providerId: string) => {
+    const newProviders = settings.providers.filter(p => p.id !== providerId);
+    onUpdateSettings({ ...settings, providers: newProviders });
+    setEditingProvider(null);
+  }, [settings, onUpdateSettings]);
+
+  const handleAddProvider = useCallback(() => {
+    const newProvider = createProvider("新平台");
+    const newProviders = [...settings.providers, newProvider];
+    onUpdateSettings({ ...settings, providers: newProviders });
+    setEditingProvider(newProvider);
+    setExpandedProviders(prev => new Set([...prev, newProvider.id]));
+  }, [settings, onUpdateSettings]);
+
+  const handleDeleteModel = useCallback((providerId: string, modelId: string) => {
+    const provider = settings.providers.find(p => p.id === providerId);
+    if (!provider) return;
+    
+    const updatedProvider = {
+      ...provider,
+      models: provider.models.filter(m => m.id !== modelId),
+    };
+    handleUpdateProvider(updatedProvider);
+  }, [settings.providers, handleUpdateProvider]);
+
+  // 如果正在编辑平台，显示配置面板
+  if (editingProvider) {
+    return createElement(
+      "div",
+      { style: menuContainerStyle },
+      createElement(ProviderConfigPanel, {
+        provider: editingProvider,
+        onUpdate: handleUpdateProvider,
+        onDelete: editingProvider.isBuiltin ? undefined : () => handleDeleteProvider(editingProvider.id),
+        onClose: () => setEditingProvider(null),
+      })
+    );
+  }
 
   return createElement(
     "div",
     { style: menuContainerStyle },
     createElement(
       "div",
-      { style: menuFlexStyle },
-      createElement(ModelListPanel, {
-        modelGroups,
-        selectedModel,
-        onModelChange,
-        modelFilter,
-        onFilterChange: setModelFilter,
-        close,
+      { style: { ...modelListPanelStyle, minWidth: "320px" } },
+      // 搜索框
+      createElement(Input as any, {
+        placeholder: "搜索模型...",
+        value: filter,
+        onChange: (e: any) => setFilter(e.target.value),
+        pre: createElement("i", { className: "ti ti-search" }),
+        style: { width: "100%", maxWidth: "100%", boxSizing: "border-box", marginBottom: "8px" },
       }),
-      createElement(AddModelPanel, {
-        onAdd: handleAddModel,
-        isAdding: addingModel,
-      })
+      
+      // 平台列表
+      createElement(
+        "div",
+        { style: modelListScrollStyle },
+        filteredProviders.length === 0
+          ? createElement(
+              "div",
+              { style: { padding: "16px", textAlign: "center", color: "var(--orca-color-text-3)" } },
+              "未找到匹配的模型"
+            )
+          : filteredProviders.map(provider =>
+              createElement(ProviderGroup, {
+                key: provider.id,
+                provider,
+                selectedModelId: provider.id === selectedProviderId ? selectedModelId : "",
+                defaultModelId: settings.selectedModelId,
+                defaultProviderId: settings.selectedProviderId,
+                onSelectModel: (modelId: string) => handleSelectModel(provider.id, modelId),
+                onSetDefaultModel: (modelId: string) => handleSetDefaultModel(provider.id, modelId),
+                onDeleteModel: !provider.isBuiltin ? (modelId: string) => handleDeleteModel(provider.id, modelId) : undefined,
+                onEditProvider: () => setEditingProvider(provider),
+                isExpanded: expandedProviders.has(provider.id),
+                onToggle: () => toggleProvider(provider.id),
+              })
+            )
+      ),
+      
+      // 添加平台按钮
+      createElement(
+        "div",
+        { style: { borderTop: "1px solid var(--orca-color-border)", paddingTop: "8px", marginTop: "8px" } },
+        createElement(
+          Button,
+          {
+            variant: "ghost",
+            onClick: handleAddProvider,
+            style: { width: "100%", justifyContent: "center" },
+          },
+          createElement("i", { className: "ti ti-plus", style: { marginRight: "4px" } }),
+          "新建平台"
+        )
+      )
     )
   );
 }

@@ -57,171 +57,9 @@ const DEFAULT_SYSTEM_PROMPT = `你是一个笔记库智能助手，帮助用户�
 - 所有尝试失败时：说明尝试了哪些方法、可能原因、给出建议
 `;
 
-
-export async function registerAiChatSettingsSchema(
-  pluginName: string,
-): Promise<void> {
-  const isZh = orca.state.locale === "zh-CN";
-  await orca.plugins.setSettingsSchema(pluginName, {
-    apiKey: {
-      label: "API Key",
-      type: "string",
-      defaultValue: "",
-    },
-    apiUrl: {
-      label: "API URL",
-      type: "string",
-      defaultValue: "https://api.openai.com/v1",
-    },
-    model: {
-      label: "AI Model",
-      type: "singleChoice",
-      choices: [
-        { label: "GPT-4o Mini", value: "gpt-4o-mini" },
-        { label: "GPT-4o", value: "gpt-4o" },
-        { label: "Custom", value: "custom" },
-      ],
-      defaultValue: "gpt-4o-mini",
-    },
-    customModel: {
-      label: "Custom Model Name",
-      type: "string",
-      defaultValue: "",
-    },
-    customModels: {
-      label: isZh ? "自定义模型" : "Custom Models",
-      description: isZh
-        ? "添加自定义模型，每个模型可配置独立的 API 地址和密钥"
-        : "Add custom models with optional independent API URL and Key",
-      type: "array",
-      defaultValue: [],
-      arrayItemSchema: {
-        model: {
-          label: isZh ? "模型名称" : "Model Name",
-          type: "string",
-          defaultValue: "",
-        },
-        label: {
-          label: isZh ? "显示名称（可选）" : "Display Name (optional)",
-          type: "string",
-          defaultValue: "",
-        },
-        apiUrl: {
-          label: isZh ? "API 地址（留空使用全局）" : "API URL (empty = use global)",
-          type: "string",
-          defaultValue: "",
-        },
-        apiKey: {
-          label: isZh ? "API 密钥（留空使用全局）" : "API Key (empty = use global)",
-          type: "string",
-          defaultValue: "",
-        },
-        inputPrice: {
-          label: isZh ? "输入价格 ($/百万Token)" : "Input Price ($/M tokens)",
-          type: "number",
-          defaultValue: 0,
-        },
-        outputPrice: {
-          label: isZh ? "输出价格 ($/百万Token)" : "Output Price ($/M tokens)",
-          type: "number",
-          defaultValue: 0,
-        },
-        capabilities: {
-          label: isZh ? "模型能力" : "Capabilities",
-          type: "multiChoices",
-          choices: [
-            { label: isZh ? "视觉" : "Vision", value: "vision" },
-            { label: isZh ? "联网" : "Web", value: "web" },
-            { label: isZh ? "推理" : "Reasoning", value: "reasoning" },
-            { label: isZh ? "工具" : "Tools", value: "tools" },
-            { label: isZh ? "重排" : "Rerank", value: "rerank" },
-            { label: isZh ? "嵌入" : "Embedding", value: "embedding" },
-          ],
-          defaultValue: [],
-        },
-      },
-    },
-    systemPrompt: {
-      label: "System Prompt",
-      type: "string",
-      defaultValue: DEFAULT_SYSTEM_PROMPT,
-    },
-    temperature: {
-      label: "Temperature",
-      type: "number",
-      defaultValue: 0.7,
-    },
-	    maxTokens: {
-	      label: "Max Tokens",
-	      type: "number",
-	      defaultValue: 4096,
-	    },
-	    maxToolRounds: {
-	      // 工具调用最大轮数：复杂查询场景下允许 AI 多次尝试（会增加响应时间和成本）
-	      label: isZh ? "工具调用最大轮数" : "Max Tool Rounds",
-	      description: isZh
-	        ? "AI 可以连续调用工具的最大轮数（3-10）。增加轮数可以让 AI 在复杂场景下有更多尝试机会，但会增加响应时间和成本。"
-	        : "Maximum rounds AI can call tools consecutively (3-10). More rounds allow AI to handle complex queries better, but increase response time and cost.",
-	      type: "number",
-	      defaultValue: 5,
-	      min: 3,
-	      max: 10,
-	    },
-	    autoSaveChat: {
-	      label: "Auto Save Chat",
-	      description: "When to automatically save chat history",
-	      type: "singleChoice",
-	      choices: [
-        { label: "On Close", value: "on_close" },
-        { label: "Manual Only", value: "manual" },
-        { label: "Never", value: "never" },
-      ],
-      defaultValue: "manual",
-    },
-    maxSavedSessions: {
-      label: "Max Saved Sessions",
-      description: "Maximum number of saved chat sessions (oldest will be deleted when exceeded)",
-      type: "number",
-      defaultValue: 10,
-    },
-    currency: {
-      label: isZh ? "价格币种" : "Currency",
-      description: isZh ? "用于显示预估费用的货币单位" : "Currency unit for estimated cost display",
-      type: "singleChoice",
-      choices: [
-        { label: "USD ($)", value: "USD" },
-        { label: "CNY (¥)", value: "CNY" },
-        { label: "EUR (€)", value: "EUR" },
-        { label: "JPY (¥)", value: "JPY" },
-      ],
-      defaultValue: "USD",
-    },
-  });
-}
-
-export type CurrencyType = "USD" | "CNY" | "EUR" | "JPY";
-
-export const CURRENCY_SYMBOLS: Record<CurrencyType, string> = {
-  USD: "$",
-  CNY: "¥",
-  EUR: "€",
-  JPY: "¥",
-};
-
-export type AiChatSettings = {
-	apiKey: string;
-	apiUrl: string;
-	model: string;
-	customModel: string;
-	customModels: AiModelPreset[];
-	systemPrompt: string;
-	temperature: number;
-	maxTokens: number;
-	maxToolRounds: number;
-	autoSaveChat: "on_close" | "manual" | "never";
-	maxSavedSessions: number;
-	currency: CurrencyType;
-};
+// ═══════════════════════════════════════════════════════════════════════════
+// 类型定义
+// ═══════════════════════════════════════════════════════════════════════════
 
 /** 模型能力类型 */
 export type ModelCapability = "vision" | "web" | "reasoning" | "tools" | "rerank" | "embedding";
@@ -236,35 +74,124 @@ export const MODEL_CAPABILITY_LABELS: Record<ModelCapability, { label: string; i
   embedding: { label: "嵌入", icon: "ti ti-vector", color: "#6366f1" },
 };
 
-export type AiModelPreset = {
-  label?: string;
-  model: string;
-  /** 自定义 API URL（留空则使用全局设置） */
-  apiUrl?: string;
-  /** 自定义 API Key（留空则使用全局设置） */
-  apiKey?: string;
-  /** 输入价格，单位：每百万Token */
-  inputPrice?: number;
-  /** 输出价格，单位：每百万Token */
-  outputPrice?: number;
-  /** 模型能力标签 */
+/** 平台下的模型配置 */
+export type ProviderModel = {
+  id: string;              // 模型 ID（如 gpt-4o）
+  label?: string;          // 显示名称（可选）
+  inputPrice?: number;     // 输入价格 $/M tokens
+  outputPrice?: number;    // 输出价格 $/M tokens
   capabilities?: ModelCapability[];
+  // 模型级别的设置
+  temperature?: number;    // 温度（0-2）
+  maxTokens?: number;      // 最大输出 token
+  maxToolRounds?: number;  // 工具调用最大轮数
+  currency?: CurrencyType; // 价格币种
 };
 
-export const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
-	apiKey: "",
-	apiUrl: "https://api.openai.com/v1",
-	model: "gpt-4o-mini",
-	customModel: "",
-	customModels: [],
-	systemPrompt: DEFAULT_SYSTEM_PROMPT,
-	temperature: 0.7,
-	maxTokens: 4096,
-	maxToolRounds: 5,
-	autoSaveChat: "manual",
-	maxSavedSessions: 10,
-	currency: "USD",
+/** AI 平台/提供商配置 */
+export type AiProvider = {
+  id: string;              // 平台唯一 ID
+  name: string;            // 平台显示名称
+  apiUrl: string;          // API 地址
+  apiKey: string;          // API 密钥
+  models: ProviderModel[]; // 该平台下的模型列表
+  enabled: boolean;        // 是否启用
+  isBuiltin?: boolean;     // 是否为内置平台（不可删除）
 };
+
+export type CurrencyType = "USD" | "CNY" | "EUR" | "JPY";
+
+export const CURRENCY_SYMBOLS: Record<CurrencyType, string> = {
+  USD: "$",
+  CNY: "¥",
+  EUR: "€",
+  JPY: "¥",
+};
+
+/** 新的设置结构 */
+export type AiChatSettings = {
+  providers: AiProvider[];           // 平台列表
+  selectedProviderId: string;        // 当前选中的平台 ID
+  selectedModelId: string;           // 当前选中的模型 ID
+  systemPrompt: string;
+  // 以下为全局默认值，模型可以覆盖
+  temperature: number;
+  maxTokens: number;
+  maxToolRounds: number;
+  currency: CurrencyType;
+  // 兼容旧版本的字段（迁移用）
+  apiKey?: string;
+  apiUrl?: string;
+  model?: string;
+  customModel?: string;
+  customModels?: any[];
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 默认平台配置
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DEFAULT_PROVIDERS: AiProvider[] = [
+  {
+    id: "openai",
+    name: "OpenAI",
+    apiUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    enabled: true,
+    isBuiltin: true,
+    models: [
+      { id: "gpt-4o", label: "GPT-4o", inputPrice: 2.5, outputPrice: 10, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
+      { id: "gpt-4o-mini", label: "GPT-4o Mini", inputPrice: 0.15, outputPrice: 0.6, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
+      { id: "o1", label: "o1", inputPrice: 15, outputPrice: 60, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
+      { id: "o1-mini", label: "o1 Mini", inputPrice: 3, outputPrice: 12, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
+    ],
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    apiUrl: "https://api.deepseek.com/v1",
+    apiKey: "",
+    enabled: true,
+    isBuiltin: true,
+    models: [
+      { id: "deepseek-chat", label: "DeepSeek Chat", inputPrice: 0.14, outputPrice: 0.28, capabilities: ["tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
+      { id: "deepseek-reasoner", label: "DeepSeek Reasoner", inputPrice: 0.55, outputPrice: 2.19, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
+    ],
+  },
+];
+
+export const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
+  providers: DEFAULT_PROVIDERS,
+  selectedProviderId: "openai",
+  selectedModelId: "gpt-4o-mini",
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  // 全局默认值（模型未设置时使用）
+  temperature: 0.7,
+  maxTokens: 4096,
+  maxToolRounds: 5,
+  currency: "USD",
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 设置 Schema 注册
+// ═══════════════════════════════════════════════════════════════════════════
+
+const PROVIDERS_STORAGE_KEY = "ai-providers-config";
+
+export async function registerAiChatSettingsSchema(
+  pluginName: string,
+): Promise<void> {
+  // 只注册需要在设置页面显示的字段
+  await orca.plugins.setSettingsSchema(pluginName, {
+    // 系统提示词（在设置页面显示）
+    systemPrompt: { label: "System Prompt", type: "string", defaultValue: DEFAULT_SYSTEM_PROMPT },
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 工具函数
+// ═══════════════════════════════════════════════════════════════════════════
 
 function toNumber(value: unknown, fallback: number): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -280,57 +207,6 @@ function toString(value: unknown, fallback: string): string {
   return fallback;
 }
 
-function toModelPresets(value: unknown, fallback: AiModelPreset[]): AiModelPreset[] {
-  if (!Array.isArray(value)) return fallback;
-
-  const out: AiModelPreset[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const rawLabel = (item as any).label;
-    const rawModel = (item as any).model;
-    const rawApiUrl = (item as any).apiUrl;
-    const rawApiKey = (item as any).apiKey;
-    const rawInputPrice = (item as any).inputPrice;
-    const rawOutputPrice = (item as any).outputPrice;
-    const rawCapabilities = (item as any).capabilities;
-    
-    const model = typeof rawModel === "string" ? rawModel.trim() : "";
-    if (!model) continue;
-    const label = typeof rawLabel === "string" ? rawLabel.trim() : "";
-    const apiUrl = typeof rawApiUrl === "string" ? rawApiUrl.trim() : undefined;
-    const apiKey = typeof rawApiKey === "string" ? rawApiKey.trim() : undefined;
-    const inputPrice = typeof rawInputPrice === "number" && rawInputPrice >= 0 ? rawInputPrice : undefined;
-    const outputPrice = typeof rawOutputPrice === "number" && rawOutputPrice >= 0 ? rawOutputPrice : undefined;
-    const capabilities = Array.isArray(rawCapabilities) 
-      ? rawCapabilities.filter((c): c is ModelCapability => 
-          ["vision", "web", "reasoning", "tools", "rerank", "embedding"].includes(c)
-        )
-      : undefined;
-    
-    out.push({ label, model, apiUrl: apiUrl || undefined, apiKey: apiKey || undefined, inputPrice, outputPrice, capabilities });
-  }
-
-  const seen = new Set<string>();
-  const unique: AiModelPreset[] = [];
-  for (const item of out) {
-    if (seen.has(item.model)) continue;
-    seen.add(item.model);
-    unique.push(item);
-  }
-
-  return unique;
-}
-
-function toAutoSaveChoice(
-  value: unknown,
-  fallback: "on_close" | "manual" | "never",
-): "on_close" | "manual" | "never" {
-  if (value === "on_close" || value === "manual" || value === "never") {
-    return value;
-  }
-  return fallback;
-}
-
 function toCurrency(value: unknown, fallback: CurrencyType): CurrencyType {
   if (value === "USD" || value === "CNY" || value === "EUR" || value === "JPY") {
     return value;
@@ -338,137 +214,246 @@ function toCurrency(value: unknown, fallback: CurrencyType): CurrencyType {
   return fallback;
 }
 
-export function getAiChatSettings(pluginName: string): AiChatSettings {
-	const raw = (orca.state.plugins as any)?.[pluginName]?.settings ?? {};
-	const merged: AiChatSettings = {
-		apiKey: toString(raw.apiKey, DEFAULT_AI_CHAT_SETTINGS.apiKey),
-		apiUrl: toString(raw.apiUrl, DEFAULT_AI_CHAT_SETTINGS.apiUrl),
-		model: toString(raw.model, DEFAULT_AI_CHAT_SETTINGS.model),
-		customModel: toString(raw.customModel, DEFAULT_AI_CHAT_SETTINGS.customModel),
-		customModels: toModelPresets(raw.customModels, DEFAULT_AI_CHAT_SETTINGS.customModels),
-		systemPrompt: toString(raw.systemPrompt, DEFAULT_AI_CHAT_SETTINGS.systemPrompt),
-		temperature: toNumber(raw.temperature, DEFAULT_AI_CHAT_SETTINGS.temperature),
-		maxTokens: toNumber(raw.maxTokens, DEFAULT_AI_CHAT_SETTINGS.maxTokens),
-		maxToolRounds: toNumber(raw.maxToolRounds, DEFAULT_AI_CHAT_SETTINGS.maxToolRounds),
-		autoSaveChat: toAutoSaveChoice(raw.autoSaveChat, DEFAULT_AI_CHAT_SETTINGS.autoSaveChat),
-		maxSavedSessions: toNumber(raw.maxSavedSessions, DEFAULT_AI_CHAT_SETTINGS.maxSavedSessions),
-		currency: toCurrency(raw.currency, DEFAULT_AI_CHAT_SETTINGS.currency),
-	};
+// ═══════════════════════════════════════════════════════════════════════════
+// 获取和更新设置
+// ═══════════════════════════════════════════════════════════════════════════
 
-  merged.apiUrl = merged.apiUrl.trim();
-  merged.apiKey = merged.apiKey.trim();
-  merged.model = merged.model.trim();
-	merged.customModel = merged.customModel.trim();
-	merged.temperature = Math.max(0, Math.min(2, merged.temperature));
-	merged.maxTokens = Math.max(1, Math.floor(merged.maxTokens));
-	merged.maxToolRounds = Math.max(3, Math.min(10, Math.floor(merged.maxToolRounds)));
-	merged.maxSavedSessions = Math.max(1, Math.floor(merged.maxSavedSessions));
-
-	return merged;
-}
-
-export type AiModelOption = {
-  value: string;
-  label: string;
-  group?: string;
-  /** 自定义 API URL */
-  apiUrl?: string;
-  /** 自定义 API Key */
-  apiKey?: string;
-  /** 输入价格，单位：每百万Token */
-  inputPrice?: number;
-  /** 输出价格，单位：每百万Token */
-  outputPrice?: number;
-  /** 模型能力标签 */
-  capabilities?: ModelCapability[];
+/** 存储的配置数据结构 */
+type StoredConfig = {
+  providers: AiProvider[];
+  selectedProviderId: string;
+  selectedModelId: string;
+  temperature: number;
+  maxTokens: number;
+  maxToolRounds: number;
+  currency: CurrencyType;
 };
 
-const BUILTIN_MODEL_OPTIONS: AiModelOption[] = [
-  { value: "gpt-4o-mini", label: "GPT-4o Mini", group: "Built-in", inputPrice: 0.15, outputPrice: 0.6, capabilities: ["vision", "tools"] },
-  { value: "gpt-4o", label: "GPT-4o", group: "Built-in", inputPrice: 2.5, outputPrice: 10, capabilities: ["vision", "tools"] },
-];
+// 内存缓存（避免频繁读取）
+let cachedConfig: StoredConfig | null = null;
+let cachePluginName: string | null = null;
 
-export function buildAiModelOptions(
-  settings: AiChatSettings,
-  extraModels: string[] = [],
-): AiModelOption[] {
-  const seen = new Set<string>();
-  const out: AiModelOption[] = [];
+/** 从存储加载配置 */
+async function loadStoredConfig(pluginName: string): Promise<StoredConfig | null> {
+  try {
+    const raw = await orca.plugins.getData(pluginName, PROVIDERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      console.log("[ai-chat-settings] Loaded config from storage:", {
+        providersCount: parsed.providers?.length,
+        selectedProviderId: parsed.selectedProviderId,
+        selectedModelId: parsed.selectedModelId,
+      });
+      return parsed;
+    }
+  } catch (e) {
+    console.warn("[ai-chat-settings] Failed to load config:", e);
+  }
+  return null;
+}
 
-  const add = (opt: AiModelOption) => {
-    const v = opt.value.trim();
-    if (!v) return;
-    if (seen.has(v)) return;
-    seen.add(v);
-    out.push({ ...opt, value: v, label: (opt.label || v).trim() });
+/** 保存配置到存储 */
+async function saveStoredConfig(pluginName: string, config: StoredConfig): Promise<void> {
+  try {
+    await orca.plugins.setData(pluginName, PROVIDERS_STORAGE_KEY, JSON.stringify(config));
+    cachedConfig = config;
+    cachePluginName = pluginName;
+    console.log("[ai-chat-settings] Config saved to storage");
+  } catch (e) {
+    console.error("[ai-chat-settings] Failed to save config:", e);
+    throw e;
+  }
+}
+
+/** 同步获取设置（使用缓存，首次需要先调用 initAiChatSettings） */
+export function getAiChatSettings(pluginName: string): AiChatSettings {
+  const raw = (orca.state.plugins as any)?.[pluginName]?.settings ?? {};
+  
+  // 使用缓存的配置
+  const config = (cachePluginName === pluginName && cachedConfig) ? cachedConfig : null;
+  
+  // 如果有缓存，使用缓存的 providers
+  const providers = config?.providers || JSON.parse(JSON.stringify(DEFAULT_PROVIDERS));
+  
+  // 兼容旧版迁移
+  if (!config && raw.apiKey) {
+    const openai = providers.find((p: AiProvider) => p.id === "openai");
+    if (openai) {
+      openai.apiKey = raw.apiKey;
+      if (raw.apiUrl) openai.apiUrl = raw.apiUrl;
+    }
+  }
+  
+  const merged: AiChatSettings = {
+    providers,
+    selectedProviderId: config?.selectedProviderId || DEFAULT_AI_CHAT_SETTINGS.selectedProviderId,
+    selectedModelId: config?.selectedModelId || DEFAULT_AI_CHAT_SETTINGS.selectedModelId,
+    systemPrompt: toString(raw.systemPrompt, DEFAULT_AI_CHAT_SETTINGS.systemPrompt),
+    temperature: config?.temperature ?? DEFAULT_AI_CHAT_SETTINGS.temperature,
+    maxTokens: config?.maxTokens ?? DEFAULT_AI_CHAT_SETTINGS.maxTokens,
+    maxToolRounds: config?.maxToolRounds ?? DEFAULT_AI_CHAT_SETTINGS.maxToolRounds,
+    currency: config?.currency ?? DEFAULT_AI_CHAT_SETTINGS.currency,
   };
 
-  for (const opt of BUILTIN_MODEL_OPTIONS) add(opt);
+  merged.temperature = Math.max(0, Math.min(2, merged.temperature));
+  merged.maxTokens = Math.max(1, Math.floor(merged.maxTokens));
+  merged.maxToolRounds = Math.max(3, Math.min(10, Math.floor(merged.maxToolRounds)));
 
-  for (const item of settings.customModels) {
-    add({
-      value: item.model,
-      label: item.label || item.model,
-      group: "Custom",
-      apiUrl: item.apiUrl,
-      apiKey: item.apiKey,
-      inputPrice: item.inputPrice,
-      outputPrice: item.outputPrice,
-      capabilities: item.capabilities,
-    });
-  }
-  if (settings.customModel.trim()) {
-    add({ value: settings.customModel, label: settings.customModel, group: "Custom" });
-  }
-
-  for (const m of extraModels) add({ value: m, label: m, group: "Other" });
-
-  return out;
+  return merged;
 }
 
-export function resolveAiModel(settings: AiChatSettings): string {
-  if (settings.model === "custom") return settings.customModel.trim();
-  return settings.model.trim();
+/** 初始化设置（异步加载存储的配置） */
+export async function initAiChatSettings(pluginName: string): Promise<void> {
+  const config = await loadStoredConfig(pluginName);
+  if (config) {
+    cachedConfig = config;
+    cachePluginName = pluginName;
+  }
 }
 
-export function validateAiChatSettings(settings: AiChatSettings): string | null {
-  if (!settings.apiUrl.trim()) return "Missing API URL (Settings → API URL)";
-  if (!settings.apiKey.trim()) return "Missing API Key (Settings → API Key)";
-  const model = resolveAiModel(settings);
-  if (!model) return "Missing model (Settings → AI Model / Custom Model Name)";
+export async function updateAiChatSettings(
+  to: "app" | "repo",
+  pluginName: string,
+  patch: Partial<AiChatSettings>,
+): Promise<void> {
+  const current = getAiChatSettings(pluginName);
+  const next = { ...current, ...patch };
+  
+  // 构建存储配置
+  const config: StoredConfig = {
+    providers: next.providers,
+    selectedProviderId: next.selectedProviderId,
+    selectedModelId: next.selectedModelId,
+    temperature: next.temperature,
+    maxTokens: next.maxTokens,
+    maxToolRounds: next.maxToolRounds,
+    currency: next.currency,
+  };
+  
+  console.log("[ai-chat-settings] Saving config:", {
+    selectedProviderId: config.selectedProviderId,
+    selectedModelId: config.selectedModelId,
+    providersCount: config.providers.length,
+  });
+  
+  // 保存到 data 存储
+  await saveStoredConfig(pluginName, config);
+  
+  // 同时保存 systemPrompt 到 settings（用于设置页面）
+  if (patch.systemPrompt !== undefined) {
+    await orca.plugins.setSettings(to, pluginName, { systemPrompt: next.systemPrompt });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 平台和模型操作
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** 获取当前选中的平台 */
+export function getSelectedProvider(settings: AiChatSettings): AiProvider | undefined {
+  return settings.providers.find(p => p.id === settings.selectedProviderId);
+}
+
+/** 获取当前选中的模型 */
+export function getSelectedModel(settings: AiChatSettings): ProviderModel | undefined {
+  const provider = getSelectedProvider(settings);
+  return provider?.models.find(m => m.id === settings.selectedModelId);
+}
+
+/** 获取当前 API 配置 */
+export function getCurrentApiConfig(settings: AiChatSettings): { apiUrl: string; apiKey: string; model: string } {
+  const provider = getSelectedProvider(settings);
+  return {
+    apiUrl: provider?.apiUrl || "",
+    apiKey: provider?.apiKey || "",
+    model: settings.selectedModelId,
+  };
+}
+
+/** 获取当前模型的完整配置（包括模型级别的设置，回退到全局默认值） */
+export function getModelConfig(settings: AiChatSettings, modelId?: string): {
+  temperature: number;
+  maxTokens: number;
+  maxToolRounds: number;
+  currency: CurrencyType;
+  inputPrice: number;
+  outputPrice: number;
+} {
+  const targetModelId = modelId || settings.selectedModelId;
+  
+  // 查找模型
+  let model: ProviderModel | undefined;
+  for (const provider of settings.providers) {
+    model = provider.models.find(m => m.id === targetModelId);
+    if (model) break;
+  }
+  
+  return {
+    temperature: model?.temperature ?? settings.temperature,
+    maxTokens: model?.maxTokens ?? settings.maxTokens,
+    maxToolRounds: model?.maxToolRounds ?? settings.maxToolRounds,
+    currency: model?.currency ?? settings.currency,
+    inputPrice: model?.inputPrice ?? 0,
+    outputPrice: model?.outputPrice ?? 0,
+  };
+}
+
+/** 验证当前配置是否完整 */
+export function validateCurrentConfig(settings: AiChatSettings): string | null {
+  const provider = getSelectedProvider(settings);
+  if (!provider) return "请选择一个平台";
+  if (!provider.apiUrl.trim()) return `请设置 ${provider.name} 的 API 地址`;
+  if (!provider.apiKey.trim()) return `请设置 ${provider.name} 的 API 密钥`;
+  if (!settings.selectedModelId.trim()) return "请选择一个模型";
   return null;
 }
 
-export function validateAiChatSettingsWithModel(
-  settings: AiChatSettings,
-  modelOverride: string,
-): string | null {
-  if (!settings.apiUrl.trim()) return "Missing API URL (Settings → API URL)";
-  if (!settings.apiKey.trim()) return "Missing API Key (Settings → API Key)";
-  if (!modelOverride.trim()) return "Missing model (Select a model or check Settings)";
-  return null;
+/** 创建新平台 */
+export function createProvider(name: string): AiProvider {
+  return {
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: name || "新平台",
+    apiUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    enabled: true,
+    models: [],
+  };
 }
 
-/**
- * 获取指定模型的 API 配置
- * 如果模型有自定义配置则使用，否则使用全局配置
- */
+/** 添加模型到平台 */
+export function addModelToProvider(provider: AiProvider, modelId: string, label?: string): ProviderModel {
+  const model: ProviderModel = {
+    id: modelId,
+    label: label || modelId,
+  };
+  provider.models.push(model);
+  return model;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 兼容旧版 API（逐步废弃）
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** @deprecated 使用 getCurrentApiConfig */
 export function getModelApiConfig(
   settings: AiChatSettings,
   modelName: string,
 ): { apiUrl: string; apiKey: string } {
-  // 查找自定义模型配置
-  const customModel = settings.customModels.find(m => m.model === modelName);
-  
-  return {
-    apiUrl: (customModel?.apiUrl?.trim() || settings.apiUrl).trim(),
-    apiKey: (customModel?.apiKey?.trim() || settings.apiKey).trim(),
-  };
+  // 查找包含该模型的平台
+  for (const provider of settings.providers) {
+    if (provider.models.find(m => m.id === modelName)) {
+      return {
+        apiUrl: provider.apiUrl,
+        apiKey: provider.apiKey,
+      };
+    }
+  }
+  // 回退到当前选中的平台
+  const current = getCurrentApiConfig(settings);
+  return { apiUrl: current.apiUrl, apiKey: current.apiKey };
 }
 
-/**
- * 验证模型的 API 配置是否完整
- */
+/** @deprecated 使用 validateCurrentConfig */
 export function validateModelApiConfig(
   settings: AiChatSettings,
   modelName: string,
@@ -480,12 +465,64 @@ export function validateModelApiConfig(
   return null;
 }
 
-export async function updateAiChatSettings(
-  to: "app" | "repo",
-  pluginName: string,
-  patch: Partial<AiChatSettings>,
-): Promise<void> {
-  const current = getAiChatSettings(pluginName);
-  const next: AiChatSettings = { ...current, ...patch };
-  await orca.plugins.setSettings(to, pluginName, next);
+/** 构建模型选项列表（用于下拉菜单） */
+export type AiModelOption = {
+  value: string;
+  label: string;
+  group?: string;
+  providerId?: string;
+  apiUrl?: string;
+  apiKey?: string;
+  inputPrice?: number;
+  outputPrice?: number;
+  capabilities?: ModelCapability[];
+};
+
+export function buildAiModelOptions(settings: AiChatSettings): AiModelOption[] {
+  const options: AiModelOption[] = [];
+  
+  for (const provider of settings.providers) {
+    if (!provider.enabled) continue;
+    
+    for (const model of provider.models) {
+      options.push({
+        value: model.id,
+        label: model.label || model.id,
+        group: provider.name,
+        providerId: provider.id,
+        apiUrl: provider.apiUrl,
+        apiKey: provider.apiKey,
+        inputPrice: model.inputPrice,
+        outputPrice: model.outputPrice,
+        capabilities: model.capabilities,
+      });
+    }
+  }
+  
+  return options;
 }
+
+/** @deprecated */
+export function resolveAiModel(settings: AiChatSettings): string {
+  return settings.selectedModelId;
+}
+
+/** @deprecated */
+export function validateAiChatSettings(settings: AiChatSettings): string | null {
+  return validateCurrentConfig(settings);
+}
+
+/** @deprecated */
+export function validateAiChatSettingsWithModel(
+  settings: AiChatSettings,
+  modelOverride: string,
+): string | null {
+  const config = getModelApiConfig(settings, modelOverride);
+  if (!config.apiUrl) return "Missing API URL";
+  if (!config.apiKey) return "Missing API Key";
+  if (!modelOverride.trim()) return "Missing model";
+  return null;
+}
+
+// 兼容旧版类型
+export type AiModelPreset = ProviderModel;

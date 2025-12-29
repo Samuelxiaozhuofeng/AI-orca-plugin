@@ -143,19 +143,38 @@ export async function saveSessionToJournal(session: SavedSession): Promise<{ suc
     const title = session.title || "AI 对话";
     const simplifiedMessages = simplifyMessages(session.messages);
     
+    console.log("[export-service] saveSessionToJournal called, messages:", simplifiedMessages.length);
+    
     if (simplifiedMessages.length === 0) {
       return { success: false, message: "没有可保存的消息" };
     }
     
-    // 获取今日日记
-    const today = new Date();
-    const journalResult = await orca.invokeBackend("get-journal", today.getTime());
+    // 获取今日日记 - 使用 get-journal-block API
+    console.log("[export-service] Calling get-journal-block...");
+    const journalResult = await orca.invokeBackend("get-journal-block", new Date());
+    console.log("[export-service] get-journal-block result:", journalResult);
     
     if (!journalResult) {
-      return { success: false, message: "获取今日日记失败" };
+      console.error("[export-service] journalResult is null/undefined");
+      return { success: false, message: "获取今日日记失败，请确保已创建今日日记" };
     }
     
-    const journalId = typeof journalResult === "number" ? journalResult : (journalResult as any).id;
+    // 处理可能的包装格式 - Orca 后端可能返回 { result: block } 或直接返回 block
+    let journalBlock = journalResult;
+    if ((journalResult as any)?.result !== undefined) {
+      journalBlock = (journalResult as any).result;
+    }
+    
+    console.log("[export-service] journalBlock:", journalBlock);
+    
+    const journalId = typeof journalBlock === "number" ? journalBlock : (journalBlock as any)?.id;
+    
+    if (!journalId) {
+      console.error("[export-service] Cannot extract journalId from:", journalBlock);
+      return { success: false, message: "获取今日日记失败，返回格式异常" };
+    }
+    
+    console.log("[export-service] journalId:", journalId);
     
     // 使用自定义块类型创建对话块
     const blockType = getAiChatBlockType();
@@ -168,6 +187,7 @@ export async function saveSessionToJournal(session: SavedSession): Promise<{ suc
     };
     
     // 在日记中添加自定义块
+    console.log("[export-service] Inserting block to journal...");
     await orca.invokeBackend("insert-blocks", journalId, "append", [{
       text: "",
       properties: [
@@ -175,6 +195,7 @@ export async function saveSessionToJournal(session: SavedSession): Promise<{ suc
       ],
     }]);
     
+    console.log("[export-service] Successfully saved to journal");
     return { success: true, message: "已保存到今日日记" };
   } catch (err: any) {
     console.error("[export-service] Failed to save to journal:", err);

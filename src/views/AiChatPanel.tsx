@@ -21,12 +21,13 @@ import ChatNavigation from "../components/ChatNavigation";
 import FlashcardReview, { type Flashcard } from "../components/FlashcardReview";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
-  buildAiModelOptions,
   getAiChatSettings,
   getModelApiConfig,
-  resolveAiModel,
+  getCurrentApiConfig,
+  getSelectedProvider,
   updateAiChatSettings,
-  validateAiChatSettingsWithModel,
+  validateCurrentConfig,
+  type AiChatSettings,
 } from "../settings/ai-chat-settings";
 import {
   loadSessions,
@@ -116,8 +117,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [currentSession, setCurrentSession] = useState<SavedSession>(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const model = resolveAiModel(settings);
-    return { ...createNewSession(), model };
+    return { ...createNewSession(), model: settings.selectedModelId };
   });
   const [sessions, setSessions] = useState<SavedSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -151,7 +151,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   useEffect(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     loadSessions().then((data) => {
       setSessions(data.sessions);
@@ -175,7 +175,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleNewSession = useCallback(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     setCurrentSession({ ...createNewSession(), model: defaultModel });
     setMessages([
@@ -193,7 +193,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleSelectSession = useCallback(async (sessionId: string) => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
@@ -510,7 +510,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      };
 	      const conversationForFlashcard: Message[] = [...historyMessages, flashcardRequestMsg];
 	      
-	      const model = (currentSession.model || "").trim() || resolveAiModel(settings);
+	      const model = (currentSession.model || "").trim() || settings.selectedModelId;
 	      const memoryText = memoryStore.getFullMemoryText();
 	      
 	      // 构建上下文
@@ -604,8 +604,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    const currentChatMode = getMode();
 	    const includeTools = currentChatMode !== 'ask';
 
-	    const model = (currentSession.model || "").trim() || resolveAiModel(settings);
-	    const validationError = validateAiChatSettingsWithModel(settings, model);
+	    const model = (currentSession.model || "").trim() || settings.selectedModelId;
+	    const validationError = validateCurrentConfig(settings);
 	    if (validationError) {
 	      orca.notify("warn", validationError);
       return;
@@ -1183,34 +1183,39 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [rootBlockId]);
 
   const pluginNameForUi = getAiChatPluginName();
-  const settingsForUi = getAiChatSettings(pluginNameForUi);
-  const defaultModelForUi = resolveAiModel(settingsForUi);
-  const selectedModel = (currentSession.model || "").trim() || defaultModelForUi;
-  const modelOptions = buildAiModelOptions(settingsForUi, [selectedModel]);
+  // 使用 settingsVersion 来强制重新获取设置
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  const settingsForUi = useMemo(() => getAiChatSettings(pluginNameForUi), [pluginNameForUi, settingsVersion]);
+  const selectedModel = (currentSession.model || "").trim() || settingsForUi.selectedModelId;
 
+  // 新的模型选择处理：同时更新 providerId 和 modelId
+  const handleModelSelect = useCallback((providerId: string, modelId: string) => {
+    setCurrentSession((prev) => ({ ...prev, model: modelId }));
+    // 同时更新设置中的选中状态
+    updateAiChatSettings("app", pluginNameForUi, {
+      selectedProviderId: providerId,
+      selectedModelId: modelId,
+    }).then(() => {
+      setSettingsVersion(v => v + 1); // 触发重新获取设置
+    }).catch(err => {
+      console.warn("[AiChatPanel] Failed to update model selection:", err);
+    });
+  }, [pluginNameForUi]);
+
+  // 更新设置（用于 ModelSelectorMenu 中的平台配置修改）
+  const handleUpdateSettings = useCallback(async (newSettings: AiChatSettings) => {
+    try {
+      await updateAiChatSettings("app", pluginNameForUi, newSettings);
+      setSettingsVersion(v => v + 1); // 触发重新获取设置
+    } catch (err: any) {
+      orca.notify("error", `保存设置失败: ${String(err?.message ?? err ?? "unknown error")}`);
+    }
+  }, [pluginNameForUi]);
+
+  // 兼容旧的 handleModelChange（用于 ChatInput）
   const handleModelChange = useCallback((nextModel: string) => {
     setCurrentSession((prev) => ({ ...prev, model: nextModel }));
   }, []);
-
-  const handleAddModelToSettings = useCallback(
-    async (preset: import("../settings/ai-chat-settings").AiModelPreset) => {
-      const trimmed = preset.model?.trim();
-      if (!trimmed) return;
-
-      try {
-        const current = getAiChatSettings(pluginNameForUi);
-        if (current.customModels.some((m) => m.model === trimmed)) return;
-
-        await updateAiChatSettings("app", pluginNameForUi, {
-          customModels: [...current.customModels, { ...preset, model: trimmed }],
-        });
-        orca.notify("success", `已添加模型: ${preset.label || trimmed}`);
-      } catch (err: any) {
-        orca.notify("error", `添加模型失败: ${String(err?.message ?? err ?? "unknown error")}`);
-      }
-    },
-    [pluginNameForUi]
-  );
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -1245,11 +1250,17 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     // 辅助函数：根据模型名获取价格
     const getModelPrices = (modelName?: string) => {
       const model = modelName || selectedModel;
-      const opt = modelOptions.find(o => o.value === model);
-      return {
-        inputPrice: opt?.inputPrice || 0,
-        outputPrice: opt?.outputPrice || 0,
-      };
+      // 从 providers 中查找模型价格
+      for (const provider of settingsForUi.providers) {
+        const found = provider.models.find(m => m.id === model);
+        if (found) {
+          return {
+            inputPrice: found.inputPrice || 0,
+            outputPrice: found.outputPrice || 0,
+          };
+        }
+      }
+      return { inputPrice: 0, outputPrice: 0 };
     };
 
     // 计算每条消息的 token 统计和费用
@@ -1648,10 +1659,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       disabled: sending,
       currentPageId: rootBlockId,
       currentPageTitle,
-      modelOptions,
+      settings: settingsForUi,
       selectedModel,
-      onModelChange: handleModelChange,
-      onAddModel: handleAddModelToSettings,
+      onModelSelect: handleModelSelect,
+      onUpdateSettings: handleUpdateSettings,
       currency: settingsForUi.currency,
     })
   );
