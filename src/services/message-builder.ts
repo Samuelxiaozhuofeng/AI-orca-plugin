@@ -2,10 +2,14 @@
  * Message Builder Service
  *
  * Builds OpenAI-compatible message arrays with standard and fallback formats.
+ * Supports multimodal messages with images, videos, and other files.
  */
 
 import type { OpenAIChatMessage } from "./openai-client";
 import type { Message } from "./session-service";
+import type { ChatMode } from "../store/chat-mode-store";
+import { buildImageContent } from "./image-service";
+import { buildFileContentsForApi } from "./file-service";
 
 export interface MessageBuildParams {
   messages: Message[];
@@ -13,6 +17,7 @@ export interface MessageBuildParams {
   systemPrompt?: string;
   contextText?: string;
   customMemory?: string;
+  chatMode?: ChatMode;
 }
 
 export interface ConversationBuildParams {
@@ -20,6 +25,7 @@ export interface ConversationBuildParams {
   systemPrompt?: string;
   contextText?: string;
   customMemory?: string;
+  chatMode?: ChatMode;
 }
 
 export interface ToolResultParams extends MessageBuildParams {
@@ -29,7 +35,20 @@ export interface ToolResultParams extends MessageBuildParams {
 }
 
 /**
- * Convert internal Message to OpenAI API format
+ * Ask mode instruction to append to system prompt
+ */
+const ASK_MODE_INSTRUCTION = `
+
+---
+## 重要提示：当前为 Ask 模式
+你现在处于"Ask 模式"。在此模式下：
+- 你只能回答问题和提供信息
+- 你不能执行任何操作或调用任何工具
+- 如果用户请求执行操作，请解释你当前无法执行操作，但可以提供相关信息或建议
+- 专注于提供有帮助的、信息性的回答`;
+
+/**
+ * Convert internal Message to OpenAI API format (sync, text only)
  */
 function messageToApi(m: Message): OpenAIChatMessage {
   const msg: OpenAIChatMessage = {
@@ -45,39 +64,111 @@ function messageToApi(m: Message): OpenAIChatMessage {
 }
 
 /**
+ * Convert internal Message to OpenAI API format with image support (async)
+ */
+async function messageToApiWithImages(m: Message): Promise<OpenAIChatMessage> {
+  // Handle messages with images (multimodal) - legacy support
+  if (m.images && m.images.length > 0 && m.role === "user") {
+    const contentParts: any[] = [];
+    
+    // Add text content if present
+    if (m.content) {
+      contentParts.push({ type: "text", text: m.content });
+    }
+    
+    // Add image content
+    for (const img of m.images) {
+      const imageContent = await buildImageContent(img);
+      if (imageContent) {
+        contentParts.push(imageContent);
+      }
+    }
+    
+    if (contentParts.length > 0) {
+      return {
+        role: "user",
+        content: contentParts as any,
+      };
+    }
+  }
+
+  // Handle messages with files (new format - supports all file types including video)
+  if (m.files && m.files.length > 0 && m.role === "user") {
+    const contentParts: any[] = [];
+
+    // Add text content if present
+    if (m.content) {
+      contentParts.push({ type: "text", text: m.content });
+    }
+
+    // Add file content (may return multiple items for video)
+    for (const file of m.files) {
+      const fileContents = await buildFileContentsForApi(file);
+      contentParts.push(...fileContents);
+    }
+
+    if (contentParts.length > 0) {
+      return {
+        role: "user",
+        content: contentParts as any,
+      };
+    }
+  }
+
+  // Standard text message
+  return messageToApi(m);
+}
+
+/**
  * Build system message content from prompt, context, and memory
  */
-function buildSystemContent(systemPrompt?: string, contextText?: string, customMemory?: string): string | null {
+function buildSystemContent(
+  systemPrompt?: string,
+  contextText?: string,
+  customMemory?: string,
+  chatMode?: ChatMode
+): string | null {
   const parts: string[] = [];
   if (systemPrompt?.trim()) parts.push(systemPrompt.trim());
   if (customMemory?.trim()) parts.push(`用户信息:\n${customMemory.trim()}`);
   if (contextText?.trim()) parts.push(`Context:\n${contextText.trim()}`);
+  
+  // Append Ask mode instruction when in Ask mode
+  if (chatMode === 'ask') {
+    parts.push(ASK_MODE_INSTRUCTION.trim());
+  }
+  
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 /**
  * Build chat messages from full conversation history.
  *
- * Standard format: Preserves OpenAI tool-calling roles/fields.
+ * Standard format: Preserves OpenAI tool-calling roles/fields with image support.
  * Fallback format: Strips tool_calls and converts tool messages into user messages.
  */
-export function buildConversationMessages(params: ConversationBuildParams): {
+export async function buildConversationMessages(params: ConversationBuildParams): Promise<{
   standard: OpenAIChatMessage[];
   fallback: OpenAIChatMessage[];
-} {
-  const { messages, systemPrompt, contextText, customMemory } = params;
+}> {
+  const { messages, systemPrompt, contextText, customMemory, chatMode } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
-  const history = messages.filter((m) => !m.localOnly).map(messageToApi);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory, chatMode);
+  const filteredMessages = messages.filter((m) => !m.localOnly);
+  
+  // Build standard format with async image conversion
+  const history = await Promise.all(filteredMessages.map(messageToApiWithImages));
 
   const standard: OpenAIChatMessage[] = [
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
     ...history,
   ];
 
+  // Build fallback format (sync, no images)
+  const fallbackHistory = filteredMessages.map(messageToApi);
   const fallback: OpenAIChatMessage[] = [
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
-    ...history.flatMap((m) => {
+    ...fallbackHistory.flatMap((m) => {
       if (m.role === "tool") {
         const toolName = m.name || "tool";
         return [
@@ -103,12 +194,14 @@ export function buildConversationMessages(params: ConversationBuildParams): {
 
 /**
  * Build chat messages for initial API call (before tool execution)
+ * Now async to support file content extraction
  */
-export function buildChatMessages(params: MessageBuildParams): OpenAIChatMessage[] {
-  const { messages, userContent, systemPrompt, contextText, customMemory } = params;
+export async function buildChatMessages(params: MessageBuildParams): Promise<OpenAIChatMessage[]> {
+  const { messages, userContent, systemPrompt, contextText, customMemory, chatMode } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
-  const history = messages.filter((m) => !m.localOnly).map(messageToApi);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory, chatMode);
+  const filteredMessages = messages.filter((m) => !m.localOnly);
+  const history = await Promise.all(filteredMessages.map(messageToApiWithImages));
 
   return [
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
@@ -122,24 +215,27 @@ export function buildChatMessages(params: MessageBuildParams): OpenAIChatMessage
  *
  * Standard format: Uses OpenAI's tool/assistant message structure
  * Fallback format: Converts tool results to user messages for incompatible APIs
+ * Now async to support file content extraction
  */
-export function buildMessagesWithToolResults(params: ToolResultParams): {
+export async function buildMessagesWithToolResults(params: ToolResultParams): Promise<{
   standard: OpenAIChatMessage[];
   fallback: OpenAIChatMessage[];
-} {
+}> {
   const {
     messages,
     userContent,
     systemPrompt,
     contextText,
     customMemory,
+    chatMode,
     assistantContent,
     toolCalls,
     toolResults,
   } = params;
 
-  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
-  const history = messages.filter((m) => !m.localOnly).map(messageToApi);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory, chatMode);
+  const filteredMessages = messages.filter((m) => !m.localOnly);
+  const history = await Promise.all(filteredMessages.map(messageToApiWithImages));
 
   // Standard OpenAI format with tool role
   const standard: OpenAIChatMessage[] = [
@@ -160,9 +256,10 @@ export function buildMessagesWithToolResults(params: ToolResultParams): {
   ];
 
   // Fallback format - convert tool results to user message
+  const historySync = filteredMessages.map(messageToApi);
   const fallback: OpenAIChatMessage[] = [
     ...(systemContent ? [{ role: "system" as const, content: systemContent }] : []),
-    ...history.map((m) => {
+    ...historySync.map((m) => {
       // Strip tool_calls from fallback format
       const { tool_calls, ...rest } = m;
       return rest as OpenAIChatMessage;

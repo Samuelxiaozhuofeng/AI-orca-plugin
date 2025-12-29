@@ -3,6 +3,35 @@ import { getAiChatSettings } from "../settings/ai-chat-settings";
 import type { ContextRef } from "../store/context-store";
 
 /**
+ * Image reference for messages (stores path, not base64)
+ * @deprecated Use FileRef instead
+ */
+export type ImageRef = {
+  path: string; // 本地文件路径
+  name: string; // 文件名
+  mimeType: string; // image/png, image/jpeg 等
+};
+
+/**
+ * 视频处理模式
+ */
+export type VideoProcessMode = "full" | "audio-only" | "frames-only";
+
+/**
+ * File reference for messages (stores path, not content)
+ * Supports images, videos, audio, documents, code files, and data files
+ */
+export type FileRef = {
+  path: string; // 本地文件路径
+  name: string; // 文件名
+  mimeType: string; // MIME 类型
+  size?: number; // 文件大小 (bytes)
+  category?: "image" | "video" | "audio" | "document" | "code" | "data" | "other"; // 文件分类
+  videoMode?: VideoProcessMode; // 视频处理模式：full=完整处理, audio-only=仅音频, frames-only=仅抽帧
+  thumbnail?: string; // 视频缩略图 base64（仅视频）
+};
+
+/**
  * Message type (same as AiChatPanel)
  */
 export type Message = {
@@ -11,6 +40,9 @@ export type Message = {
   content: string;
   createdAt: number;
   localOnly?: boolean;
+  images?: ImageRef[]; // 图片引用（存路径）- 兼容旧版
+  files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型
+  reasoning?: string; // AI 推理过程（DeepSeek/Claude thinking）
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -34,6 +66,8 @@ export type SavedSession = {
   contexts: ContextRef[];
   createdAt: number;
   updatedAt: number;
+  pinned?: boolean; // 置顶标记
+  favorited?: boolean; // 收藏标记
 };
 
 /**
@@ -157,8 +191,12 @@ export async function saveSession(session: SavedSession): Promise<void> {
     data.sessions.push(sessionToSave);
   }
 
-  // Sort by updatedAt descending (newest first)
-  data.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+  // Sort: pinned first, then by updatedAt descending
+  data.sessions.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.updatedAt - a.updatedAt;
+  });
 
   // Trim to max sessions
   if (data.sessions.length > maxSessions) {
@@ -231,28 +269,153 @@ export function shouldAutoSave(): boolean {
  * Format a timestamp for display
  */
 export function formatSessionTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = now - timestamp;
   const date = new Date(timestamp);
+  const now = new Date();
+
+  // 获取今天和昨天的日期边界
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
 
   // Today
-  if (diff < 24 * 60 * 60 * 1000) {
+  if (timestamp >= todayStart) {
     const hours = date.getHours().toString().padStart(2, "0");
     const minutes = date.getMinutes().toString().padStart(2, "0");
     return `今天 ${hours}:${minutes}`;
   }
 
   // Yesterday
-  if (diff < 48 * 60 * 60 * 1000) {
+  if (timestamp >= yesterdayStart) {
     return "昨天";
   }
 
   // This week
-  if (diff < 7 * 24 * 60 * 60 * 1000) {
+  if (timestamp >= weekStart) {
     const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
     return days[date.getDay()];
   }
 
   // Older
   return `${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+/**
+ * Toggle session pinned status
+ */
+export async function toggleSessionPinned(sessionId: string): Promise<boolean> {
+  const data = await loadSessions();
+  const session = data.sessions.find((s) => s.id === sessionId);
+  if (!session) return false;
+
+  session.pinned = !session.pinned;
+
+  // Re-sort: pinned first, then by updatedAt
+  data.sessions.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  await saveSessions(data);
+  console.log("[session-service] Session pinned toggled:", sessionId, session.pinned);
+  return session.pinned;
+}
+
+/**
+ * Toggle session favorited status
+ */
+export async function toggleSessionFavorited(sessionId: string): Promise<boolean> {
+  const data = await loadSessions();
+  const session = data.sessions.find((s) => s.id === sessionId);
+  if (!session) return false;
+
+  session.favorited = !session.favorited;
+
+  await saveSessions(data);
+  console.log("[session-service] Session favorited toggled:", sessionId, session.favorited);
+  return session.favorited;
+}
+
+/**
+ * Rename a session
+ */
+export async function renameSession(sessionId: string, newTitle: string): Promise<void> {
+  const data = await loadSessions();
+  const session = data.sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+
+  session.title = newTitle.trim() || generateSessionTitle(session.messages);
+  await saveSessions(data);
+  console.log("[session-service] Session renamed:", sessionId, session.title);
+}
+
+/**
+ * Auto-cache current session (called on message changes)
+ * This saves without requiring manual action
+ * Only generates title on first message, preserves existing title afterwards
+ * Only updates position (updatedAt) when new messages are added
+ */
+export async function autoCacheSession(session: SavedSession): Promise<void> {
+  const data = await loadSessions();
+  const pluginName = getAiChatPluginName();
+  const settings = getAiChatSettings(pluginName);
+  const maxSessions = settings.maxSavedSessions || 10;
+
+  // Filter out localOnly messages
+  const filteredMessages = session.messages.filter((m) => !m.localOnly);
+
+  // Find existing session
+  const existingIndex = data.sessions.findIndex((s) => s.id === session.id);
+  const existingSession = existingIndex >= 0 ? data.sessions[existingIndex] : null;
+
+  // Only generate title on first save (when no existing title)
+  // After that, keep the existing title unchanged
+  let title = session.title;
+  if (existingSession?.title) {
+    // Keep existing title
+    title = existingSession.title;
+  } else if (!title && filteredMessages.length > 0) {
+    // First time with messages, generate title
+    title = generateSessionTitle(filteredMessages);
+  }
+
+  // Only update updatedAt when message count changes (new message added)
+  // This prevents reordering when just switching sessions
+  const hasNewMessages = !existingSession || filteredMessages.length > existingSession.messages.length;
+  const updatedAt = hasNewMessages ? Date.now() : (existingSession?.updatedAt || Date.now());
+
+  const sessionToSave: SavedSession = {
+    ...session,
+    messages: filteredMessages,
+    title: title || "",
+    updatedAt,
+  };
+
+  if (existingIndex >= 0) {
+    // Preserve pinned status
+    sessionToSave.pinned = data.sessions[existingIndex].pinned;
+    data.sessions[existingIndex] = sessionToSave;
+  } else {
+    data.sessions.push(sessionToSave);
+  }
+
+  // Sort: pinned first, then by updatedAt
+  data.sessions.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return b.updatedAt - a.updatedAt;
+  });
+
+  // Trim to max (but don't remove pinned sessions)
+  const pinnedSessions = data.sessions.filter((s) => s.pinned);
+  const unpinnedSessions = data.sessions.filter((s) => !s.pinned);
+  if (unpinnedSessions.length > maxSessions - pinnedSessions.length) {
+    data.sessions = [
+      ...pinnedSessions,
+      ...unpinnedSessions.slice(0, Math.max(1, maxSessions - pinnedSessions.length)),
+    ];
+  }
+
+  data.activeSessionId = session.id;
+  await saveSessions(data);
 }

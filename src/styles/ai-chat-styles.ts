@@ -258,6 +258,22 @@ export const paragraphStyle: React.CSSProperties = {
   userSelect: "text", // Allow selection/copy of Markdown content
 };
 
+// Image styles for inline images in markdown
+export const imageContainerStyle: React.CSSProperties = {
+  display: "block",
+  margin: "8px 0",
+};
+
+export const imageStyle: React.CSSProperties = {
+  maxWidth: "100%",
+  maxHeight: "400px",
+  borderRadius: "8px",
+  cursor: "pointer",
+  objectFit: "contain",
+  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
+  transition: "transform 0.2s ease, box-shadow 0.2s ease",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Message Item Action Bar & Tool Styles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -404,7 +420,7 @@ type ToolStatus = "loading" | "success" | "failed" | "cancelled";
  * Gemini UX Review: Pill shape + subtle background + secondary text color
  */
 export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => ({
-  display: "inline-flex",
+  display: "flex",
   alignItems: "center",
   gap: "8px",
   padding: "6px 12px",
@@ -419,6 +435,8 @@ export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => 
       ? "var(--orca-color-danger, #dc3545)"
       : "var(--orca-color-text-2)",
   transition: "all 0.2s ease",
+  maxWidth: "100%",
+  overflow: "hidden",
 });
 
 /**
@@ -505,3 +523,15 @@ export const toolStatusRetryButtonStyle: React.CSSProperties = {
   marginLeft: "8px",
   flexShrink: 0,
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Message Time Styles
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const messageTimeStyle = (role: string): React.CSSProperties => ({
+  fontSize: "11px",
+  color: "var(--orca-color-text-3)",
+  marginTop: "6px",
+  textAlign: role === "user" ? "right" : "left",
+  userSelect: "none",
+});

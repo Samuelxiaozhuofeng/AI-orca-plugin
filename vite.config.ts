@@ -19,12 +19,23 @@ export default defineConfig(({ command }) => {
         formats: ["es"],
       },
       rollupOptions: {
-        external: ["react", "valtio"],
+        external: ["react", "react-dom", "valtio"],
         output: {
-          inlineDynamicImports: true,
+          // 分离文档解析库到单独的 chunk
+          manualChunks: {
+            "document-parsers": ["xlsx", "mammoth", "unpdf"],
+          },
+          chunkFileNames: "[name].js",
         },
       },
     },
-    plugins: [react(), externalGlobals({ react: "React", valtio: "Valtio" })],
+    plugins: [
+      react(),
+      externalGlobals({
+        react: "React",
+        "react-dom": "ReactDOM",
+        valtio: "Valtio",
+      }),
+    ],
   };
 });

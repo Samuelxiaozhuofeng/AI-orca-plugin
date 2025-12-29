@@ -109,8 +109,18 @@ function transformToSearchResults(
 }
 
 /**
+ * Normalize tag name by removing # prefix and trimming whitespace
+ */
+function normalizeTagForSearch(tag: string): string {
+  const trimmed = tag.trim();
+  // Remove leading # if present
+  if (trimmed.startsWith("#")) return trimmed.slice(1);
+  return trimmed;
+}
+
+/**
  * Search blocks by tag name
- * @param tagName - The tag name to search for
+ * @param tagName - The tag name to search for (with or without # prefix)
  * @param maxResults - Maximum number of results to return (default: 50)
  * @returns Array of search results
  */
@@ -126,7 +136,11 @@ export async function searchBlocksByTag(
       return [];
     }
 
-    const result = await orca.invokeBackend("get-blocks-with-tags", [tagName]);
+    // Normalize tag name - remove # prefix if present
+    const normalizedTag = normalizeTagForSearch(tagName);
+    console.log("[searchBlocksByTag] Normalized tag:", normalizedTag);
+
+    const result = await orca.invokeBackend("get-blocks-with-tags", [normalizedTag]);
     const blocks = unwrapBlocks(result);
 
     if (!Array.isArray(blocks)) {
@@ -239,24 +253,51 @@ export async function queryBlocksByTag(
             enhanced.op = "includes";
           }
 
-          // Convert numeric value to string label
-          // AI often passes the numeric value (e.g., 2 for "Done") based on schema options
-          // But Orca query API expects the string label (e.g., "Done")
-          if (typeof filter.value === "number" && (schemaProperty as any).options) {
-            const options = (schemaProperty as any).options as Array<{ label: string; value: number }>;
-            const matchingOption = options.find((opt) => opt.value === filter.value);
-            if (matchingOption) {
-              console.log(
-                `[queryBlocksByTag] Converting numeric value ${filter.value} to string label "${matchingOption.label}" for TextChoices property "${filter.name}"`
+          // Handle value conversion for TextChoices
+          // The value could be: string label ("Canceled"), numeric string ("3"), or number (3)
+          const schemaOptions = (schemaProperty as any).options as Array<{ label: string; value: number }> | undefined;
+          
+          if (schemaOptions && schemaOptions.length > 0) {
+            const filterValue = filter.value;
+            
+            // Check if it's a numeric value (number or numeric string)
+            const numericValue = typeof filterValue === "number" 
+              ? filterValue 
+              : (typeof filterValue === "string" && /^\d+$/.test(filterValue) ? parseInt(filterValue, 10) : null);
+            
+            if (numericValue !== null) {
+              // Convert numeric value to string label
+              const matchingOption = schemaOptions.find((opt) => opt.value === numericValue);
+              if (matchingOption) {
+                console.log(
+                  `[queryBlocksByTag] Converting numeric value ${numericValue} to string label "${matchingOption.label}"`
+                );
+                enhanced.value = matchingOption.label;
+              }
+            } else if (typeof filterValue === "string") {
+              // It's a string label, verify it exists in options (case-insensitive)
+              const matchingOption = schemaOptions.find(
+                (opt) => opt.label.toLowerCase() === filterValue.toLowerCase()
               );
-              enhanced.value = matchingOption.label;
+              if (matchingOption) {
+                // Use exact case from schema
+                enhanced.value = matchingOption.label;
+                console.log(
+                  `[queryBlocksByTag] Using exact label "${matchingOption.label}" for value "${filterValue}"`
+                );
+              } else {
+                console.warn(
+                  `[queryBlocksByTag] Value "${filterValue}" not found in options:`,
+                  schemaOptions.map(o => o.label)
+                );
+              }
             }
           }
         }
 
         return enhanced;
       });
-      console.log("[queryBlocksByTag] Enhanced properties:", enhancedProperties);
+      console.log("[queryBlocksByTag] Enhanced properties:", JSON.stringify(enhancedProperties));
     } catch (schemaError) {
       console.warn(
         "[queryBlocksByTag] Failed to get tag schema, using original properties:",
@@ -642,8 +683,9 @@ export async function searchBlocksByReference(
     const targetBlock = await orca.invokeBackend("get-block-by-alias", aliasName);
 
     if (!targetBlock) {
-      console.warn(`[searchBlocksByReference] Page "${aliasName}" not found`);
-      throw new Error(`Page "${aliasName}" not found`);
+      // Page not found - return empty array instead of throwing
+      console.log(`[searchBlocksByReference] Page "${aliasName}" not found, returning empty results`);
+      return [];
     }
 
     const blockId = targetBlock.id;

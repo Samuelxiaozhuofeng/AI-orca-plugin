@@ -69,20 +69,20 @@ export default function ToolStatusIndicator({
   switch (status) {
     case "loading":
       icon = config.icon;
-      text = config.loadingText;
+      text = `${config.displayName}: ${config.loadingText}`;
       animationClass = `tool-animation-${config.animation}`;
       break;
     case "success":
       icon = config.successIcon;
-      text = result ? generateResultSummary(toolName, result) : config.successText;
+      text = `${config.displayName}: ${result ? generateResultSummary(toolName, result) : config.successText}`;
       break;
     case "failed":
       icon = "❌";
-      text = error ? `失败: ${error.slice(0, 50)}` : "执行失败";
+      text = `${config.displayName}: ${error ? `失败 - ${error.slice(0, 50)}` : "执行失败"}`;
       break;
     case "cancelled":
       icon = "⏸️";
-      text = "已取消";
+      text = `${config.displayName}: 已取消`;
       break;
     default:
       icon = "🔧";

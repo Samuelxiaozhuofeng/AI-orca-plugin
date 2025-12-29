@@ -17,8 +17,9 @@ const { proxy } = (window as any).Valtio as {
  * Injection mode determines which memories are included in AI conversations
  * - ALL: Include enabled memories from all users, prefixed with user name
  * - CURRENT: Include only enabled memories from the active user
+ * - SELECTED: Include enabled memories from selected users only
  */
-export type InjectionMode = 'ALL' | 'CURRENT';
+export type InjectionMode = 'ALL' | 'CURRENT' | 'SELECTED';
 
 /**
  * User profile representing a person who owns memories
@@ -29,6 +30,7 @@ export interface UserProfile {
   emoji: string;
   isDefault?: boolean;
   isSelf?: boolean;  // Whether this user represents "myself"
+  isDisabled?: boolean;  // Whether this user's memories are disabled for injection
   createdAt: number;
 }
 
@@ -56,11 +58,13 @@ export interface PortraitTag {
 
 /**
  * Portrait info item - single piece of information within a category
+ * Supports multiple values per key
  */
 export interface PortraitInfoItem {
   id: string;
-  label: string;  // e.g., "姓名", "身高"
-  value: string;  // e.g., "张三", "183cm"
+  label: string; // e.g., "姓名", "身高"
+  value: string; // Primary value, e.g., "张三", "183cm"
+  values?: string[]; // Additional values for multi-value support
 }
 
 /**
@@ -69,7 +73,7 @@ export interface PortraitInfoItem {
 export interface PortraitCategory {
   id: string;
   title: string;
-  items: PortraitInfoItem[];  // Changed from content string to items array
+  items: PortraitInfoItem[]; // Changed from content string to items array
 }
 
 /**
@@ -92,6 +96,18 @@ export interface MemoryStoreData {
   portraits: UserPortrait[];
   activeUserId: string;
   injectionMode: InjectionMode;
+  selectedUserIds: string[];  // User IDs selected for SELECTED mode
+  selectionPresets: SelectionPreset[];  // Saved selection presets
+}
+
+/**
+ * Selection preset - saved user selection for quick switching
+ */
+export interface SelectionPreset {
+  id: string;
+  name: string;
+  userIds: string[];
+  createdAt: number;
 }
 
 /**
@@ -152,6 +168,8 @@ export const DEFAULT_STATE: MemoryStoreData = {
   portraits: [],
   activeUserId: 'default-user',
   injectionMode: 'ALL',
+  selectedUserIds: [],
+  selectionPresets: [],
 };
 
 // ============================================================================
@@ -197,7 +215,7 @@ function validateContent(content: string): boolean {
  * Create the memory store state
  */
 function createMemoryStoreState(): MemoryStoreData {
-  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [] };
+  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [], selectedUserIds: [], selectionPresets: [] };
 }
 
 export const memoryStoreState = proxy<MemoryStoreData>(createMemoryStoreState());
@@ -292,6 +310,190 @@ export function setUserAsSelf(id: string | null): boolean {
     isSelf: u.id === id,
   }));
   memoryStoreState.users = updatedUsers;
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Toggle a user's disabled state for memory injection
+ * @param id - User ID to toggle
+ * @returns true if toggle succeeded, false if user not found
+ */
+export function toggleUserDisabled(id: string): boolean {
+  const userIndex = memoryStoreState.users.findIndex(u => u.id === id);
+  if (userIndex === -1) {
+    return false;
+  }
+
+  const updatedUsers = [...memoryStoreState.users];
+  updatedUsers[userIndex] = {
+    ...updatedUsers[userIndex],
+    isDisabled: !updatedUsers[userIndex].isDisabled,
+  };
+  memoryStoreState.users = updatedUsers;
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Set a user's disabled state for memory injection
+ * @param id - User ID
+ * @param disabled - Whether to disable
+ * @returns true if update succeeded, false if user not found
+ */
+export function setUserDisabled(id: string, disabled: boolean): boolean {
+  const userIndex = memoryStoreState.users.findIndex(u => u.id === id);
+  if (userIndex === -1) {
+    return false;
+  }
+
+  const updatedUsers = [...memoryStoreState.users];
+  updatedUsers[userIndex] = {
+    ...updatedUsers[userIndex],
+    isDisabled: disabled,
+  };
+  memoryStoreState.users = updatedUsers;
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Toggle a user's selection for SELECTED injection mode
+ * @param id - User ID to toggle
+ * @returns true if toggle succeeded
+ */
+export function toggleUserSelection(id: string): boolean {
+  const user = memoryStoreState.users.find(u => u.id === id);
+  if (!user) {
+    return false;
+  }
+
+  const currentSelected = memoryStoreState.selectedUserIds || [];
+  const isSelected = currentSelected.includes(id);
+  
+  if (isSelected) {
+    memoryStoreState.selectedUserIds = currentSelected.filter(uid => uid !== id);
+  } else {
+    memoryStoreState.selectedUserIds = [...currentSelected, id];
+  }
+  
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Set selected user IDs for SELECTED injection mode
+ * @param ids - Array of user IDs to select
+ */
+export function setSelectedUserIds(ids: string[]): void {
+  // Filter to only include valid user IDs
+  const validIds = ids.filter(id => memoryStoreState.users.some(u => u.id === id));
+  memoryStoreState.selectedUserIds = validIds;
+  saveMemoryStore();
+}
+
+/**
+ * Select all users for SELECTED injection mode
+ */
+export function selectAllUsers(): void {
+  memoryStoreState.selectedUserIds = memoryStoreState.users
+    .filter(u => !u.isDisabled)
+    .map(u => u.id);
+  saveMemoryStore();
+}
+
+/**
+ * Deselect all users for SELECTED injection mode
+ */
+export function deselectAllUsers(): void {
+  memoryStoreState.selectedUserIds = [];
+  saveMemoryStore();
+}
+
+// ============================================================================
+// Selection Preset Functions
+// ============================================================================
+
+/**
+ * Save current selection as a preset
+ * @param name - Preset name
+ * @returns Created preset or null if no users selected
+ */
+export function saveSelectionPreset(name: string): SelectionPreset | null {
+  if (!name.trim() || memoryStoreState.selectedUserIds.length === 0) {
+    return null;
+  }
+
+  const preset: SelectionPreset = {
+    id: generateId(),
+    name: name.trim(),
+    userIds: [...memoryStoreState.selectedUserIds],
+    createdAt: Date.now(),
+  };
+
+  memoryStoreState.selectionPresets = [...(memoryStoreState.selectionPresets || []), preset];
+  saveMemoryStore();
+  return preset;
+}
+
+/**
+ * Load a selection preset
+ * @param presetId - Preset ID to load
+ * @returns true if loaded successfully
+ */
+export function loadSelectionPreset(presetId: string): boolean {
+  const preset = (memoryStoreState.selectionPresets || []).find(p => p.id === presetId);
+  if (!preset) {
+    return false;
+  }
+
+  // Filter to only include valid, non-disabled user IDs
+  const validUserIds = preset.userIds.filter(id => {
+    const user = memoryStoreState.users.find(u => u.id === id);
+    return user && !user.isDisabled;
+  });
+
+  memoryStoreState.selectedUserIds = validUserIds;
+  memoryStoreState.injectionMode = 'SELECTED';
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Delete a selection preset
+ * @param presetId - Preset ID to delete
+ * @returns true if deleted successfully
+ */
+export function deleteSelectionPreset(presetId: string): boolean {
+  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
+  if (index === -1) {
+    return false;
+  }
+
+  memoryStoreState.selectionPresets = memoryStoreState.selectionPresets.filter(p => p.id !== presetId);
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Rename a selection preset
+ * @param presetId - Preset ID to rename
+ * @param newName - New name
+ * @returns true if renamed successfully
+ */
+export function renameSelectionPreset(presetId: string, newName: string): boolean {
+  if (!newName.trim()) {
+    return false;
+  }
+
+  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
+  if (index === -1) {
+    return false;
+  }
+
+  const updatedPresets = [...memoryStoreState.selectionPresets];
+  updatedPresets[index] = { ...updatedPresets[index], name: newName.trim() };
+  memoryStoreState.selectionPresets = updatedPresets;
   saveMemoryStore();
   return true;
 }
@@ -682,6 +884,304 @@ export function deletePortraitTag(userId: string, tagId: string): boolean {
 }
 
 /**
+ * Reorder info items within a category
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemIds - Array of item IDs in new order
+ * @returns true if reorder succeeded, false otherwise
+ */
+export function reorderPortraitInfoItems(
+  userId: string,
+  categoryId: string,
+  itemIds: string[]
+): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+
+  // Verify all item IDs exist
+  const itemMap = new Map(category.items.map(item => [item.id, item]));
+  const reorderedItems: PortraitInfoItem[] = [];
+
+  for (const itemId of itemIds) {
+    const item = itemMap.get(itemId);
+    if (!item) {
+      return false; // Invalid item ID
+    }
+    reorderedItems.push(item);
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: reorderedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Add a value to an info item's values array
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param value - Value to add
+ * @returns true if add succeeded, false otherwise
+ */
+export function addPortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  value: string
+): boolean {
+  if (!value || value.trim().length === 0) {
+    return false;
+  }
+
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const currentValues = item.values || [];
+
+  // Check for duplicate
+  const trimmedValue = value.trim();
+  if (currentValues.includes(trimmedValue) || item.value === trimmedValue) {
+    return false;
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+  updatedItems[itemIndex] = {
+    ...item,
+    values: [...currentValues, trimmedValue],
+  };
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Remove a value from an info item's values array
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param valueIndex - Index of value to remove
+ * @returns true if remove succeeded, false otherwise
+ */
+export function removePortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  valueIndex: number
+): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const currentValues = item.values || [];
+
+  if (valueIndex < 0 || valueIndex >= currentValues.length) {
+    return false;
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+  updatedItems[itemIndex] = {
+    ...item,
+    values: currentValues.filter((_, i) => i !== valueIndex),
+  };
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Update a specific value in an info item
+ * @param userId - User ID
+ * @param categoryId - Category ID
+ * @param itemId - Item ID
+ * @param valueIndex - Index of value to update (0 = primary value, >0 = additional values)
+ * @param newValue - New value string
+ * @returns true if update succeeded, false otherwise
+ */
+export function updatePortraitInfoItemValue(
+  userId: string,
+  categoryId: string,
+  itemId: string,
+  valueIndex: number,
+  newValue: string
+): boolean {
+  if (!newValue || newValue.trim().length === 0) {
+    return false;
+  }
+
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+  const categoryIndex = portrait.categories.findIndex(c => c.id === categoryId);
+  if (categoryIndex === -1) {
+    return false;
+  }
+
+  const category = portrait.categories[categoryIndex];
+  const itemIndex = category.items.findIndex(item => item.id === itemId);
+  if (itemIndex === -1) {
+    return false;
+  }
+
+  const item = category.items[itemIndex];
+  const trimmedValue = newValue.trim();
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  const updatedCategories = [...portrait.categories];
+  const updatedItems = [...category.items];
+
+  if (valueIndex === 0) {
+    // Update primary value
+    updatedItems[itemIndex] = {
+      ...item,
+      value: trimmedValue,
+    };
+  } else {
+    // Update additional value
+    const currentValues = item.values || [];
+    const actualIndex = valueIndex - 1;
+    if (actualIndex < 0 || actualIndex >= currentValues.length) {
+      return false;
+    }
+    const newValues = [...currentValues];
+    newValues[actualIndex] = trimmedValue;
+    updatedItems[itemIndex] = {
+      ...item,
+      values: newValues,
+    };
+  }
+
+  updatedCategories[categoryIndex] = {
+    ...category,
+    items: updatedItems,
+  };
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: updatedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
+ * Reorder categories in a user's portrait
+ * @param userId - User ID
+ * @param categoryIds - Array of category IDs in new order
+ * @returns true if reorder succeeded, false otherwise
+ */
+export function reorderPortraitCategories(userId: string, categoryIds: string[]): boolean {
+  const portraitIndex = memoryStoreState.portraits.findIndex(p => p.userId === userId);
+  if (portraitIndex === -1) {
+    return false;
+  }
+
+  const portrait = memoryStoreState.portraits[portraitIndex];
+
+  // Verify all category IDs exist
+  const categoryMap = new Map(portrait.categories.map(c => [c.id, c]));
+  const reorderedCategories: PortraitCategory[] = [];
+
+  for (const categoryId of categoryIds) {
+    const category = categoryMap.get(categoryId);
+    if (!category) {
+      return false; // Invalid category ID
+    }
+    reorderedCategories.push(category);
+  }
+
+  const updatedPortraits = [...memoryStoreState.portraits];
+  updatedPortraits[portraitIndex] = {
+    ...portrait,
+    categories: reorderedCategories,
+    updatedAt: Date.now(),
+  };
+  memoryStoreState.portraits = updatedPortraits;
+
+  saveMemoryStore();
+  return true;
+}
+
+/**
  * Update a single info item in a category
  * @param userId - User ID
  * @param categoryId - Category ID
@@ -1039,12 +1539,19 @@ export function setInjectionMode(mode: InjectionMode): void {
  * @returns Array of enabled memory items
  */
 export function getEnabledMemories(): MemoryItem[] {
-  const { memories, activeUserId, injectionMode } = memoryStoreState;
+  const { memories, users, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
+
+  // Filter out disabled users
+  const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
 
   if (injectionMode === 'ALL') {
-    return memories.filter(m => m.isEnabled);
+    return memories.filter(m => m.isEnabled && enabledUserIds.has(m.userId));
+  } else if (injectionMode === 'SELECTED') {
+    const selected = new Set(selectedUserIds || []);
+    return memories.filter(m => m.isEnabled && enabledUserIds.has(m.userId) && selected.has(m.userId));
   } else {
-    return memories.filter(m => m.userId === activeUserId && m.isEnabled);
+    // CURRENT mode
+    return memories.filter(m => m.userId === activeUserId && m.isEnabled && enabledUserIds.has(m.userId));
   }
 }
 
@@ -1054,13 +1561,20 @@ export function getEnabledMemories(): MemoryItem[] {
  * @returns Array of enabled, non-extracted memory items
  */
 export function getUnextractedMemories(): MemoryItem[] {
-  const { memories, users, activeUserId, injectionMode } = memoryStoreState;
+  const { memories, users, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
+
+  // Filter out disabled users
+  const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
 
   let filtered: MemoryItem[];
   if (injectionMode === 'ALL') {
-    filtered = memories.filter(m => m.isEnabled && !m.isExtracted);
+    filtered = memories.filter(m => m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId));
+  } else if (injectionMode === 'SELECTED') {
+    const selected = new Set(selectedUserIds || []);
+    filtered = memories.filter(m => m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId) && selected.has(m.userId));
   } else {
-    filtered = memories.filter(m => m.userId === activeUserId && m.isEnabled && !m.isExtracted);
+    // CURRENT mode
+    filtered = memories.filter(m => m.userId === activeUserId && m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId));
   }
 
   // Sort: self user's memories first
@@ -1111,11 +1625,21 @@ export function getMemoryText(): string {
  * @returns Formatted portrait text string
  */
 export function getPortraitText(): string {
-  const { users, portraits, activeUserId, injectionMode } = memoryStoreState;
+  const { users, portraits, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
   
-  let relevantPortraits = injectionMode === 'ALL' 
-    ? [...portraits] 
-    : portraits.filter(p => p.userId === activeUserId);
+  // Filter out disabled users
+  const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
+  
+  let relevantPortraits: UserPortrait[];
+  if (injectionMode === 'ALL') {
+    relevantPortraits = portraits.filter(p => enabledUserIds.has(p.userId));
+  } else if (injectionMode === 'SELECTED') {
+    const selected = new Set(selectedUserIds || []);
+    relevantPortraits = portraits.filter(p => enabledUserIds.has(p.userId) && selected.has(p.userId));
+  } else {
+    // CURRENT mode
+    relevantPortraits = portraits.filter(p => p.userId === activeUserId && enabledUserIds.has(p.userId));
+  }
 
   if (relevantPortraits.length === 0) {
     return '';
@@ -1123,7 +1647,7 @@ export function getPortraitText(): string {
 
   // Sort: self user's portrait first
   const selfUser = users.find(u => u.isSelf);
-  if (selfUser && injectionMode === 'ALL') {
+  if (selfUser && (injectionMode === 'ALL' || injectionMode === 'SELECTED')) {
     relevantPortraits.sort((a, b) => {
       const aIsSelf = a.userId === selfUser.id;
       const bIsSelf = b.userId === selfUser.id;
@@ -1151,15 +1675,18 @@ export function getPortraitText(): string {
     // Add categories
     for (const category of portrait.categories) {
       if (category.items.length > 0) {
-        const itemsStr = category.items.map(item => 
-          item.label ? `${item.label}:${item.value}` : item.value
-        ).join(' | ');
+        const itemsStr = category.items.map(item => {
+          const allValues = item.values && item.values.length > 0
+            ? [item.value, ...item.values].join(', ')
+            : item.value;
+          return item.label ? `${item.label}:${allValues}` : allValues;
+        }).join(' | ');
         lines.push(`${category.title}: ${itemsStr}`);
       }
     }
     
     if (lines.length > 0) {
-      if (injectionMode === 'ALL') {
+      if (injectionMode === 'ALL' || injectionMode === 'SELECTED') {
         parts.push(`[${userName}的印象]\n${lines.join('\n')}`);
       } else {
         parts.push(lines.join('\n'));
@@ -1203,6 +1730,8 @@ export async function saveMemoryStore(): Promise<void> {
       portraits: memoryStoreState.portraits,
       activeUserId: memoryStoreState.activeUserId,
       injectionMode: memoryStoreState.injectionMode,
+      selectedUserIds: memoryStoreState.selectedUserIds,
+      selectionPresets: memoryStoreState.selectionPresets || [],
     };
     await orca.plugins.setData(pluginName, STORAGE_KEY, JSON.stringify(data));
   } catch (error) {
@@ -1265,6 +1794,8 @@ export async function loadMemoryStore(): Promise<void> {
     memoryStoreState.portraits = data.portraits || [];
     memoryStoreState.activeUserId = data.activeUserId || 'default-user';
     memoryStoreState.injectionMode = data.injectionMode || 'ALL';
+    memoryStoreState.selectedUserIds = data.selectedUserIds || [];
+    memoryStoreState.selectionPresets = data.selectionPresets || [];
   } catch (error) {
     console.error('[MemoryStore] Failed to load:', error);
     // Keep default state on error
@@ -1289,6 +1820,12 @@ export const memoryStore = {
   updateUser,
   updateUserEmoji,
   setUserAsSelf,
+  toggleUserDisabled,
+  setUserDisabled,
+  toggleUserSelection,
+  setSelectedUserIds,
+  selectAllUsers,
+  deselectAllUsers,
   deleteUser,
   setActiveUser,
   getActiveUser,
@@ -1315,6 +1852,11 @@ export const memoryStore = {
   updatePortraitCategory,
   updatePortraitInfoItem,
   deletePortraitInfoItem,
+  reorderPortraitInfoItems,
+  addPortraitInfoItemValue,
+  removePortraitInfoItemValue,
+  updatePortraitInfoItemValue,
+  reorderPortraitCategories,
 
   // Injection Mode
   setInjectionMode,
@@ -1323,6 +1865,12 @@ export const memoryStore = {
   getMemoryText,
   getPortraitText,
   getFullMemoryText,
+
+  // Selection Presets
+  saveSelectionPreset,
+  loadSelectionPreset,
+  deleteSelectionPreset,
+  renameSelectionPreset,
 
   // Persistence
   save: saveMemoryStore,

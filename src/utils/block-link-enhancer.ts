@@ -80,8 +80,20 @@ export function formatBlockResult(block: {
   title: string;
   content?: string;
   fullContent?: string;
+  tags?: string[];  // aliases are stored in tags field
 }, index: number): string {
-  let linkTitle = block.title.replace(/[\[\]]/g, '');  // Escape brackets
+  // Priority: tags (aliases) > title > Block #id
+  let linkTitle: string;
+  
+  if (Array.isArray(block.tags) && block.tags.length > 0) {
+    // tags field contains aliases (page names)
+    const validTags = block.tags.filter((t: any) => typeof t === "string" && t.trim());
+    linkTitle = validTags.length > 0 ? validTags.join(" / ") : block.title;
+  } else {
+    linkTitle = block.title;
+  }
+  
+  linkTitle = linkTitle.replace(/[\[\]]/g, '');  // Escape brackets
   
   // Use block ID format for untitled blocks to prevent AI from calling getPage
   if (!linkTitle || linkTitle === '(untitled)' || linkTitle.trim() === '') {
@@ -98,5 +110,5 @@ export function formatBlockResult(block: {
  */
 export function addLinkPreservationNote(resultCount: number): string {
   if (resultCount === 0) return '';
-  return '📌 提示：链接可点击。在回复中引用块时，请使用 blockid:数字 格式（例如：blockid:433），这将自动渲染为可点击的链接。\n⚠️ 注意：以上结果已包含完整内容，请勿再调用 getPage 获取详情。\n\n';
+  return '📌 重要：引用块时必须使用 blockid:数字 格式（如 blockid:433），不要用 [数字] 格式！只有 blockid: 格式才能渲染为可点击链接。\n⚠️ 以上结果已包含完整内容，请勿再调用 getPage 获取详情。\n\n';
 }

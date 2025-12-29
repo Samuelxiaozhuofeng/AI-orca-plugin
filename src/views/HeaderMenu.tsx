@@ -8,14 +8,12 @@ const { createElement, useState, useEffect, useRef } = React;
 const { Button } = orca.components;
 
 interface HeaderMenuProps {
-  onSaveSession: () => void;
   onClearChat: () => void;
   onOpenSettings: () => void;
   onOpenMemoryManager: () => void;
 }
 
 export default function HeaderMenu({
-  onSaveSession,
   onClearChat,
   onOpenSettings,
   onOpenMemoryManager,
@@ -85,26 +83,14 @@ export default function HeaderMenu({
             padding: "4px 0",
           },
         },
-        // Save Session
-        createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onSaveSession),
-            onMouseEnter: (e: any) => e.currentTarget.style.background = "var(--orca-color-bg-2)",
-            onMouseLeave: (e: any) => e.currentTarget.style.background = "transparent",
-          },
-          createElement("i", { className: "ti ti-device-floppy" }),
-          "Save Session"
-        ),
         // Settings
         createElement(
           "div",
           {
             style: menuItemStyle,
             onClick: () => handleItemClick(onOpenSettings),
-            onMouseEnter: (e: any) => e.currentTarget.style.background = "var(--orca-color-bg-2)",
-            onMouseLeave: (e: any) => e.currentTarget.style.background = "transparent",
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
           },
           createElement("i", { className: "ti ti-settings" }),
           "Settings"
@@ -115,8 +101,8 @@ export default function HeaderMenu({
           {
             style: menuItemStyle,
             onClick: () => handleItemClick(onOpenMemoryManager),
-            onMouseEnter: (e: any) => e.currentTarget.style.background = "var(--orca-color-bg-2)",
-            onMouseLeave: (e: any) => e.currentTarget.style.background = "transparent",
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
           },
           createElement("i", { className: "ti ti-brain" }),
           "记忆管理"
@@ -135,8 +121,8 @@ export default function HeaderMenu({
           {
             style: { ...menuItemStyle, color: "var(--orca-color-danger, #dc3545)" },
             onClick: () => handleItemClick(onClearChat),
-            onMouseEnter: (e: any) => e.currentTarget.style.background = "var(--orca-color-bg-2)",
-            onMouseLeave: (e: any) => e.currentTarget.style.background = "transparent",
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
           },
           createElement("i", { className: "ti ti-trash" }),
           "Clear Chat"

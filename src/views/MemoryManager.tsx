@@ -132,6 +132,8 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
   const [tagEditorEmoji, setTagEditorEmoji] = useState("");
   const [tagEditorLabel, setTagEditorLabel] = useState("");
   const [showTagEmojiPicker, setShowTagEmojiPicker] = useState(false);
+  // Track newly added tags for highlighting
+  const [newTagIds, setNewTagIds] = useState<Set<string>>(new Set());
 
   // Get active user and their memories
   const activeUser = useMemo(() => {
@@ -424,6 +426,8 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
     portraitAbortRef.current = abortController;
     
     setIsGeneratingPortrait(true);
+    // Clear new tag highlights when generating fresh
+    setNewTagIds(new Set());
     try {
       // Import and use portrait generation service
       const { generatePortrait } = await import("../services/portrait-generation");
@@ -455,6 +459,84 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
       portraitAbortRef.current = null;
     }
   }, [activeUser, userMemories]);
+
+  // Refresh AI impression - regenerate based on current portrait categories
+  const handleRefreshAIImpression = useCallback(async () => {
+    if (!activeUser || !userPortrait || userPortrait.categories.length === 0) {
+      if (typeof orca !== "undefined" && orca.notify) {
+        orca.notify("warn", "请先添加分类信息后再刷新 AI 印象");
+      }
+      return;
+    }
+    
+    // Cancel any existing generation
+    if (portraitAbortRef.current) {
+      portraitAbortRef.current.abort();
+    }
+    
+    // Create new abort controller
+    const abortController = new AbortController();
+    portraitAbortRef.current = abortController;
+    
+    setIsGeneratingPortrait(true);
+    try {
+      const { refreshPortraitFromCategories } = await import("../services/portrait-generation");
+      const result = await refreshPortraitFromCategories(
+        userPortrait.categories,
+        userPortrait.tags,
+        abortController.signal
+      );
+      
+      if (abortController.signal.aborted) {
+        return;
+      }
+      
+      if (result.success && result.portrait && result.portrait.tags.length > 0) {
+        // Track new tag IDs for highlighting
+        const newIds = new Set<string>();
+        
+        // Filter out duplicate tags
+        const existingLabels = new Set(userPortrait.tags.map(t => t.label.toLowerCase()));
+        const newTags = result.portrait.tags.filter(tag => 
+          !existingLabels.has(tag.label.toLowerCase())
+        );
+        
+        if (newTags.length > 0) {
+          newTags.forEach(tag => newIds.add(tag.id));
+          
+          memoryStore.updatePortrait(activeUser.id, {
+            tags: [...userPortrait.tags, ...newTags],
+            categories: userPortrait.categories,
+          });
+          
+          setNewTagIds(newIds);
+          
+          if (typeof orca !== "undefined" && orca.notify) {
+            orca.notify("success", `已更新 AI 印象，新增 ${newTags.length} 个标签`);
+          }
+        } else {
+          if (typeof orca !== "undefined" && orca.notify) {
+            orca.notify("info", "AI 印象已是最新，无需更新");
+          }
+        }
+      } else if (result.error) {
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("error", result.error);
+        }
+      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        console.log("[MemoryManager] AI impression refresh cancelled");
+        return;
+      }
+      console.error("[MemoryManager] Failed to refresh AI impression:", error);
+    } finally {
+      if (!abortController.signal.aborted) {
+        setIsGeneratingPortrait(false);
+      }
+      portraitAbortRef.current = null;
+    }
+  }, [activeUser, userPortrait]);
 
   const handleEditTag = useCallback((tagId: string) => {
     if (!userPortrait) return;
@@ -565,6 +647,36 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
     setShowTagEmojiPicker(false);
   }, []);
 
+  // InfoItem reorder and value management handlers
+  const handleReorderInfoItems = useCallback((categoryId: string, itemIds: string[]) => {
+    if (activeUser) {
+      memoryStore.reorderPortraitInfoItems(activeUser.id, categoryId, itemIds);
+    }
+  }, [activeUser]);
+
+  const handleAddInfoItemValue = useCallback((categoryId: string, itemId: string, value: string) => {
+    if (activeUser) {
+      memoryStore.addPortraitInfoItemValue(activeUser.id, categoryId, itemId, value);
+    }
+  }, [activeUser]);
+
+  const handleRemoveInfoItemValue = useCallback((categoryId: string, itemId: string, valueIndex: number) => {
+    if (activeUser) {
+      memoryStore.removePortraitInfoItemValue(activeUser.id, categoryId, itemId, valueIndex);
+    }
+  }, [activeUser]);
+
+  const handleUpdateInfoItemValue = useCallback((categoryId: string, itemId: string, valueIndex: number, newValue: string) => {
+    if (activeUser) {
+      memoryStore.updatePortraitInfoItemValue(activeUser.id, categoryId, itemId, valueIndex, newValue);
+    }
+  }, [activeUser]);
+
+  const handleReorderCategories = useCallback((categoryIds: string[]) => {
+    if (activeUser) {
+      memoryStore.reorderPortraitCategories(activeUser.id, categoryIds);
+    }
+  }, [activeUser]);
 
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -852,6 +964,8 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         onDeleteUser: handleDeleteUserClick,
         onAvatarClick: handleAvatarClick,
         onSetAsSelf: (id: string | null) => memoryStore.setUserAsSelf(id),
+        onToggleUserDisabled: (id: string) => memoryStore.toggleUserDisabled(id),
+        getMemoryCountForUser: (userId: string) => storeSnap.memories.filter(m => m.userId === userId).length,
       }),
       // User Portrait Card
       createElement(UserPortraitCard, {
@@ -870,6 +984,13 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         onEditCategoryTitle: handleEditCategoryTitle,
         onDeleteCategory: handleDeleteCategory,
         onAddInfoItem: handleAddInfoItem,
+        onReorderInfoItems: handleReorderInfoItems,
+        onAddInfoItemValue: handleAddInfoItemValue,
+        onRemoveInfoItemValue: handleRemoveInfoItemValue,
+        onUpdateInfoItemValue: handleUpdateInfoItemValue,
+        onReorderCategories: handleReorderCategories,
+        onRefreshAIImpression: handleRefreshAIImpression,
+        newTagIds: newTagIds,
       }),
       // Memory Card
       createElement(MemoryCard, {

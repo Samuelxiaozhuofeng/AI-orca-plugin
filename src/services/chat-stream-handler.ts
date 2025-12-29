@@ -26,6 +26,7 @@ export interface StreamOptions {
 export interface StreamResult {
   content: string;
   toolCalls: ToolCallInfo[];
+  reasoning?: string;
 }
 
 export interface ToolCallInfo {
@@ -39,6 +40,7 @@ export interface ToolCallInfo {
 
 export type StreamChunk =
   | { type: "content"; content: string }
+  | { type: "reasoning"; reasoning: string }
   | { type: "tool_calls"; toolCalls: ToolCallInfo[] }
   | { type: "done"; result: StreamResult };
 
@@ -107,7 +109,8 @@ export function mergeToolCalls(
       }
     } else {
       // Create new tool call
-      const newId = tc.id || nowId();
+      // Use tc.id if available, otherwise generate based on index or fallback to nowId()
+      const newId = tc.id || (typeof tc.index === "number" ? `tool_call_${tc.index}` : nowId());
       const newToolCall: any = {
         id: newId,
         type: tc.type || "function",
@@ -146,6 +149,7 @@ export async function* streamChatCompletion(
   options: StreamOptions
 ): AsyncGenerator<StreamChunk, void, unknown> {
   let content = "";
+  let reasoning = "";
   let toolCalls: ToolCallInfo[] = [];
 
   for await (const chunk of openAIChatCompletionsStream({
@@ -161,6 +165,9 @@ export async function* streamChatCompletion(
     if (chunk.type === "content" && chunk.content) {
       content += chunk.content;
       yield { type: "content", content: chunk.content };
+    } else if (chunk.type === "reasoning" && chunk.reasoning) {
+      reasoning += chunk.reasoning;
+      yield { type: "reasoning", reasoning: chunk.reasoning };
     } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
       console.log("[streamChatCompletion] Received tool_calls chunk, merging...");
       const oldCount = toolCalls.length;
@@ -170,7 +177,7 @@ export async function* streamChatCompletion(
     }
   }
 
-  yield { type: "done", result: { content, toolCalls } };
+  yield { type: "done", result: { content, toolCalls, reasoning: reasoning || undefined } };
 }
 
 /**
@@ -189,6 +196,7 @@ export async function* streamChatWithRetry(
 ): AsyncGenerator<StreamChunk, void, unknown> {
   const timeoutMs = options.timeoutMs ?? 30000;
   let content = "";
+  let reasoning = "";
   let toolCalls: ToolCallInfo[] = [];
   let usedFallback = false;
 
@@ -238,6 +246,9 @@ export async function* streamChatWithRetry(
         if (chunk.type === "content" && chunk.content) {
           content += chunk.content;
           yield { type: "content", content: chunk.content };
+        } else if (chunk.type === "reasoning" && chunk.reasoning) {
+          reasoning += chunk.reasoning;
+          yield { type: "reasoning", reasoning: chunk.reasoning };
         } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
           console.log("[streamChatWithRetry] Received tool_calls chunk, merging...");
           const oldCount = toolCalls.length;
@@ -267,9 +278,10 @@ export async function* streamChatWithRetry(
     yield* doStream(fallbackMessages);
   }
 
-  // Retry with fallback if response is empty
+  // Only retry with fallback if response is truly empty (no content AND no tool calls)
+  // Tool calls with empty content is a valid response - don't retry in that case
   if (!usedFallback && content.trim().length === 0 && toolCalls.length === 0) {
-    console.warn("[streamChatWithRetry] Empty response, retrying with fallback...");
+    console.warn("[streamChatWithRetry] Empty response (no content, no tools), retrying with fallback...");
     usedFallback = true;
     content = "";
     onRetry?.();
@@ -279,7 +291,10 @@ export async function* streamChatWithRetry(
     } catch (fallbackErr: any) {
       console.error("[streamChatWithRetry] Fallback retry failed:", fallbackErr);
     }
+  } else if (toolCalls.length > 0) {
+    // Log that we got tool calls - this is expected behavior, not an error
+    console.log(`[streamChatWithRetry] Response complete with ${toolCalls.length} tool call(s)`);
   }
 
-  yield { type: "done", result: { content, toolCalls } };
+  yield { type: "done", result: { content, toolCalls, reasoning: reasoning || undefined } };
 }

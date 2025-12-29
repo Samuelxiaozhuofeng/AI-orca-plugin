@@ -4,7 +4,12 @@
  * Requirements: 15.1, 15.2, 15.4, 15.5
  */
 
-import type { UserPortrait, PortraitTag, PortraitCategory, PortraitInfoItem } from "../../store/memory-store";
+import type {
+  UserPortrait,
+  PortraitTag,
+  PortraitCategory,
+  PortraitInfoItem,
+} from "../../store/memory-store";
 import {
   cardStyle,
   cardHeaderStyle,
@@ -15,12 +20,16 @@ import {
   generateButtonStyle,
   portraitEmptyStyle,
 } from "./card-styles";
+import SortableInfoItemList from "./SortableInfoItemList";
+import SortableCategoryList from "./SortableCategoryList";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
+  useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
+  useRef: <T>(value: T) => { current: T };
 };
-const { createElement, useState } = React;
+const { createElement, useState, useCallback, useRef } = React;
 
 // ============================================================================
 // Types
@@ -42,6 +51,16 @@ interface UserPortraitCardProps {
   onEditCategoryTitle: (categoryId: string, title: string) => void;
   onDeleteCategory: (categoryId: string) => void;
   onAddInfoItem: (categoryId: string, label: string, value: string) => void;
+  // New props for info item management
+  onReorderInfoItems?: (categoryId: string, itemIds: string[]) => void;
+  onAddInfoItemValue?: (categoryId: string, itemId: string, value: string) => void;
+  onRemoveInfoItemValue?: (categoryId: string, itemId: string, valueIndex: number) => void;
+  onUpdateInfoItemValue?: (categoryId: string, itemId: string, valueIndex: number, newValue: string) => void;
+  onReorderCategories?: (categoryIds: string[]) => void;
+  // Refresh AI impression
+  onRefreshAIImpression?: () => void;
+  // Track newly added tags for highlighting
+  newTagIds?: Set<string>;
 }
 
 // ============================================================================
@@ -64,6 +83,13 @@ export default function UserPortraitCard({
   onEditCategoryTitle,
   onDeleteCategory,
   onAddInfoItem,
+  onReorderInfoItems,
+  onAddInfoItemValue,
+  onRemoveInfoItemValue,
+  onUpdateInfoItemValue,
+  onReorderCategories,
+  onRefreshAIImpression,
+  newTagIds,
 }: UserPortraitCardProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [hoveredTagId, setHoveredTagId] = useState<string | null>(null);
@@ -105,6 +131,14 @@ export default function UserPortraitCard({
     wordBreak: "break-word",
   };
 
+  // New tag style with highlight
+  const newTagStyle: React.CSSProperties = {
+    ...tagStyle,
+    background: "rgba(40, 167, 69, 0.15)",
+    border: "1px solid rgba(40, 167, 69, 0.4)",
+    color: "var(--orca-color-text-1)",
+  };
+
   const tagDeleteBtnStyle: React.CSSProperties = {
     position: "absolute",
     top: "-6px",
@@ -125,18 +159,32 @@ export default function UserPortraitCard({
 
   const renderTag = (tag: PortraitTag) => {
     const isHovered = hoveredTagId === tag.id;
+    const isNew = newTagIds?.has(tag.id);
 
     // Display mode only - AI tags are not editable
     return createElement(
       "div",
       {
         key: tag.id,
-        style: tagStyle,
+        style: isNew ? newTagStyle : tagStyle,
         onMouseEnter: () => setHoveredTagId(tag.id),
         onMouseLeave: () => setHoveredTagId(null),
+        title: isNew ? "新增印象" : undefined,
       },
       createElement("span", null, tag.emoji),
       createElement("span", null, tag.label),
+      isNew && createElement(
+        "span",
+        {
+          style: {
+            marginLeft: "4px",
+            fontSize: "10px",
+            color: "rgba(40, 167, 69, 0.9)",
+            fontWeight: 500,
+          },
+        },
+        "新"
+      ),
       isHovered &&
         createElement(
           "button",
@@ -176,13 +224,63 @@ export default function UserPortraitCard({
       cursor: "pointer",
     };
 
+    const refreshBtnStyle: React.CSSProperties = {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
+      padding: "4px 10px",
+      borderRadius: "4px",
+      background: "transparent",
+      border: "1px solid var(--orca-color-border)",
+      fontSize: "13px",
+      color: "var(--orca-color-text-2)",
+      cursor: isGenerating ? "not-allowed" : "pointer",
+      opacity: isGenerating ? 0.6 : 1,
+    };
+
+    const tagsHeaderStyle: React.CSSProperties = {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: "8px",
+    };
+
     return createElement(
       "div",
       null,
       createElement(
         "div",
-        { style: { fontSize: "12px", color: "var(--orca-color-text-2)", marginBottom: "8px" } },
-        "AI 印象"
+        { style: tagsHeaderStyle },
+        createElement(
+          "div",
+          { style: { fontSize: "12px", color: "var(--orca-color-text-2)" } },
+          "AI 印象"
+        ),
+        onRefreshAIImpression && createElement(
+          "button",
+          {
+            style: refreshBtnStyle,
+            onClick: isGenerating ? undefined : onRefreshAIImpression,
+            title: isGenerating ? "正在生成..." : "刷新 AI 印象",
+            onMouseEnter: (e: any) => {
+              if (!isGenerating) {
+                e.currentTarget.style.background = "var(--orca-color-bg-3)";
+                e.currentTarget.style.borderColor = "var(--orca-color-primary)";
+                e.currentTarget.style.color = "var(--orca-color-primary)";
+              }
+            },
+            onMouseLeave: (e: any) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.borderColor = "var(--orca-color-border)";
+              e.currentTarget.style.color = "var(--orca-color-text-2)";
+            },
+          },
+          createElement("i", {
+            className: isGenerating ? "ti ti-loader" : "ti ti-refresh",
+            style: isGenerating ? { animation: "spin 1s linear infinite" } : undefined,
+          }),
+          isGenerating ? "生成中" : "刷新"
+        )
       ),
       createElement(
         "div",
@@ -499,7 +597,24 @@ export default function UserPortraitCard({
         createElement(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "6px", marginLeft: "18px" } },
-          items.map((item) => renderInfoItem(category, item)),
+          // Use SortableInfoItemList if handlers are provided
+          onReorderInfoItems && onAddInfoItemValue && onRemoveInfoItemValue
+            ? createElement(SortableInfoItemList, {
+                category,
+                onReorder: (itemIds: string[]) => onReorderInfoItems(category.id, itemIds),
+                onEditItem: (itemId: string, label: string, value: string) =>
+                  onEditInfoItem(category.id, itemId, label, value),
+                onDeleteItem: (itemId: string) => onDeleteInfoItem(category.id, itemId),
+                onAddValue: (itemId: string, value: string) =>
+                  onAddInfoItemValue(category.id, itemId, value),
+                onRemoveValue: (itemId: string, valueIndex: number) =>
+                  onRemoveInfoItemValue(category.id, itemId, valueIndex),
+                onUpdateValue: onUpdateInfoItemValue
+                  ? (itemId: string, valueIndex: number, newValue: string) =>
+                      onUpdateInfoItemValue(category.id, itemId, valueIndex, newValue)
+                  : undefined,
+              })
+            : items.map((item) => renderInfoItem(category, item)),
           // Add info item form or button
           isAddingInfo
             ? createElement(
@@ -584,6 +699,29 @@ export default function UserPortraitCard({
     );
   };
 
+  // Collapse/expand all categories handlers
+  const handleCollapseAll = useCallback(() => {
+    if (portrait?.categories) {
+      setCollapsedCategories(new Set(portrait.categories.map(c => c.id)));
+    }
+  }, [portrait?.categories]);
+
+  const handleExpandAll = useCallback(() => {
+    setCollapsedCategories(new Set());
+  }, []);
+
+  const handleToggleCategoryCollapse = useCallback((categoryId: string) => {
+    setCollapsedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) {
+        next.delete(categoryId);
+      } else {
+        next.add(categoryId);
+      }
+      return next;
+    });
+  }, []);
+
   const renderCategories = () => {
     const addCategoryBtnStyle: React.CSSProperties = {
       display: "inline-flex",
@@ -625,10 +763,28 @@ export default function UserPortraitCard({
       cursor: "pointer",
     };
 
+    // Use SortableCategoryList if reorder handler is provided
+    const categoriesContent = onReorderCategories && portrait?.categories
+      ? createElement(SortableCategoryList, {
+          categories: portrait.categories,
+          collapsedCategories,
+          onReorder: onReorderCategories,
+          onToggleCollapse: handleToggleCategoryCollapse,
+          onCollapseAll: handleCollapseAll,
+          onExpandAll: handleExpandAll,
+          renderCategory: (category: PortraitCategory, isDragging: boolean, isDropTarget: boolean) => 
+            renderCategory(category),
+        })
+      : createElement(
+          "div",
+          { style: { marginTop: "16px" } },
+          portrait?.categories.map(renderCategory)
+        );
+
     return createElement(
       "div",
-      { style: { marginTop: "16px" } },
-      portrait?.categories.map(renderCategory),
+      null,
+      categoriesContent,
       // Add category form or button
       isAddingCategory
         ? createElement(
@@ -856,12 +1012,24 @@ export default function UserPortraitCard({
   const renderInfoItemModal = () => {
     if (!showInfoItemModal) return null;
 
-    const textareaStyle: React.CSSProperties = {
+    const horizontalFormStyle: React.CSSProperties = {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      marginBottom: "12px",
+    };
+
+    const labelInputStyle: React.CSSProperties = {
       ...modalInputStyle,
-      minHeight: "60px",
-      resize: "vertical",
-      lineHeight: "1.5",
-      fontFamily: "inherit",
+      width: "100px",
+      flexShrink: 0,
+      marginBottom: 0,
+    };
+
+    const valueInputStyle: React.CSSProperties = {
+      ...modalInputStyle,
+      flex: 1,
+      marginBottom: 0,
     };
 
     return createElement(
@@ -869,34 +1037,40 @@ export default function UserPortraitCard({
       { style: modalOverlayStyle, onClick: handleCancelInfoItemModal },
       createElement(
         "div",
-        { style: modalContentStyle, onClick: (e: any) => e.stopPropagation() },
+        { style: { ...modalContentStyle, minWidth: "400px" }, onClick: (e: any) => e.stopPropagation() },
         createElement("div", { style: modalTitleStyle }, "编辑信息"),
-        createElement("input", {
-          type: "text",
-          placeholder: "标签（可选，如：姓名）",
-          value: editingInfoLabel,
-          onChange: (e: any) => setEditingInfoLabel(e.target.value),
-          style: modalInputStyle,
-        }),
-        createElement("textarea", {
-          placeholder: "内容（必填）",
-          value: editingInfoValue,
-          onChange: (e: any) => setEditingInfoValue(e.target.value),
-          style: textareaStyle,
-          autoFocus: true,
-          onKeyDown: (e: any) => {
-            if (e.key === "Enter" && e.ctrlKey && editingInfoValue.trim()) {
-              handleSaveInfoItemModal();
-            }
-            if (e.key === "Escape") {
-              handleCancelInfoItemModal();
-            }
-          },
-        }),
         createElement(
           "div",
-          { style: { fontSize: "11px", color: "var(--orca-color-text-3)", marginTop: "-6px", marginBottom: "8px" } },
-          "Ctrl+Enter 保存"
+          { style: horizontalFormStyle },
+          createElement("input", {
+            type: "text",
+            placeholder: "标签",
+            value: editingInfoLabel,
+            onChange: (e: any) => setEditingInfoLabel(e.target.value),
+            style: labelInputStyle,
+          }),
+          createElement("span", { style: { color: "var(--orca-color-text-2)" } }, "："),
+          createElement("input", {
+            type: "text",
+            placeholder: "内容（必填）",
+            value: editingInfoValue,
+            onChange: (e: any) => setEditingInfoValue(e.target.value),
+            style: valueInputStyle,
+            autoFocus: true,
+            onKeyDown: (e: any) => {
+              if (e.key === "Enter" && editingInfoValue.trim()) {
+                handleSaveInfoItemModal();
+              }
+              if (e.key === "Escape") {
+                handleCancelInfoItemModal();
+              }
+            },
+          })
+        ),
+        createElement(
+          "div",
+          { style: { fontSize: "11px", color: "var(--orca-color-text-3)", marginBottom: "8px" } },
+          "Enter 保存，Escape 取消"
         ),
         createElement(
           "div",

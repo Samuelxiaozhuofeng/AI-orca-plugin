@@ -334,11 +334,10 @@ export default function MemoryCard({
       }),
       // Content - editable or display (same visual style)
       isEditing
-        ? createElement("div", {
-            contentEditable: true,
-            suppressContentEditableWarning: true,
-            onInput: (e: any) => {
-              setEditingContent(e.currentTarget.textContent || "");
+        ? createElement("textarea", {
+            value: editingContent,
+            onChange: (e: any) => {
+              setEditingContent(e.target.value);
             },
             onBlur: handleSaveEditMemory,
             onKeyDown: (e: any) => {
@@ -351,19 +350,32 @@ export default function MemoryCard({
                 handleCancelEditMemory(memory.content);
               }
             },
+            autoFocus: true,
             style: { 
               ...memoryContentStyle, 
               cursor: "text", 
               whiteSpace: "pre-wrap",
               outline: "none",
               minHeight: "20px",
+              border: "none",
+              background: "transparent",
+              resize: "none",
+              fontFamily: "inherit",
+              fontSize: "inherit",
+              lineHeight: "inherit",
+              padding: "0",
+              margin: "0",
+              width: "100%",
+              overflow: "hidden",
               color: memory.isExtracted 
                 ? "var(--orca-color-text-2)" 
                 : "var(--orca-color-text-1)",
             },
             ref: (el: any) => {
-              if (el && !el.dataset.initialized) {
-                el.dataset.initialized = "true";
+              if (el) {
+                // Auto-resize textarea to fit content
+                el.style.height = "auto";
+                el.style.height = el.scrollHeight + "px";
                 // Restore scroll position
                 if (listContainerRef.current && scrollPositionRef.current > 0) {
                   requestAnimationFrame(() => {
@@ -374,7 +386,7 @@ export default function MemoryCard({
                 }
               }
             },
-          }, editingContent)
+          })
         : createElement(
             "div",
             {

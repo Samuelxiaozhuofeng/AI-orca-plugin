@@ -478,4 +478,142 @@ function parseContentToItems(content: string): PortraitInfoItem[] {
  */
 export const portraitGenerationService = {
   generatePortrait,
+  refreshPortraitFromCategories,
 };
+
+// ============================================================================
+// Refresh Portrait from Categories
+// ============================================================================
+
+const REFRESH_PORTRAIT_PROMPT = `根据以下用户分类信息，重新生成 AI 印象标签。
+
+## 当前用户分类信息
+{categories}
+
+## 生成规则
+1. 根据分类信息中的内容，生成能够概括用户特点的印象标签
+2. 每个标签用 emoji + 简短描述（2-6字）
+3. 最多生成 10 个标签
+4. 标签应该简洁有趣，能快速传达用户特点
+5. 不要重复已有的标签内容
+
+## 已有标签（避免重复）
+{existingTags}
+
+## 输出格式（JSON）
+{
+  "tags": [
+    { "emoji": "👨‍👩‍👧", "label": "三口之家" },
+    { "emoji": "🌶️", "label": "无辣不欢" }
+  ]
+}
+
+只输出 JSON，不要添加任何其他文字。`;
+
+/**
+ * Refresh AI impression tags based on current portrait categories
+ * 
+ * @param categories - Current portrait categories
+ * @param existingTags - Existing tags to avoid duplication
+ * @param signal - Optional AbortSignal for cancellation
+ * @returns PortraitGenerationResult containing new tags
+ */
+export async function refreshPortraitFromCategories(
+  categories: PortraitCategory[],
+  existingTags: PortraitTag[],
+  signal?: AbortSignal
+): Promise<PortraitGenerationResult> {
+  // Validate input
+  if (!categories || categories.length === 0) {
+    return {
+      portrait: null,
+      success: false,
+      error: "没有可用的分类信息来生成印象",
+    };
+  }
+
+  // Get API settings
+  const pluginName = getAiChatPluginName();
+  const settings = getAiChatSettings(pluginName);
+  
+  if (!settings.apiUrl || !settings.apiKey) {
+    return {
+      portrait: null,
+      success: false,
+      error: "API 配置缺失，请在设置中配置 API URL 和 API Key",
+    };
+  }
+
+  const model = resolveAiModel(settings);
+  if (!model) {
+    return {
+      portrait: null,
+      success: false,
+      error: "未配置 AI 模型",
+    };
+  }
+
+  // Format categories for the prompt
+  const categoriesText = categories.map(cat => {
+    const itemsText = cat.items.map(item => {
+      const values = item.values ? [item.value, ...item.values] : [item.value];
+      return item.label ? `${item.label}：${values.join('、')}` : values.join('、');
+    }).join('\n');
+    return `【${cat.title}】\n${itemsText}`;
+  }).join('\n\n');
+
+  // Format existing tags
+  const existingTagsText = existingTags.length > 0
+    ? existingTags.map(t => `${t.emoji} ${t.label}`).join('、')
+    : '无';
+
+  // Build the prompt
+  const prompt = REFRESH_PORTRAIT_PROMPT
+    .replace("{categories}", categoriesText)
+    .replace("{existingTags}", existingTagsText);
+
+  try {
+    const response = await callPortraitAPI({
+      apiUrl: settings.apiUrl,
+      apiKey: settings.apiKey,
+      model,
+      prompt,
+      temperature: 0.7,
+      signal,
+    });
+
+    // Parse the response - only extract tags
+    const jsonContent = extractJsonFromResponse(response);
+    if (!jsonContent) {
+      return {
+        portrait: null,
+        success: false,
+        error: "无法解析 AI 响应",
+      };
+    }
+
+    const parsed = JSON.parse(jsonContent);
+    const tags: PortraitTag[] = [];
+    
+    if (Array.isArray(parsed.tags)) {
+      for (const item of parsed.tags) {
+        const tag = validateTagItem(item);
+        if (tag) {
+          tags.push(tag);
+        }
+      }
+    }
+
+    return {
+      portrait: { tags, categories: [] },
+      success: true,
+    };
+  } catch (error) {
+    console.error("[PortraitGeneration] Refresh failed:", error);
+    return {
+      portrait: null,
+      success: false,
+      error: error instanceof Error ? error.message : "印象刷新失败",
+    };
+  }
+}

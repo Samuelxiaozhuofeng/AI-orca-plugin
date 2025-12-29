@@ -1,6 +1,8 @@
 /**
  * UserManagementCard - Card component for user profile management
  * Displays user avatar with emoji, user selector, and action buttons
+ * Supports user disable functionality via right-click
+ * Supports collapse/expand
  * Requirements: 9.1, 9.3, 12.3, 12.4
  */
 
@@ -8,20 +10,79 @@ import type { UserProfile } from "../../store/memory-store";
 import {
   cardStyle,
   cardHeaderStyle,
+  cardHeaderCollapsedStyle,
   cardTitleStyle,
+  cardCollapseIconStyle,
   cardBodyStyle,
   cardActionsStyle,
   userAvatarStyle,
   userInfoContainerStyle,
   userDetailsStyle,
   userNameRowStyle,
-  userNameStyle,
   userStatsStyle,
-  userSelectorStyle,
   userActionButtonStyle,
-  editInputStyle,
   iconButtonStyle,
 } from "./card-styles";
+
+// ============================================================================
+// User Tab Styles - Modern Pill Design
+// ============================================================================
+
+const userTabsContainerStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "6px",
+  marginTop: "12px",
+};
+
+const userTabStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "5px",
+  padding: "4px 10px",
+  borderRadius: "16px",
+  border: "1px solid var(--orca-color-border)",
+  background: "var(--orca-color-bg-1)",
+  color: "var(--orca-color-text-2)",
+  fontSize: "12px",
+  cursor: "pointer",
+  transition: "all 0.15s ease",
+};
+
+const userTabActiveStyle: React.CSSProperties = {
+  ...userTabStyle,
+  borderColor: "var(--orca-color-text-1)",
+  background: "var(--orca-color-bg-3)",
+  color: "var(--orca-color-text-1)",
+  fontWeight: 500,
+};
+
+const userTabDisabledStyle: React.CSSProperties = {
+  ...userTabStyle,
+  opacity: 0.4,
+  textDecoration: "line-through",
+};
+
+// Badge style for memory count
+const userTabBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: "16px",
+  height: "16px",
+  padding: "0 4px",
+  borderRadius: "8px",
+  background: "var(--orca-color-bg-3)",
+  color: "var(--orca-color-text-3)",
+  fontSize: "10px",
+  fontWeight: 500,
+};
+
+const userTabBadgeActiveStyle: React.CSSProperties = {
+  ...userTabBadgeStyle,
+  background: "var(--orca-color-bg-2)",
+  color: "var(--orca-color-text-2)",
+};
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -46,6 +107,9 @@ interface UserManagementCardProps {
   onDeleteUser: (id: string) => void;
   onAvatarClick: () => void;
   onSetAsSelf?: (id: string | null) => void;
+  onToggleUserDisabled?: (id: string) => void;
+  getMemoryCountForUser?: (userId: string) => number;
+  defaultCollapsed?: boolean;
 }
 
 // ============================================================================
@@ -64,7 +128,11 @@ export default function UserManagementCard({
   onDeleteUser,
   onAvatarClick,
   onSetAsSelf,
+  onToggleUserDisabled,
+  getMemoryCountForUser,
+  defaultCollapsed = false,
 }: UserManagementCardProps) {
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newUserName, setNewUserName] = useState("");
   const [isEditingUser, setIsEditingUser] = useState(false);
@@ -75,11 +143,12 @@ export default function UserManagementCard({
   // Handlers
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleUserSelectChange = useCallback((e: any) => {
-    onUserChange(e.target.value);
-  }, [onUserChange]);
+  const handleToggleCollapse = useCallback(() => {
+    setIsCollapsed(prev => !prev);
+  }, []);
 
-  const handleStartAddUser = useCallback(() => {
+  const handleStartAddUser = useCallback((e: any) => {
+    e.stopPropagation();
     setIsAddingUser(true);
     setNewUserName("");
   }, []);
@@ -97,7 +166,8 @@ export default function UserManagementCard({
     setNewUserName("");
   }, []);
 
-  const handleStartEditUser = useCallback(() => {
+  const handleStartEditUser = useCallback((e: any) => {
+    e.stopPropagation();
     if (activeUser) {
       setIsEditingUser(true);
       setEditingUserName(activeUser.name);
@@ -117,15 +187,16 @@ export default function UserManagementCard({
     setEditingUserName("");
   }, []);
 
-  const handleDeleteUser = useCallback(() => {
+  const handleDeleteUser = useCallback((e: any) => {
+    e.stopPropagation();
     if (activeUser && !activeUser.isDefault) {
       onDeleteUser(activeUser.id);
     }
   }, [activeUser, onDeleteUser]);
 
-  const handleToggleSelf = useCallback(() => {
+  const handleToggleSelf = useCallback((e: any) => {
+    e.stopPropagation();
     if (activeUser && onSetAsSelf) {
-      // Toggle: if already self, clear it; otherwise set as self
       onSetAsSelf(activeUser.isSelf ? null : activeUser.id);
     }
   }, [activeUser, onSetAsSelf]);
@@ -136,7 +207,7 @@ export default function UserManagementCard({
 
   const renderAvatar = () => {
     const avatarCurrentStyle = isAvatarHovered
-      ? { ...userAvatarStyle, transform: "scale(1.05)", boxShadow: "0 4px 12px rgba(0, 0, 0, 0.2)" }
+      ? { ...userAvatarStyle, transform: "scale(1.05)", background: "var(--orca-color-bg-2)" }
       : userAvatarStyle;
 
     return createElement(
@@ -152,16 +223,25 @@ export default function UserManagementCard({
     );
   };
 
-  const renderUserSelector = () => {
+  const renderUserInfo = () => {
     if (isEditingUser) {
       return createElement(
         "div",
-        { style: { display: "flex", gap: "8px", flex: 1 } },
+        { style: { display: "flex", gap: "6px", flex: 1 } },
         createElement("input", {
           type: "text",
           value: editingUserName,
           onChange: (e: any) => setEditingUserName(e.target.value),
-          style: { ...userSelectorStyle, flex: 1 },
+          style: {
+            flex: 1,
+            padding: "6px 10px",
+            borderRadius: "6px",
+            border: "1px solid var(--orca-color-border)",
+            background: "var(--orca-color-bg-1)",
+            color: "var(--orca-color-text-1)",
+            fontSize: "13px",
+            outline: "none",
+          },
           autoFocus: true,
           onKeyDown: (e: any) => {
             if (e.key === "Enter") handleConfirmEditUser();
@@ -171,7 +251,7 @@ export default function UserManagementCard({
         createElement(
           "button",
           {
-            style: { ...iconButtonStyle, color: "var(--orca-color-primary)" },
+            style: { ...iconButtonStyle, color: "var(--orca-color-success, #28a745)" },
             onClick: handleConfirmEditUser,
             title: "保存",
           },
@@ -189,20 +269,11 @@ export default function UserManagementCard({
       );
     }
 
+    // 直接显示当前用户名
     return createElement(
-      "select",
-      {
-        style: userSelectorStyle,
-        value: activeUserId,
-        onChange: handleUserSelectChange,
-      },
-      users.map((user) =>
-        createElement(
-          "option",
-          { key: user.id, value: user.id },
-          `${user.emoji} ${user.name}${user.isDefault ? " (默认)" : ""}`
-        )
-      )
+      "div",
+      { style: { fontSize: "14px", fontWeight: 500, color: "var(--orca-color-text-1)" } },
+      activeUser?.name || "用户"
     );
   };
 
@@ -211,13 +282,22 @@ export default function UserManagementCard({
 
     return createElement(
       "div",
-      { style: { display: "flex", gap: "8px", marginTop: "12px" } },
+      { style: { display: "flex", gap: "6px", marginTop: "10px" } },
       createElement("input", {
         type: "text",
         placeholder: "输入新用户名...",
         value: newUserName,
         onChange: (e: any) => setNewUserName(e.target.value),
-        style: { ...userSelectorStyle, flex: 1 },
+        style: {
+          flex: 1,
+          padding: "6px 10px",
+          borderRadius: "6px",
+          border: "1px solid var(--orca-color-border)",
+          background: "var(--orca-color-bg-1)",
+          color: "var(--orca-color-text-1)",
+          fontSize: "13px",
+          outline: "none",
+        },
         autoFocus: true,
         onKeyDown: (e: any) => {
           if (e.key === "Enter") handleConfirmAddUser();
@@ -227,7 +307,7 @@ export default function UserManagementCard({
       createElement(
         "button",
         {
-          style: { ...iconButtonStyle, color: "var(--orca-color-primary)" },
+          style: { ...iconButtonStyle, color: "var(--orca-color-success, #28a745)" },
           onClick: handleConfirmAddUser,
           title: "确认添加",
         },
@@ -245,6 +325,71 @@ export default function UserManagementCard({
     );
   };
 
+  // Render user tabs for quick switching
+  const renderUserTabs = () => {
+    if (users.length <= 1) return null;
+
+    return createElement(
+      "div",
+      { style: userTabsContainerStyle },
+      users.map((user) => {
+        const isActive = user.id === activeUserId;
+        const isDisabled = user.isDisabled;
+        const memoryCount = getMemoryCountForUser ? getMemoryCountForUser(user.id) : 0;
+        
+        let tabStyle = userTabStyle;
+        if (isDisabled) {
+          tabStyle = userTabDisabledStyle;
+        } else if (isActive) {
+          tabStyle = userTabActiveStyle;
+        }
+
+        const badgeStyle = isActive ? userTabBadgeActiveStyle : userTabBadgeStyle;
+
+        return createElement(
+          "button",
+          {
+            key: user.id,
+            style: tabStyle,
+            onClick: () => {
+              if (!isActive) {
+                onUserChange(user.id);
+              }
+            },
+            onContextMenu: (e: any) => {
+              e.preventDefault();
+              if (onToggleUserDisabled) {
+                onToggleUserDisabled(user.id);
+              }
+            },
+            title: isDisabled 
+              ? `${user.name} (已禁用 - 右键启用)` 
+              : `${user.name} (右键禁用)`,
+            onMouseEnter: (e: any) => {
+              if (!isActive && !isDisabled) {
+                e.currentTarget.style.background = "var(--orca-color-bg-2)";
+                e.currentTarget.style.borderColor = "var(--orca-color-text-2)";
+              }
+            },
+            onMouseLeave: (e: any) => {
+              if (!isActive && !isDisabled) {
+                e.currentTarget.style.background = "var(--orca-color-bg-1)";
+                e.currentTarget.style.borderColor = "var(--orca-color-border)";
+              }
+            },
+          },
+          createElement("span", null, user.emoji),
+          createElement("span", null, user.name),
+          memoryCount > 0 && createElement("span", { style: badgeStyle }, memoryCount),
+          isDisabled && createElement("i", { 
+            className: "ti ti-ban", 
+            style: { fontSize: "11px", opacity: 0.6 } 
+          })
+        );
+      })
+    );
+  };
+
   const renderActionButtons = () => {
     if (isEditingUser) return null;
 
@@ -252,20 +397,19 @@ export default function UserManagementCard({
 
     return createElement(
       "div",
-      { style: cardActionsStyle },
-      // Set as self button
+      { style: cardActionsStyle, onClick: (e: any) => e.stopPropagation() },
       onSetAsSelf &&
         createElement(
           "button",
           {
             style: {
               ...userActionButtonStyle,
-              color: isSelf ? "var(--orca-color-primary, #007bff)" : undefined,
+              color: isSelf ? "var(--orca-color-text-1)" : undefined,
             },
             onClick: handleToggleSelf,
             title: isSelf ? "取消设为我自己" : "设为我自己",
             onMouseEnter: (e: any) => {
-              e.currentTarget.style.background = "var(--orca-color-bg-3)";
+              e.currentTarget.style.background = "var(--orca-color-bg-2)";
             },
             onMouseLeave: (e: any) => {
               e.currentTarget.style.background = "transparent";
@@ -280,7 +424,7 @@ export default function UserManagementCard({
           onClick: handleStartAddUser,
           title: "添加用户",
           onMouseEnter: (e: any) => {
-            e.currentTarget.style.background = "var(--orca-color-bg-3)";
+            e.currentTarget.style.background = "var(--orca-color-bg-2)";
           },
           onMouseLeave: (e: any) => {
             e.currentTarget.style.background = "transparent";
@@ -295,7 +439,7 @@ export default function UserManagementCard({
           onClick: handleStartEditUser,
           title: "编辑用户名",
           onMouseEnter: (e: any) => {
-            e.currentTarget.style.background = "var(--orca-color-bg-3)";
+            e.currentTarget.style.background = "var(--orca-color-bg-2)";
           },
           onMouseLeave: (e: any) => {
             e.currentTarget.style.background = "transparent";
@@ -311,7 +455,7 @@ export default function UserManagementCard({
             onClick: handleDeleteUser,
             title: "删除用户",
             onMouseEnter: (e: any) => {
-              e.currentTarget.style.background = "var(--orca-color-bg-3)";
+              e.currentTarget.style.background = "var(--orca-color-bg-2)";
             },
             onMouseLeave: (e: any) => {
               e.currentTarget.style.background = "transparent";
@@ -325,20 +469,33 @@ export default function UserManagementCard({
   return createElement(
     "div",
     { style: cardStyle },
-    // Card Header
+    // Card Header - clickable for collapse
     createElement(
       "div",
-      { style: cardHeaderStyle },
+      { 
+        style: isCollapsed ? cardHeaderCollapsedStyle : cardHeaderStyle,
+        onClick: handleToggleCollapse,
+      },
       createElement(
         "div",
         { style: cardTitleStyle },
+        createElement("i", { 
+          className: isCollapsed ? "ti ti-chevron-right" : "ti ti-chevron-down", 
+          style: cardCollapseIconStyle 
+        }),
         createElement("i", { className: "ti ti-user" }),
-        "用户管理"
+        "用户管理",
+        // 折叠时显示当前用户
+        isCollapsed && activeUser && createElement(
+          "span",
+          { style: { fontWeight: 400, color: "var(--orca-color-text-2)", marginLeft: "8px" } },
+          `${activeUser.emoji} ${activeUser.name}`
+        )
       ),
-      renderActionButtons()
+      !isCollapsed && renderActionButtons()
     ),
-    // Card Body
-    createElement(
+    // Card Body - only show when not collapsed
+    !isCollapsed && createElement(
       "div",
       { style: cardBodyStyle },
       createElement(
@@ -351,7 +508,7 @@ export default function UserManagementCard({
           createElement(
             "div",
             { style: userNameRowStyle },
-            renderUserSelector()
+            renderUserInfo()
           ),
           createElement(
             "div",
@@ -360,6 +517,7 @@ export default function UserManagementCard({
           )
         )
       ),
+      renderUserTabs(),
       renderAddUserForm()
     )
   );

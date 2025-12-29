@@ -3,22 +3,27 @@
  *
  * Renders individual chat messages with:
  * - Markdown content rendering
- * - Tool call status indicators (semantic, animated)
+ * - Reasoning/thinking display (collapsible)
+ * - Tool call status indicators (semantic, animated, auto-collapse when done)
  * - Action bar (copy, regenerate, extract memory)
+ * - File attachments (images, documents, code, data)
  *
  * Gemini UX Review: Tool calls now use inline status flow instead of technical cards
  */
 
 import MarkdownMessage from "../components/MarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
+import SuggestedReplies from "../components/SuggestedReplies";
 import ExtractMemoryButton from "./ExtractMemoryButton";
 import type { ExtractedMemory } from "../services/memory-extraction";
+import { getFileDisplayUrl, getFileIcon, getFileFullPath } from "../services/file-service";
 import {
   messageRowStyle,
   messageBubbleStyle,
   cursorStyle,
   actionBarStyle,
   actionButtonStyle,
+  messageTimeStyle,
 } from "../styles/ai-chat-styles";
 import type { Message } from "../services/session-service";
 import type { ToolCallInfo } from "../services/chat-stream-handler";
@@ -28,21 +33,199 @@ const React = window.React as unknown as {
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
   useMemo: <T>(factory: () => T, deps: any[]) => T;
+  useEffect: (effect: () => void | (() => void), deps?: any[]) => void;
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback, useMemo, Fragment } = React;
+const { createElement, useState, useCallback, useMemo, useEffect, Fragment } = React;
+
+// 格式化消息时间
+function formatMessageTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+
+  // 获取今天和昨天的日期边界
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const dateTime = date.getTime();
+
+  if (dateTime >= todayStart) {
+    // 今天：只显示时间
+    return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } else if (dateTime >= yesterdayStart) {
+    // 昨天
+    return "昨天 " + date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  } else {
+    // 更早：显示日期
+    return `${date.getMonth() + 1}月${date.getDate()}日 ` +
+      date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  }
+}
+
+/**
+ * ReasoningBlock - 显示 AI 推理过程（可折叠）
+ * 类似 Cherry Studio 的显示方式：显示为独立的消息块
+ */
+function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
+  const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
+  const [showActions, setShowActions] = useState(false);
+  
+  if (!reasoning) return null;
+
+  // 计算推理时间（简单估算：每100字符约1秒）
+  const estimatedSeconds = Math.max(1, Math.round(reasoning.length / 100));
+
+  // 复制功能
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(reasoning).then(() => {
+      if (typeof orca !== "undefined" && orca.notify) {
+        orca.notify("success", "已复制推理内容");
+      }
+    });
+  }, [reasoning]);
+
+  return createElement(
+    "div",
+    {
+      style: {
+        marginBottom: "12px",
+        borderRadius: "8px",
+        border: "1px solid var(--orca-color-border)",
+        background: "var(--orca-color-bg-2)",
+        overflow: "hidden",
+      },
+      onMouseEnter: () => setShowActions(true),
+      onMouseLeave: () => setShowActions(false),
+    },
+    // Header - 显示 "已深度思考 (用时 X 秒)"
+    createElement(
+      "div",
+      {
+        onClick: () => setIsExpanded(!isExpanded),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          padding: "10px 14px",
+          cursor: "pointer",
+          background: "var(--orca-color-bg-3)",
+          userSelect: "none",
+          transition: "background 0.2s",
+          position: "relative",
+        },
+        onMouseEnter: (e: any) => {
+          e.currentTarget.style.background = "var(--orca-color-bg-4)";
+        },
+        onMouseLeave: (e: any) => {
+          e.currentTarget.style.background = "var(--orca-color-bg-3)";
+        },
+      },
+      createElement("i", {
+        className: isStreaming ? "ti ti-loader" : "ti ti-brain",
+        style: {
+          fontSize: "16px",
+          color: "var(--orca-color-primary)",
+          animation: isStreaming ? "spin 1s linear infinite" : undefined,
+        },
+      }),
+      createElement(
+        "span",
+        { 
+          style: { 
+            fontSize: "13px", 
+            fontWeight: 500, 
+            color: "var(--orca-color-text-1)",
+            flex: 1,
+          } 
+        },
+        isStreaming 
+          ? "深度思考中..." 
+          : `已深度思考 (用时约 ${estimatedSeconds} 秒)`
+      ),
+      // 操作按钮（始终占据空间，通过透明度控制显示）
+      !isStreaming && createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            gap: "4px",
+            marginRight: "8px",
+            opacity: showActions ? 1 : 0,
+            pointerEvents: showActions ? "auto" : "none",
+            transition: "opacity 0.2s",
+          },
+          onClick: (e: any) => e.stopPropagation(), // 防止触发折叠
+        },
+        // 复制按钮
+        createElement(
+          "button",
+          {
+            onClick: handleCopy,
+            style: {
+              padding: "4px 8px",
+              border: "none",
+              borderRadius: "4px",
+              background: "var(--orca-color-bg-4)",
+              color: "var(--orca-color-text-2)",
+              cursor: "pointer",
+              fontSize: "12px",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              transition: "all 0.2s",
+            },
+            title: "复制推理内容",
+          },
+          createElement("i", {
+            className: "ti ti-copy",
+            style: { fontSize: "14px" },
+          })
+        )
+      ),
+      createElement("i", {
+        className: isExpanded ? "ti ti-chevron-up" : "ti ti-chevron-down",
+        style: { 
+          fontSize: "14px", 
+          color: "var(--orca-color-text-3)",
+        },
+      })
+    ),
+    // Content - 推理内容（可展开查看，支持 Markdown 渲染）
+    isExpanded && createElement(
+      "div",
+      {
+        style: {
+          padding: "12px 14px",
+          fontSize: "13px",
+          color: "var(--orca-color-text-2)",
+          lineHeight: 1.6,
+          maxHeight: "400px",
+          overflowY: "auto",
+          borderTop: "1px solid var(--orca-color-border)",
+        },
+      },
+      createElement(MarkdownMessage, { content: reasoning, role: "assistant" })
+    )
+  );
+}
 
 interface MessageItemProps {
   message: Message;
+  messageIndex?: number; // 消息在列表中的索引，用于目录导航
   isLastAiMessage?: boolean;
   isStreaming?: boolean;
   onRegenerate?: () => void;
+  onDelete?: () => void;
+  onRollback?: () => void; // 回档到此消息（删除此消息及之后的所有消息）
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
   // Conversation context for memory extraction (all messages up to this point)
   conversationContext?: string;
   // Callback when memories are extracted from this message
   onExtractMemory?: (memories: ExtractedMemory[]) => void;
+  // Callback when user clicks a suggested reply
+  onSuggestedReply?: (text: string) => void;
+  // Callback to generate AI-powered suggestions
+  onGenerateSuggestions?: () => Promise<string[]>;
 }
 
 /**
@@ -69,6 +252,125 @@ function ToolCallWithResult({
 }
 
 /**
+ * CollapsibleToolCalls - 可折叠的工具调用列表
+ * 流式传输时展开，完成后自动折叠
+ */
+function CollapsibleToolCalls({
+  toolCalls,
+  toolResults,
+  isStreaming,
+}: {
+  toolCalls: ToolCallInfo[];
+  toolResults?: Map<string, { content: string; name: string }>;
+  isStreaming?: boolean;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
+  // 检查是否所有工具调用都已完成
+  const allCompleted = useMemo(() => {
+    if (!toolResults) return false;
+    return toolCalls.every((tc) => toolResults.has(tc.id));
+  }, [toolCalls, toolResults]);
+
+  // 流式传输时展开，完成后自动折叠
+  useEffect(() => {
+    if (!isStreaming && allCompleted) {
+      const timer = setTimeout(() => setIsExpanded(false), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [isStreaming, allCompleted]);
+
+  const toolCount = toolCalls.length;
+  const completedCount = toolResults
+    ? toolCalls.filter((tc) => toolResults.has(tc.id)).length
+    : 0;
+
+  // 折叠状态的摘要头部
+  const collapsedHeader = createElement(
+    "div",
+    {
+      onClick: () => setIsExpanded(true),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 10px",
+        borderRadius: "6px",
+        background: "var(--orca-color-bg-2)",
+        border: "1px solid var(--orca-color-border)",
+        cursor: "pointer",
+        fontSize: "12px",
+        color: "var(--orca-color-text-2)",
+      },
+    },
+    createElement("i", {
+      className: "ti ti-tools",
+      style: { fontSize: "14px", color: "var(--orca-color-primary)" },
+    }),
+    `已执行 ${completedCount}/${toolCount} 个工具`,
+    createElement("i", {
+      className: "ti ti-chevron-down",
+      style: { fontSize: "12px", marginLeft: "auto" },
+    })
+  );
+
+  // 展开状态的头部（带折叠按钮）
+  const expandedHeader =
+    allCompleted &&
+    !isStreaming &&
+    createElement(
+      "div",
+      {
+        onClick: () => setIsExpanded(false),
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "6px 10px",
+          marginBottom: "8px",
+          borderRadius: "6px",
+          background: "var(--orca-color-bg-2)",
+          border: "1px solid var(--orca-color-border)",
+          cursor: "pointer",
+          fontSize: "12px",
+          color: "var(--orca-color-text-2)",
+        },
+      },
+      createElement("i", {
+        className: "ti ti-tools",
+        style: { fontSize: "14px", color: "var(--orca-color-primary)" },
+      }),
+      `${completedCount} 个工具调用`,
+      createElement("i", {
+        className: "ti ti-chevron-up",
+        style: { fontSize: "12px", marginLeft: "auto" },
+      })
+    );
+
+  // 工具调用列表
+  const toolList = toolCalls.map((tc) =>
+    createElement(ToolCallWithResult, {
+      key: tc.id,
+      toolCall: tc,
+      result: toolResults?.get(tc.id),
+      isLoading: isStreaming || !toolResults?.has(tc.id),
+    })
+  );
+
+  return createElement(
+    "div",
+    {
+      style: {
+        marginTop: "12px",
+      },
+    },
+    isExpanded
+      ? createElement("div", null, expandedHeader, ...toolList)
+      : collapsedHeader
+  );
+}
+
+/**
  * Tool result item for standalone tool messages (role='tool')
  * Gemini UX Review: Uses semantic status indicator instead of technical card
  */
@@ -92,12 +394,17 @@ function ToolResultItem({ message }: { message: Message }) {
 
 export default function MessageItem({
   message,
+  messageIndex,
   isLastAiMessage,
   isStreaming,
   onRegenerate,
+  onDelete,
+  onRollback,
   toolResults,
   conversationContext,
   onExtractMemory,
+  onSuggestedReply,
+  onGenerateSuggestions,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [isExtractDropdownOpen, setIsExtractDropdownOpen] = useState(false);
@@ -134,6 +441,8 @@ export default function MessageItem({
     "div",
     {
       style: messageRowStyle(message.role),
+      "data-message-index": messageIndex,
+      "data-message-id": message.id,
       onMouseEnter: () => setIsHovered(true),
       onMouseLeave: () => setIsHovered(false),
     },
@@ -142,30 +451,187 @@ export default function MessageItem({
       {
         style: messageBubbleStyle(message.role),
       },
+      // 文件显示（图片和其他文件）
+      message.files &&
+        message.files.length > 0 &&
+        createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "8px",
+              marginBottom: message.content ? "8px" : "0",
+            },
+          },
+          ...message.files.map((file, index) => {
+            const isImage = file.category === "image";
+            return createElement(
+              "div",
+              {
+                key: `${file.path}-${index}`,
+                style: {
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  maxWidth: isImage ? "200px" : "180px",
+                  cursor: "pointer",
+                  border: isImage ? undefined : "1px solid var(--orca-color-border)",
+                  background: isImage ? undefined : "var(--orca-color-bg-2)",
+                  padding: isImage ? undefined : "8px 12px",
+                  display: isImage ? undefined : "flex",
+                  alignItems: isImage ? undefined : "center",
+                  gap: isImage ? undefined : "8px",
+                },
+                onClick: () => {
+                  orca.invokeBackend("shell-open", getFileFullPath(file));
+                },
+                title: file.name,
+              },
+              isImage
+                ? createElement("img", {
+                    src: getFileDisplayUrl(file),
+                    alt: file.name,
+                    style: {
+                      maxWidth: "100%",
+                      maxHeight: "200px",
+                      objectFit: "contain",
+                      display: "block",
+                    },
+                    onError: (e: any) => {
+                      e.target.style.display = "none";
+                    },
+                  })
+                : [
+                    createElement("i", {
+                      key: "icon",
+                      className: getFileIcon(file.name, file.mimeType),
+                      style: { fontSize: "18px", color: "var(--orca-color-primary)" },
+                    }),
+                    createElement("span", {
+                      key: "name",
+                      style: {
+                        fontSize: "12px",
+                        color: "var(--orca-color-text-1)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      },
+                    }, file.name),
+                  ]
+            );
+          })
+        ),
+      // 兼容旧版 images 字段
+      message.images &&
+        message.images.length > 0 &&
+        !message.files &&
+        createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "8px",
+              marginBottom: message.content ? "8px" : "0",
+            },
+          },
+          ...message.images.map((img, index) =>
+            createElement(
+              "div",
+              {
+                key: `${img.path}-${index}`,
+                style: {
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  maxWidth: "200px",
+                  cursor: "pointer",
+                },
+                onClick: () => {
+                  orca.invokeBackend("shell-open", getFileFullPath(img));
+                },
+                title: img.name,
+              },
+              createElement("img", {
+                src: getFileDisplayUrl(img),
+                alt: img.name,
+                style: {
+                  maxWidth: "100%",
+                  maxHeight: "200px",
+                  objectFit: "contain",
+                  display: "block",
+                },
+                onError: (e: any) => {
+                  e.target.style.display = "none";
+                },
+              })
+            )
+          )
+        ),
+      // Reasoning/Thinking (显示 AI 推理过程) - 只在 assistant 消息中显示
+      isAssistant && message.reasoning && createElement(ReasoningBlock, {
+        reasoning: message.reasoning,
+        isStreaming,
+      }),
+
       // Content
       createElement(MarkdownMessage, { content: message.content || "", role: message.role }),
 
-      // Cursor for streaming
+      // Cursor for streaming - 如果内容为空，显示"正在输出"提示
       isStreaming &&
-        createElement("span", {
-          style: cursorStyle,
-        }),
+        (message.content && message.content.length > 0
+          ? createElement("span", {
+              style: cursorStyle,
+            })
+          : createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  color: "var(--orca-color-text-3)",
+                  fontSize: "13px",
+                  fontStyle: "italic",
+                  marginTop: "4px",
+                },
+              },
+              createElement("i", {
+                className: "ti ti-dots",
+                style: {
+                  fontSize: "16px",
+                  animation: "pulse 1.5s ease-in-out infinite",
+                },
+              }),
+              "正在输出"
+            )),
 
-      // Tool Calls with Results (unified display)
-      // Gemini UX Review: Single status flow instead of separate call/result cards
+      // Tool Calls with Results (unified display, auto-collapse when done)
       message.tool_calls &&
         message.tool_calls.length > 0 &&
+        createElement(CollapsibleToolCalls, {
+          toolCalls: message.tool_calls,
+          toolResults,
+          isStreaming,
+        }),
+
+      // Suggested Replies (only for last AI message, after streaming completes)
+      isAssistant &&
+        isLastAiMessage &&
+        !isStreaming &&
+        message.content &&
+        onSuggestedReply &&
+        onGenerateSuggestions &&
+        createElement(SuggestedReplies, {
+          onReplyClick: onSuggestedReply,
+          onGenerate: onGenerateSuggestions,
+        }),
+
+      // Message Time
+      message.createdAt &&
         createElement(
           "div",
-          { style: { marginTop: "12px" } },
-          ...message.tool_calls.map((tc) =>
-            createElement(ToolCallWithResult, {
-              key: tc.id,
-              toolCall: tc,
-              result: toolResults?.get(tc.id),
-              isLoading: isStreaming || !toolResults?.has(tc.id),
-            })
-          )
+          { style: messageTimeStyle(message.role) },
+          formatMessageTime(message.createdAt)
         ),
 
       // Action Bar
@@ -188,6 +654,30 @@ export default function MessageItem({
           },
           createElement("i", { className: "ti ti-copy" })
         ),
+        // Delete Button
+        onDelete &&
+          !isStreaming &&
+          createElement(
+            "button",
+            {
+              style: actionButtonStyle,
+              onClick: onDelete,
+              title: "删除此消息",
+            },
+            createElement("i", { className: "ti ti-trash" })
+          ),
+        // Rollback Button (回档到此消息之前)
+        onRollback &&
+          !isStreaming &&
+          createElement(
+            "button",
+            {
+              style: actionButtonStyle,
+              onClick: onRollback,
+              title: "回档到此处（删除此消息及之后的所有消息）",
+            },
+            createElement("i", { className: "ti ti-arrow-back-up" })
+          ),
         // Extract Memory Button (Only for AI messages with content)
         isAssistant &&
           message.content &&
