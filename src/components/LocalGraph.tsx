@@ -251,7 +251,7 @@ export default function LocalGraph({ blockId }: LocalGraphProps) {
 
     const simulation = d3Force.forceSimulation<GraphNode>(nodesCopy)
       .force("link", d3Force.forceLink<GraphNode, GraphLink>(linksCopy)
-        .id(d => d.id)
+        .id((d: GraphNode) => d.id)
         .distance(100))
       .force("charge", d3Force.forceManyBody().strength(-250))
       .force("center", d3Force.forceCenter(width / 2, height / 2))
