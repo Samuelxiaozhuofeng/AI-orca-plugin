@@ -170,6 +170,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
           }
+          // 恢复滚动位置
+          queueMicrotask(() => {
+            if (listRef.current && active.scrollPosition !== undefined) {
+              listRef.current.scrollTop = active.scrollPosition;
+            }
+          });
         }
       }
       setSessionsLoaded(true);
@@ -202,13 +208,28 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
 
+    // 保存当前会话的滚动位置
+    if (listRef.current && currentSession.id !== sessionId) {
+      setCurrentSession((prev) => ({
+        ...prev,
+        scrollPosition: listRef.current?.scrollTop ?? 0,
+      }));
+    }
+
     setCurrentSession({
       ...session,
       model: (session.model || "").trim() || defaultModel,
     });
     setMessages(session.messages.length > 0 ? session.messages : []);
     contextStore.selected = session.contexts || [];
-  }, [sessions]);
+
+    // 恢复目标会话的滚动位置
+    queueMicrotask(() => {
+      if (listRef.current && session.scrollPosition !== undefined) {
+        listRef.current.scrollTop = session.scrollPosition;
+      }
+    });
+  }, [sessions, currentSession.id]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     await deleteSession(sessionId);
@@ -265,6 +286,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         ...currentSession,
         messages,
         contexts: [...contextStore.selected],
+        scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
       };
       await autoCacheSession(sessionToCache);
       const data = await loadSessions();
@@ -1160,6 +1182,20 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 
+  // 切换消息的重要标记（pinned）
+  const handleTogglePinned = useCallback((messageId: string) => {
+    setMessages((prev) => prev.map((m) => {
+      if (m.id === messageId) {
+        const newPinned = !(m as any).pinned;
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("success", newPinned ? "已标记为重要" : "已取消重要标记");
+        }
+        return { ...m, pinned: newPinned };
+      }
+      return m;
+    }));
+  }, []);
+
   // 回档到指定消息（删除该消息及之后的所有消息）
   const handleRollbackToMessage = useCallback((messageId: string) => {
     setMessages((prev) => {
@@ -1448,6 +1484,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           onRegenerate: isLastAi ? handleRegenerate : undefined,
           onDelete: () => handleDeleteMessage(m.id),
           onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
+          onTogglePinned: () => handleTogglePinned(m.id),
           toolResults: m.tool_calls ? toolResultsMap : undefined,
           onSuggestedReply: isLastAi ? (text: string) => handleSend(text) : undefined,
           onGenerateSuggestions: isLastAi && m.content ? createSuggestionGenerator(m.content) : undefined,

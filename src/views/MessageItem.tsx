@@ -217,6 +217,7 @@ interface MessageItemProps {
   onRegenerate?: () => void;
   onDelete?: () => void;
   onRollback?: () => void; // 回档到此消息（删除此消息及之后的所有消息）
+  onTogglePinned?: () => void; // 切换消息的重要标记
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
   // Conversation context for memory extraction (all messages up to this point)
@@ -415,6 +416,7 @@ export default function MessageItem({
   onRegenerate,
   onDelete,
   onRollback,
+  onTogglePinned,
   toolResults,
   conversationContext,
   onExtractMemory,
@@ -427,6 +429,7 @@ export default function MessageItem({
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
+  const isPinned = (message as any).pinned === true;
 
   // Keep action bar visible when dropdown is open
   const showActionBar = isHovered || isExtractDropdownOpen;
@@ -829,6 +832,21 @@ export default function MessageItem({
           },
           createElement("i", { className: "ti ti-copy" })
         ),
+        // Pin Button (标记重要，压缩时保留)
+        onTogglePinned &&
+          !isStreaming &&
+          createElement(
+            "button",
+            {
+              style: {
+                ...actionButtonStyle,
+                color: isPinned ? "var(--orca-color-warning)" : undefined,
+              },
+              onClick: onTogglePinned,
+              title: isPinned ? "取消重要标记" : "标记为重要（压缩时保留）",
+            },
+            createElement("i", { className: isPinned ? "ti ti-pin-filled" : "ti ti-pin" })
+          ),
         // Delete Button
         onDelete &&
           !isStreaming &&

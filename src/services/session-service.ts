@@ -73,6 +73,7 @@ export type SavedSession = {
   updatedAt: number;
   pinned?: boolean; // 置顶标记
   favorited?: boolean; // 收藏标记
+  scrollPosition?: number; // 滚动位置（像素）
 };
 
 /**
@@ -384,6 +385,7 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     messages: filteredMessages,
     title: title || "",
     updatedAt,
+    scrollPosition: session.scrollPosition,
   };
 
   if (existingIndex >= 0) {

@@ -21,6 +21,49 @@ import {
 const React = window.React as any;
 const { createElement, useMemo, useState } = React;
 
+// 图片路径处理工具函数
+function resolveImageSrc(src: string): string {
+  if (src.startsWith("./") || src.startsWith("../")) {
+    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
+    }
+  } else if (src.startsWith("assets/")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/${src}`;
+    }
+  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${src}`;
+    }
+  }
+  return src;
+}
+
+function resolveImageFilePath(src: string): string {
+  if (src.startsWith("./") || src.startsWith("../")) {
+    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\assets\\${relativePath}`;
+    }
+  } else if (src.startsWith("assets/")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\${src.replace(/\//g, "\\")}`;
+    }
+  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\assets\\${src}`;
+    }
+  }
+  return src;
+}
+
 interface Props {
   content: string;
   role: "user" | "assistant" | "tool";
@@ -437,32 +480,8 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [viewMode, setViewMode] = useState("grid" as "grid" | "masonry" | "list");
   
-  // Build full image path
-  const getImageSrc = (src: string): string => {
-    if (src.startsWith("./") || src.startsWith("../")) {
-      const relativePath = src.replace(/^\.\//, "");
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
-      }
-    }
-    return src;
-  };
-  
-  // Get native path for shell-open
-  const getImageFilePath = (src: string): string => {
-    if (src.startsWith("./") || src.startsWith("../")) {
-      const relativePath = src.replace(/^\.\//, "");
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        return `${repoDir}\\assets\\${relativePath}`;
-      }
-    }
-    return src;
-  };
-  
   const openInSystem = (src: string) => {
-    orca.invokeBackend("shell-open", getImageFilePath(src));
+    orca.invokeBackend("shell-open", resolveImageFilePath(src));
   };
   
   const closeLightbox = () => setSelectedIndex(-1);
@@ -496,7 +515,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
           onClick: () => setSelectedIndex(index),
         },
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || `Image ${index + 1}`,
           className: "md-gallery-thumb",
           onError: (e: any) => { e.target.style.display = "none"; },
@@ -523,7 +542,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
           onClick: () => setSelectedIndex(index),
         },
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || `Image ${index + 1}`,
           className: "md-gallery-list-thumb",
           onError: (e: any) => { e.target.style.display = "none"; },
@@ -576,7 +595,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
         ),
         // Image
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || "",
           className: "md-gallery-lightbox-img",
         }),
@@ -720,52 +739,17 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
       );
 
     case "image":
-      // Convert relative path to absolute path
-      // Relative paths like "./image.avif" are stored relative to the repo's assets folder
-      let imageSrc = node.src;
-      let imageFilePath = node.src; // Keep original for shell-open
-      
-      // Handle different path formats
-      if (node.src.startsWith("./") || node.src.startsWith("../")) {
-        const relativePath = node.src.replace(/^\.\//, "").replace(/^\.\.\//, "");
-        // Build absolute path using repoDir + assets folder
-        const repoDir = orca.state.repoDir;
-        if (repoDir) {
-          // Use file:// protocol for img src
-          imageSrc = `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
-          // Keep native path for shell-open
-          imageFilePath = `${repoDir}\\assets\\${relativePath}`;
-        }
-      } else if (node.src.startsWith("assets/")) {
-        // Handle "assets/xxx" format
-        const repoDir = orca.state.repoDir;
-        if (repoDir) {
-          imageSrc = `file:///${repoDir.replace(/\\/g, "/")}/${node.src}`;
-          imageFilePath = `${repoDir}\\${node.src.replace(/\//g, "\\")}`;
-        }
-      } else if (!node.src.startsWith("http") && !node.src.startsWith("file://") && !node.src.startsWith("data:")) {
-        // Handle plain filename - assume it's in assets folder
-        const repoDir = orca.state.repoDir;
-        if (repoDir) {
-          imageSrc = `file:///${repoDir.replace(/\\/g, "/")}/assets/${node.src}`;
-          imageFilePath = `${repoDir}\\assets\\${node.src}`;
-        }
-      }
-      
-      // Use native img tag for file:// protocol support
       return createElement(
         "span",
         { key, style: imageContainerStyle },
         createElement("img", {
-          src: imageSrc,
+          src: resolveImageSrc(node.src),
           alt: node.alt || "image",
           style: imageStyle,
           onClick: () => {
-            // Use Orca's shell-open to open image with system default viewer
-            orca.invokeBackend("shell-open", imageFilePath);
+            orca.invokeBackend("shell-open", resolveImageFilePath(node.src));
           },
           onError: (e: any) => {
-            // Silently hide failed images, only warn in console
             console.warn("[MarkdownMessage] Image not found:", node.src);
             e.target.style.display = "none";
           },
