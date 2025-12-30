@@ -46,6 +46,7 @@ export type MarkdownNode =
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
   | { type: "localgraph"; blockId: number }
+  | { type: "mindmap"; blockId: number }
   | { type: "gallery"; images: GalleryImage[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
@@ -450,6 +451,22 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
       if (blockId > 0) {
         nodes.push({
           type: "localgraph",
+          blockId,
+        });
+        inCodeBlock = false;
+        codeBlockLang = "";
+        codeBlockLines = [];
+        return;
+      }
+    }
+    
+    // Check if it's a mindmap code block
+    if (codeBlockLang.toLowerCase() === "mindmap") {
+      const blockIdStr = codeBlockLines.join("\n").trim();
+      const blockId = parseInt(blockIdStr, 10);
+      if (blockId > 0) {
+        nodes.push({
+          type: "mindmap",
           blockId,
         });
         inCodeBlock = false;

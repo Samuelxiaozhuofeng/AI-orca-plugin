@@ -737,6 +737,84 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      return; // 直接返回，不走 AI
 	    }
 
+	    // /mindmap - 思维导图（显示块及子块的树形结构）
+	    if (content.includes("/mindmap")) {
+	      const mindmapQuery = processedContent.replace(/\/mindmap/g, "").trim();
+	      const cleanedQuery = mindmapQuery.replace(/^(显示|查看|的)?\s*/g, "").replace(/\s*(的)?(思维)?(导图)?$/g, "").trim();
+	      
+	      // 添加用户消息
+	      const userMsg: Message = { 
+	        id: nowId(), 
+	        role: "user", 
+	        content, 
+	        createdAt: Date.now(),
+	      };
+	      setMessages((prev) => [...prev, userMsg]);
+	      
+	      // 直接获取 blockId 并渲染思维导图
+	      (async () => {
+	        let blockId: number | null = null;
+	        let pageName: string | null = null;
+	        
+	        if (cleanedQuery) {
+	          // 检查是否是 blockId 格式：纯数字、blockid 123、blockid:123
+	          const blockIdMatch = cleanedQuery.match(/^(?:blockid[:\s]*)?(\d+)$/i);
+	          if (blockIdMatch) {
+	            blockId = parseInt(blockIdMatch[1], 10);
+	          } else {
+	            // 否则当作页面名称，需要查找对应的 blockId
+	            pageName = cleanedQuery;
+	            try {
+	              const block = await orca.invokeBackend("get-block-by-alias", cleanedQuery);
+	              if (block && block.id) {
+	                blockId = block.id;
+	              }
+	            } catch (err) {
+	              console.warn("[/mindmap] Failed to find page:", cleanedQuery, err);
+	            }
+	          }
+	        } else {
+	          // 使用当前打开的页面
+	          try {
+	            const activePanel = orca.state.activePanel;
+	            if (activePanel && activePanel !== uiStore.aiChatPanelId) {
+	              const vp = orca.nav.findViewPanel(activePanel, orca.state.panels);
+	              if (vp?.view === "block" && vp.viewArgs?.blockId) {
+	                blockId = vp.viewArgs.blockId;
+	              }
+	            }
+	          } catch {}
+	        }
+	        
+	        if (!blockId) {
+	          const errorMsg = pageName 
+	            ? `找不到页面「${pageName}」，请检查名称是否正确`
+	            : "请先选择一个页面，或指定页面名称，例如：/mindmap 阿拉丁";
+	          const assistantMsg: Message = {
+	            id: nowId(),
+	            role: "assistant",
+	            content: errorMsg,
+	            createdAt: Date.now(),
+	          };
+	          setMessages((prev) => [...prev, assistantMsg]);
+	          return;
+	        }
+	        
+	        // 直接输出 mindmap 代码块格式，让 MarkdownMessage 渲染思维导图
+	        const mindmapContent = "```mindmap\n" + blockId + "\n```";
+	        const assistantMsg: Message = {
+	          id: nowId(),
+	          role: "assistant",
+	          content: mindmapContent,
+	          createdAt: Date.now(),
+	        };
+	        setMessages((prev) => [...prev, assistantMsg]);
+	        queueMicrotask(scrollToBottom);
+	      })();
+	      
+	      return; // 直接返回，不走 AI
+	    }
+
 	    // /card - 闪卡生成模式（使用工具调用强制格式）
 	    const isFlashcardMode = content.includes("/card") || content.includes("帮我构建闪卡") || content.includes("生成闪卡");
 	    if (isFlashcardMode) {

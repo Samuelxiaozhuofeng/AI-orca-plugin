@@ -45,6 +45,7 @@ const SLASH_COMMANDS = [
   { command: "/summary", description: "总结模式，精炼内容要点", icon: "ti ti-list" },
   { command: "/compare", description: "对比模式，左右对比展示", icon: "ti ti-columns" },
   { command: "/localgraph", description: "显示页面的链接关系图谱", icon: "ti ti-share" },
+  { command: "/mindmap", description: "显示块及子块的思维导图", icon: "ti ti-binary-tree" },
 ];
 
 const { useSnapshot } = (window as any).Valtio as {

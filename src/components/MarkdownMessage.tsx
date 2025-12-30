@@ -1,5 +1,6 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import LocalGraph from "./LocalGraph";
+import MindMapRenderer from "./MindMapRenderer";
 import {
   codeBlockContainerStyle,
   codeBlockHeaderStyle,
@@ -1235,6 +1236,13 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
 
     case "localgraph": {
       return createElement(LocalGraph, {
+        key,
+        blockId: node.blockId,
+      });
+    }
+
+    case "mindmap": {
+      return createElement(MindMapRenderer, {
         key,
         blockId: node.blockId,
       });

@@ -63,6 +63,8 @@ return createElement(BlockShell, {
   contentJsx,      // 块内容 JSX
   childrenJsx,     // 子块 JSX
   droppable: true, // 允许拖拽到此块
+  editable: false, // 禁用编辑，启用上下插入块功能
+  selfFoldable: true, // 启用自折叠功能
 });
 ```
 
@@ -73,6 +75,19 @@ return createElement(BlockShell, {
 | `droppable` | boolean | 是否允许拖拽其他块到此块下 |
 | `contentAttrs` | object | 内容区域的 HTML 属性 |
 | `reprClassName` | string | 块表示层的 CSS 类名 |
+| `editable` | boolean | 设为 `false` 时禁用内容编辑，同时启用块上方/下方插入新块的功能 |
+| `selfFoldable` | boolean | 设为 `true` 时启用自折叠功能，用户可以折叠/展开块内容 |
+
+### editable 和 selfFoldable 的作用
+
+当 `editable={false}` 时：
+- 块内容不可直接编辑
+- 块的上方和下方会显示插入按钮，允许用户在此位置插入新块
+
+当 `selfFoldable={true}` 时：
+- 块左侧会显示折叠/展开按钮
+- 用户可以折叠块内容以节省空间
+- 适合内容较长的自定义块（如 AI 对话）
 
 ## 注册转换器
 

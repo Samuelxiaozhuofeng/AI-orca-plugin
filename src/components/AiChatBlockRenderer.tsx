@@ -665,9 +665,10 @@ export default function AiChatBlockRenderer({
     renderingMode,
     reprClassName: "aichat-repr-conversation",
     contentClassName: "aichat-repr-conversation-content",
-    // 不设置 contentEditable: false，允许正常的文本选择和复制
     contentJsx,
     childrenJsx: childrenBlocks,
     droppable: true,
+    editable: false,    // 禁用编辑，启用上下插入块功能
+    selfFoldable: true, // 启用自折叠功能
   });
 }
