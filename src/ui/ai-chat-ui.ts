@@ -74,16 +74,9 @@ export function toggleAiChatPanel(): void {
 }
 
 /**
- * Auto-save session on close if enabled and there are unsaved changes
+ * Auto-save session on close (always enabled)
  */
 async function autoSaveOnClose(): Promise<void> {
-  const settings = getAiChatSettings(pluginName);
-
-  // Check if auto-save is enabled
-  if (settings.autoSaveChat !== "on_close") {
-    return;
-  }
-
   // Check if there's a session with messages to save
   const { currentSession, messages, contexts, isDirty } = sessionStore;
   if (!currentSession || !isDirty) {

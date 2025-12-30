@@ -100,7 +100,7 @@ export const loadingContainerStyle: React.CSSProperties = {
 };
 
 export const loadingBubbleStyle: React.CSSProperties = {
-  padding: "0",
+  padding: "12px 16px",
   borderRadius: "18px 18px 18px 4px",
   background: "var(--orca-color-bg-2)",
   border: "1px solid var(--orca-color-border)",

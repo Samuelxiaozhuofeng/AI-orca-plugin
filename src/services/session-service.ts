@@ -43,6 +43,11 @@ export type Message = {
   images?: ImageRef[]; // 图片引用（存路径）- 兼容旧版
   files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型
   reasoning?: string; // AI 推理过程（DeepSeek/Claude thinking）
+  model?: string; // 使用的模型（用于计费）
+  contextRefs?: Array<{ title: string; kind: string; blockId?: number }>; // 消息关联的上下文引用（用于显示和跳转）
+  // 压缩控制
+  pinned?: boolean;    // 标记为重要，不会被压缩
+  noCompress?: boolean; // 不压缩此消息
   tool_calls?: Array<{
     id: string;
     type: "function";
@@ -68,6 +73,7 @@ export type SavedSession = {
   updatedAt: number;
   pinned?: boolean; // 置顶标记
   favorited?: boolean; // 收藏标记
+  scrollPosition?: number; // 滚动位置（像素）
 };
 
 /**
@@ -162,9 +168,6 @@ async function saveSessions(data: ChatSessionsData): Promise<void> {
  */
 export async function saveSession(session: SavedSession): Promise<void> {
   const data = await loadSessions();
-  const pluginName = getAiChatPluginName();
-  const settings = getAiChatSettings(pluginName);
-  const maxSessions = settings.maxSavedSessions || 10;
 
   // Filter out localOnly messages before saving
   const filteredMessages = session.messages.filter((m) => !m.localOnly);
@@ -197,11 +200,6 @@ export async function saveSession(session: SavedSession): Promise<void> {
     if (!a.pinned && b.pinned) return 1;
     return b.updatedAt - a.updatedAt;
   });
-
-  // Trim to max sessions
-  if (data.sessions.length > maxSessions) {
-    data.sessions = data.sessions.slice(0, maxSessions);
-  }
 
   // Update active session ID
   data.activeSessionId = session.id;
@@ -259,10 +257,11 @@ export async function setActiveSessionId(sessionId: string | null): Promise<void
 /**
  * Check if auto-save is enabled based on settings
  */
+/**
+ * Check if auto-save is enabled (always true now)
+ */
 export function shouldAutoSave(): boolean {
-  const pluginName = getAiChatPluginName();
-  const settings = getAiChatSettings(pluginName);
-  return settings.autoSaveChat === "on_close";
+  return true;
 }
 
 /**
@@ -357,9 +356,6 @@ export async function renameSession(sessionId: string, newTitle: string): Promis
  */
 export async function autoCacheSession(session: SavedSession): Promise<void> {
   const data = await loadSessions();
-  const pluginName = getAiChatPluginName();
-  const settings = getAiChatSettings(pluginName);
-  const maxSessions = settings.maxSavedSessions || 10;
 
   // Filter out localOnly messages
   const filteredMessages = session.messages.filter((m) => !m.localOnly);
@@ -389,6 +385,7 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     messages: filteredMessages,
     title: title || "",
     updatedAt,
+    scrollPosition: session.scrollPosition,
   };
 
   if (existingIndex >= 0) {
@@ -405,16 +402,6 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     if (!a.pinned && b.pinned) return 1;
     return b.updatedAt - a.updatedAt;
   });
-
-  // Trim to max (but don't remove pinned sessions)
-  const pinnedSessions = data.sessions.filter((s) => s.pinned);
-  const unpinnedSessions = data.sessions.filter((s) => !s.pinned);
-  if (unpinnedSessions.length > maxSessions - pinnedSessions.length) {
-    data.sessions = [
-      ...pinnedSessions,
-      ...unpinnedSessions.slice(0, Math.max(1, maxSessions - pinnedSessions.length)),
-    ];
-  }
 
   data.activeSessionId = session.id;
   await saveSessions(data);

@@ -21,6 +21,49 @@ import {
 const React = window.React as any;
 const { createElement, useMemo, useState } = React;
 
+// 图片路径处理工具函数
+function resolveImageSrc(src: string): string {
+  if (src.startsWith("./") || src.startsWith("../")) {
+    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
+    }
+  } else if (src.startsWith("assets/")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/${src}`;
+    }
+  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${src}`;
+    }
+  }
+  return src;
+}
+
+function resolveImageFilePath(src: string): string {
+  if (src.startsWith("./") || src.startsWith("../")) {
+    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\assets\\${relativePath}`;
+    }
+  } else if (src.startsWith("assets/")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\${src.replace(/\//g, "\\")}`;
+    }
+  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
+    const repoDir = orca.state.repoDir;
+    if (repoDir) {
+      return `${repoDir}\\assets\\${src}`;
+    }
+  }
+  return src;
+}
+
 interface Props {
   content: string;
   role: "user" | "assistant" | "tool";
@@ -437,32 +480,8 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [viewMode, setViewMode] = useState("grid" as "grid" | "masonry" | "list");
   
-  // Build full image path
-  const getImageSrc = (src: string): string => {
-    if (src.startsWith("./") || src.startsWith("../")) {
-      const relativePath = src.replace(/^\.\//, "");
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
-      }
-    }
-    return src;
-  };
-  
-  // Get native path for shell-open
-  const getImageFilePath = (src: string): string => {
-    if (src.startsWith("./") || src.startsWith("../")) {
-      const relativePath = src.replace(/^\.\//, "");
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        return `${repoDir}\\assets\\${relativePath}`;
-      }
-    }
-    return src;
-  };
-  
   const openInSystem = (src: string) => {
-    orca.invokeBackend("shell-open", getImageFilePath(src));
+    orca.invokeBackend("shell-open", resolveImageFilePath(src));
   };
   
   const closeLightbox = () => setSelectedIndex(-1);
@@ -496,7 +515,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
           onClick: () => setSelectedIndex(index),
         },
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || `Image ${index + 1}`,
           className: "md-gallery-thumb",
           onError: (e: any) => { e.target.style.display = "none"; },
@@ -523,7 +542,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
           onClick: () => setSelectedIndex(index),
         },
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || `Image ${index + 1}`,
           className: "md-gallery-list-thumb",
           onError: (e: any) => { e.target.style.display = "none"; },
@@ -576,7 +595,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
         ),
         // Image
         createElement("img", {
-          src: getImageSrc(img.src),
+          src: resolveImageSrc(img.src),
           alt: img.alt || "",
           className: "md-gallery-lightbox-img",
         }),
@@ -720,36 +739,18 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
       );
 
     case "image":
-      // Convert relative path to absolute path
-      // Relative paths like "./image.avif" are stored relative to the repo's assets folder
-      let imageSrc = node.src;
-      let imageFilePath = node.src; // Keep original for shell-open
-      if (node.src.startsWith("./") || node.src.startsWith("../")) {
-        const relativePath = node.src.replace(/^\.\//, "");
-        // Build absolute path using repoDir + assets folder
-        const repoDir = orca.state.repoDir;
-        if (repoDir) {
-          // Use file:// protocol for img src
-          imageSrc = `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
-          // Keep native path for shell-open
-          imageFilePath = `${repoDir}\\assets\\${relativePath}`;
-        }
-      }
-      
-      // Use native img tag for file:// protocol support
       return createElement(
         "span",
         { key, style: imageContainerStyle },
         createElement("img", {
-          src: imageSrc,
+          src: resolveImageSrc(node.src),
           alt: node.alt || "image",
           style: imageStyle,
           onClick: () => {
-            // Use Orca's shell-open to open image with system default viewer
-            orca.invokeBackend("shell-open", imageFilePath);
+            orca.invokeBackend("shell-open", resolveImageFilePath(node.src));
           },
           onError: (e: any) => {
-            console.error("[MarkdownMessage] Image load failed:", imageSrc);
+            console.warn("[MarkdownMessage] Image not found:", node.src);
             e.target.style.display = "none";
           },
         })
@@ -789,11 +790,58 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
         // 5. "小圆点" literal (AI sometimes uses this)
         // Real titles (even short ones like "日记", "想法") should show text
         const linkText = node.children.map(c => c.type === "text" ? c.content : "").join("").trim();
-        const isBlockIdOnly = 
-          /^\d+$/.test(linkText) || // Pure numbers only
-          /^blockid[:：]?\d+$/i.test(linkText) || // blockid:xxx format
-          /^块\s*ID\s*[:：]?\s*\d+$/i.test(linkText) || // 块 ID: xxx format
-          /^(查看|详情|点击|跳转|打开|前往|查看详情|点击查看|查看更多|小圆点|View|Click|Open)$/i.test(linkText); // Exact match action words
+        
+        const isPureNumber = /^\d+$/.test(linkText);
+        const isBlockIdFormat = /^orca-block[:：]?\d+$/i.test(linkText) || 
+                               /^blockid[:：]?\d+$/i.test(linkText) || 
+                               /^块\s*ID\s*[:：]?\s*\d+$/i.test(linkText);
+        const isActionWord = /^(查看|详情|点击|跳转|打开|前往|查看详情|点击查看|查看更多|小圆点|View|Click|Open)$/i.test(linkText);
+        
+        // 只有当链接文本看起来像是 blockId 引用时，才检查数字一致性
+        // 普通标题（如 "P2511 - 运动健身减肥"）不需要检查
+        const looksLikeBlockIdRef = isPureNumber || isBlockIdFormat;
+        
+        if (looksLikeBlockIdRef) {
+          // 提取链接文本中的数字
+          const linkTextNumberMatch = linkText.match(/(\d+)/);
+          const linkTextNumber = linkTextNumberMatch ? parseInt(linkTextNumberMatch[1], 10) : null;
+          
+          // 检查数字是否与 blockId 一致
+          if (linkTextNumber !== null && linkTextNumber !== blockId) {
+            console.warn(`[MarkdownMessage] Block ID mismatch: linkText="${linkText}" (${linkTextNumber}) vs url blockId=${blockId}`);
+            
+            // 渲染为带警告样式的链接，使用 URL 中的 blockId 进行预览和跳转
+            return createElement(
+              orca.components.BlockPreviewPopup,
+              { key, blockId, delay: 300 },
+              createElement(
+                "span",
+                {
+                  style: {
+                    ...blockLinkContainerStyle,
+                    borderColor: "rgba(255, 100, 100, 0.3)",
+                    background: "rgba(255, 100, 100, 0.05)",
+                  },
+                  onClick: handleBlockNavigation,
+                  title: `⚠️ 链接文本(${linkTextNumber})与实际块ID(${blockId})不匹配`,
+                },
+                // 显示实际的 blockId 而不是错误的链接文本
+                createElement(
+                  "span",
+                  { style: { ...blockLinkTextStyle, color: "var(--orca-color-warning, #f59e0b)" } },
+                  `块 ${blockId}`,
+                ),
+                createElement(
+                  "span",
+                  { style: { ...blockLinkArrowStyle, color: "var(--orca-color-warning, #f59e0b)" } },
+                  createElement("i", { className: "ti ti-alert-triangle" }),
+                ),
+              )
+            );
+          }
+        }
+        
+        const isBlockIdOnly = isPureNumber || isBlockIdFormat || isActionWord;
 
         // Render as small dot if it's just a block ID reference
         if (isBlockIdOnly) {

@@ -397,14 +397,14 @@ export default function ChatNavigation({ messages, listRef, visible = true }: Ch
                     style: tocUserItemStyle,
                     onClick: () => scrollToMessage(item.index),
                     onMouseEnter: (e: any) => {
-                      e.currentTarget.style.background = "var(--orca-color-primary)";
-                      e.currentTarget.style.color = "#fff";
+                      e.currentTarget.style.background = "var(--orca-color-bg-2)";
                       e.currentTarget.style.borderColor = "var(--orca-color-primary)";
+                      e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.1)";
                     },
                     onMouseLeave: (e: any) => {
                       e.currentTarget.style.background = "var(--orca-color-bg-3)";
-                      e.currentTarget.style.color = "var(--orca-color-text-1)";
                       e.currentTarget.style.borderColor = "var(--orca-color-border)";
+                      e.currentTarget.style.boxShadow = "none";
                     },
                   },
                   createElement("span", { style: indexBadgeStyle }, `#${item.userIndex}`),

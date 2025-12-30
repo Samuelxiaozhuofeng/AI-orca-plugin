@@ -272,6 +272,7 @@ export async function* streamChatWithRetry(
     console.log("[streamChatWithRetry] Retrying with fallback format...");
     usedFallback = true;
     content = "";
+    reasoning = ""; // 重置 reasoning
     toolCalls = [];
     onRetry?.();
 
@@ -284,6 +285,7 @@ export async function* streamChatWithRetry(
     console.warn("[streamChatWithRetry] Empty response (no content, no tools), retrying with fallback...");
     usedFallback = true;
     content = "";
+    reasoning = ""; // 重置 reasoning
     onRetry?.();
 
     try {

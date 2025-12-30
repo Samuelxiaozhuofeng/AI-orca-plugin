@@ -11,12 +11,26 @@ interface HeaderMenuProps {
   onClearChat: () => void;
   onOpenSettings: () => void;
   onOpenMemoryManager: () => void;
+  onOpenCompressionSettings?: () => void;
+  onExportMarkdown?: () => void;
+  onSaveToJournal?: () => void;
+  onToggleSelectionMode?: () => void;
+  selectionMode?: boolean;
+  selectedCount?: number;
+  onSaveSelected?: () => void;
 }
 
 export default function HeaderMenu({
   onClearChat,
   onOpenSettings,
   onOpenMemoryManager,
+  onOpenCompressionSettings,
+  onExportMarkdown,
+  onSaveToJournal,
+  onToggleSelectionMode,
+  selectionMode,
+  selectedCount,
+  onSaveSelected,
 }: HeaderMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -106,6 +120,84 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-brain" }),
           "记忆管理"
+        ),
+        // Token Optimization
+        onOpenCompressionSettings && createElement(
+          "div",
+          {
+            style: menuItemStyle,
+            onClick: () => handleItemClick(onOpenCompressionSettings),
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: "ti ti-arrows-minimize" }),
+          "Token 优化"
+        ),
+        // Divider
+        createElement("div", {
+          style: {
+            height: "1px",
+            background: "var(--orca-color-border)",
+            margin: "4px 0",
+          },
+        }),
+        // Export as Markdown
+        onExportMarkdown && createElement(
+          "div",
+          {
+            style: menuItemStyle,
+            onClick: () => handleItemClick(onExportMarkdown),
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: "ti ti-file-export" }),
+          "导出 Markdown"
+        ),
+        // Save to Journal
+        onSaveToJournal && createElement(
+          "div",
+          {
+            style: menuItemStyle,
+            onClick: () => handleItemClick(onSaveToJournal),
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: "ti ti-notebook" }),
+          "保存到日记"
+        ),
+        // Selection Mode Toggle
+        onToggleSelectionMode && createElement(
+          "div",
+          {
+            style: {
+              ...menuItemStyle,
+              color: selectionMode ? "var(--orca-color-primary)" : undefined,
+            },
+            onClick: () => handleItemClick(onToggleSelectionMode),
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: selectionMode ? "ti ti-checkbox" : "ti ti-select" }),
+          selectionMode ? "退出选择模式" : "选择消息保存"
+        ),
+        // Save Selected (only show in selection mode)
+        selectionMode && onSaveSelected && createElement(
+          "div",
+          {
+            style: {
+              ...menuItemStyle,
+              color: selectedCount && selectedCount > 0 ? "var(--orca-color-primary)" : "var(--orca-color-text-3)",
+            },
+            onClick: selectedCount && selectedCount > 0 ? () => handleItemClick(onSaveSelected) : undefined,
+            onMouseEnter: (e: any) => {
+              if (selectedCount && selectedCount > 0) {
+                e.currentTarget.style.background = "var(--orca-color-bg-2)";
+              }
+            },
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: "ti ti-device-floppy" }),
+          `保存选中 (${selectedCount || 0})`
         ),
         // Divider
         createElement("div", {

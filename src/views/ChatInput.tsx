@@ -4,9 +4,10 @@
  */
 
 import type { DbId } from "../orca.d.ts";
-import type { AiModelOption } from "../settings/ai-chat-settings";
+import type { AiChatSettings, CurrencyType } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
-import { contextStore } from "../store/context-store";
+import { contextStore, addPageById, clearHighPriorityContexts } from "../store/context-store";
+import { estimateTokens, formatTokenCount, estimateCost, formatCost } from "../utils/token-utils";
 import {
   uploadFile,
   getFileDisplayUrl,
@@ -19,6 +20,8 @@ import ContextPicker from "./ContextPicker";
 import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton } from "./chat-input";
 import { loadFromStorage } from "../store/chat-mode-store";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
+import { MultiModelToggleButton } from "../components/MultiModelSelector";
+import { multiModelStore } from "../store/multi-model-store";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -53,10 +56,16 @@ type Props = {
   disabled?: boolean;
   currentPageId: DbId | null;
   currentPageTitle: string;
-  modelOptions: AiModelOption[];
+  /** 新的设置结构 */
+  settings: AiChatSettings;
+  /** 当前选中的模型 ID（可能与 settings.selectedModelId 不同，因为 session 可以覆盖） */
   selectedModel: string;
-  onModelChange: (model: string) => void;
-  onAddModel?: (model: string) => void | Promise<void>;
+  /** 选择模型回调 */
+  onModelSelect: (providerId: string, modelId: string) => void;
+  /** 更新设置回调（用于平台配置修改） */
+  onUpdateSettings: (settings: AiChatSettings) => void;
+  /** 币种设置 */
+  currency?: CurrencyType;
 };
 
 // Enhanced Styles
@@ -88,10 +97,11 @@ export default function ChatInput({
   disabled = false,
   currentPageId,
   currentPageTitle,
-  modelOptions,
+  settings,
   selectedModel,
-  onModelChange,
-  onAddModel,
+  onModelSelect,
+  onUpdateSettings,
+  currency = "USD",
 }: Props) {
   const [text, setText] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -106,6 +116,31 @@ export default function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
+
+  // 获取当前选中模型的价格信息
+  const selectedModelInfo = useMemo(() => {
+    // 从 settings.providers 中查找当前选中的模型
+    for (const provider of settings.providers) {
+      const model = provider.models.find(m => m.id === selectedModel);
+      if (model) {
+        return {
+          inputPrice: model.inputPrice,
+          outputPrice: model.outputPrice,
+        };
+      }
+    }
+    return { inputPrice: 0, outputPrice: 0 };
+  }, [settings.providers, selectedModel]);
+
+  // 计算 Token 预估
+  const tokenEstimate = useMemo(() => {
+    const inputTokens = estimateTokens(text);
+    const outputTokens = Math.ceil(inputTokens * 1.5); // 预估输出为输入的 1.5 倍
+    const inputPrice = selectedModelInfo?.inputPrice ?? 0;
+    const outputPrice = selectedModelInfo?.outputPrice ?? 0;
+    const cost = estimateCost(inputTokens, outputTokens, inputPrice, outputPrice);
+    return { inputTokens, outputTokens, cost };
+  }, [text, selectedModelInfo]);
 
   // 检测是否显示斜杠命令菜单
   const filteredCommands = useMemo(() => {
@@ -141,6 +176,8 @@ export default function ChatInput({
       setText("");
       setPendingFiles([]);
       setClearContextPending(false);
+      // 清除拖入的高优先级上下文（发送后自动移除）
+      clearHighPriorityContexts();
       if (textareaRef.current) {
         textareaRef.current.value = "";
       }
@@ -294,16 +331,75 @@ export default function ChatInput({
     }
   }, []);
 
-  // 处理拖拽
+  // 处理拖拽（支持文件和 Orca 块）
   const handleDrop = useCallback(async (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     
-    const files = e.dataTransfer?.files;
-    if (files) {
+    const dataTransfer = e.dataTransfer;
+    if (!dataTransfer) return;
+    
+    // 1. 检查是否是 Orca 块拖拽
+    // Orca 使用自定义类型 "orca/xxx"，数据格式为 {"blocks":[blockId]}
+    let blockIds: number[] = [];
+    
+    // 查找 orca/ 开头的数据类型
+    for (const type of dataTransfer.types) {
+      if (type.startsWith("orca/")) {
+        const data = dataTransfer.getData(type);
+        if (data) {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.blocks && Array.isArray(parsed.blocks)) {
+              blockIds = parsed.blocks;
+              break;
+            }
+          } catch {}
+        }
+      }
+    }
+    
+    // 如果没找到 orca/ 类型，尝试其他格式
+    if (blockIds.length === 0) {
+      const textData = dataTransfer.getData("text/plain");
+      if (textData) {
+        const blockIdMatch = textData.match(/(?:orca-block:|blockid:|block:)?(\d+)/i);
+        if (blockIdMatch) {
+          blockIds = [parseInt(blockIdMatch[1], 10)];
+        }
+      }
+    }
+    
+    // 处理找到的块 - 添加为上下文而不是插入文本
+    if (blockIds.length > 0) {
+      let addedCount = 0;
+      
+      for (const blockId of blockIds) {
+        if (blockId <= 0) continue;
+        
+        try {
+          // 使用 addPageById 将块添加为高优先级上下文（priority=1）
+          // 高优先级上下文会排在普通上下文之前，但仍低于记忆和用户印象
+          const added = addPageById(blockId, 1);
+          if (added) addedCount++;
+        } catch (err) {
+          console.warn("[ChatInput] Failed to add block as context:", blockId, err);
+        }
+      }
+      
+      if (addedCount > 0) {
+        // 聚焦输入框
+        textareaRef.current?.focus();
+        return;
+      }
+    }
+    
+    // 2. 处理文件拖拽
+    const files = dataTransfer.files;
+    if (files && files.length > 0) {
       await handleFileSelect(files);
     }
-  }, [handleFileSelect]);
+  }, [handleFileSelect, text]);
 
   const handleDragOver = useCallback((e: DragEvent) => {
     e.preventDefault();
@@ -758,13 +854,40 @@ export default function ChatInput({
             createElement("i", { className: "ti ti-refresh" })
           ),
           createElement(ModelSelectorButton, {
-            modelOptions,
-            selectedModel,
-            onModelChange,
-            onAddModel,
+            settings,
+            onSelect: onModelSelect,
+            onUpdateSettings,
+          }),
+          // 多模型并行按钮
+          createElement(MultiModelToggleButton, {
+            settings,
           }),
           createElement(InjectionModeSelector, null),
-          createElement(ModeSelectorButton, null)
+          createElement(ModeSelectorButton, null),
+          // Token 预估显示
+          tokenEstimate.inputTokens > 0 && createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                color: "var(--orca-color-text-3)",
+                padding: "2px 8px",
+                background: "var(--orca-color-bg-3)",
+                borderRadius: "10px",
+              },
+              title: `预估输入: ${formatTokenCount(tokenEstimate.inputTokens)} tokens\n预估输出: ${formatTokenCount(tokenEstimate.outputTokens)} tokens`,
+            },
+            createElement("i", { className: "ti ti-coins", style: { fontSize: "12px" } }),
+            `~${formatTokenCount(tokenEstimate.inputTokens)}`,
+            selectedModelInfo?.inputPrice !== undefined && selectedModelInfo.inputPrice > 0 && createElement(
+              "span",
+              { style: { color: "var(--orca-color-text-4)" } },
+              ` ${formatCost(tokenEstimate.cost, currency)}`
+            )
+          )
         ),
 
         // Right Tool: Send/Stop Button

@@ -3,7 +3,8 @@
  * 显示当前选中的模型，点击打开模型选择菜单
  */
 
-import type { AiModelOption } from "../../settings/ai-chat-settings";
+import type { AiChatSettings } from "../../settings/ai-chat-settings";
+import { getSelectedProvider, getSelectedModel } from "../../settings/ai-chat-settings";
 import { modelButtonStyle, modelLabelStyle } from "./chat-input-styles";
 import ModelSelectorMenu from "./ModelSelectorMenu";
 
@@ -16,22 +17,26 @@ const { createElement, useMemo } = React;
 const { Button, ContextMenu } = orca.components;
 
 type Props = {
-  modelOptions: AiModelOption[];
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  onAddModel?: (model: string) => void | Promise<void>;
+  settings: AiChatSettings;
+  onSelect: (providerId: string, modelId: string) => void;
+  onUpdateSettings: (settings: AiChatSettings) => void;
 };
 
 export default function ModelSelectorButton({
-  modelOptions,
-  selectedModel,
-  onModelChange,
-  onAddModel,
+  settings,
+  onSelect,
+  onUpdateSettings,
 }: Props) {
-  const selectedModelLabel = useMemo(() => {
-    const hit = modelOptions.find((o) => o.value === selectedModel);
-    return hit?.label || selectedModel || "Select model";
-  }, [modelOptions, selectedModel]);
+  const displayInfo = useMemo(() => {
+    const provider = getSelectedProvider(settings);
+    const model = getSelectedModel(settings);
+    
+    const modelLabel = model?.label || model?.id || settings.selectedModelId || "选择模型";
+    const providerName = provider?.name || "";
+    const hasApiKey = provider?.apiKey && provider.apiKey.trim().length > 0;
+    
+    return { modelLabel, providerName, hasApiKey };
+  }, [settings]);
 
   return createElement(
     ContextMenu as any,
@@ -43,10 +48,11 @@ export default function ModelSelectorButton({
       offset: 8,
       menu: (close: () => void) =>
         createElement(ModelSelectorMenu, {
-          modelOptions,
-          selectedModel,
-          onModelChange,
-          onAddModel,
+          settings,
+          selectedProviderId: settings.selectedProviderId,
+          selectedModelId: settings.selectedModelId,
+          onSelect,
+          onUpdateSettings,
           close,
         }),
     },
@@ -56,11 +62,26 @@ export default function ModelSelectorButton({
         {
           variant: "plain",
           onClick: openMenu,
-          title: `Model: ${selectedModel}`,
-          style: modelButtonStyle,
+          title: `${displayInfo.providerName}: ${settings.selectedModelId}`,
+          style: {
+            ...modelButtonStyle,
+            borderColor: displayInfo.hasApiKey ? undefined : "var(--orca-color-warning)",
+          },
         },
         createElement("i", { className: "ti ti-cpu" }),
-        createElement("span", { style: modelLabelStyle }, selectedModelLabel),
+        createElement(
+          "span",
+          { style: modelLabelStyle },
+          displayInfo.modelLabel
+        ),
+        !displayInfo.hasApiKey && createElement(
+          "i",
+          { 
+            className: "ti ti-alert-triangle", 
+            style: { color: "var(--orca-color-warning)", fontSize: "12px" },
+            title: "未配置 API 密钥",
+          }
+        ),
         createElement("i", { className: "ti ti-chevron-up" })
       )
   );

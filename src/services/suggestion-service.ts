@@ -6,7 +6,7 @@
  */
 
 import { openAIChatCompletionsStream, type OpenAIChatMessage } from "./openai-client";
-import { getAiChatSettings, resolveAiModel } from "../settings/ai-chat-settings";
+import { getAiChatSettings, getModelApiConfig, resolveAiModel } from "../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 
 /**
@@ -19,9 +19,12 @@ export async function generateSuggestedReplies(aiMessageContent: string): Promis
   const pluginName = getAiChatPluginName();
   const settings = getAiChatSettings(pluginName);
   const model = resolveAiModel(settings);
+  
+  // 获取当前模型的 API 配置
+  const apiConfig = getModelApiConfig(settings, model);
 
   // 验证设置
-  if (!settings.apiUrl || !settings.apiKey) {
+  if (!apiConfig.apiUrl || !apiConfig.apiKey) {
     throw new Error("请先配置 API URL 和 API Key");
   }
 
@@ -61,8 +64,8 @@ ${content}
   let responseContent = "";
   
   for await (const chunk of openAIChatCompletionsStream({
-    apiUrl: settings.apiUrl,
-    apiKey: settings.apiKey,
+    apiUrl: apiConfig.apiUrl,
+    apiKey: apiConfig.apiKey,
     model,
     messages,
     temperature: 0.8,

@@ -201,14 +201,28 @@ export async function fetchBlockTrees(blocks: any[]): Promise<{ block: any; tree
           tree = null; // No valid tree
         }
 
+        // CRITICAL: Ensure the returned block ID matches the requested ID
+        // This prevents ID/content mismatch issues
         let block: any;
         if (typeof blockOrId === "number") {
           block = treeBlock ?? { id: blockId };
         } else {
-          // Merge: fetched block takes priority for aliases
-          block = treeBlock 
-            ? { ...blockOrId, ...treeBlock }
-            : blockOrId;
+          // Merge: keep original ID, only update content-related fields from treeBlock
+          if (treeBlock && treeBlock.id === blockId) {
+            block = { ...blockOrId, ...treeBlock, id: blockId };
+          } else {
+            // treeBlock ID doesn't match - use original block data
+            block = blockOrId;
+            if (treeBlock) {
+              console.warn("[fetchBlockTrees] ID mismatch - requested:", blockId, "got:", treeBlock.id);
+            }
+          }
+        }
+
+        // Final safety check: ensure block.id matches requested blockId
+        if (block.id !== blockId) {
+          console.warn("[fetchBlockTrees] Correcting ID mismatch:", block.id, "->", blockId);
+          block = { ...block, id: blockId };
         }
 
         return { block, tree };
@@ -222,7 +236,7 @@ export async function fetchBlockTrees(blocks: any[]): Promise<{ block: any; tree
         try {
           const blockResult = await orca.invokeBackend("get-block", blockId);
           const blockPayload = unwrapBackendResult<any>(blockResult);
-          if (blockPayload && blockPayload.id) {
+          if (blockPayload && blockPayload.id === blockId) {
             return { block: blockPayload, tree: null };
           }
         } catch {
@@ -231,7 +245,7 @@ export async function fetchBlockTrees(blocks: any[]): Promise<{ block: any; tree
         
         const block = typeof blockOrId === "number"
           ? { id: blockOrId }
-          : blockOrId;
+          : { ...blockOrId, id: blockId };
         return { block, tree: null };
       }
     }),

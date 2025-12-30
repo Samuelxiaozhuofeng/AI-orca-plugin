@@ -106,13 +106,25 @@ function safeDeltaFromEvent(obj: any): StreamChunk {
 
   // Check for reasoning content (DeepSeek/Claude/OpenAI thinking)
   // 尝试多种可能的字段名
-  const reasoning =
+  let reasoning =
     delta?.reasoning_content ||
     delta?.thinking ||
     delta?.reasoning ||
     choice?.reasoning_content ||
     choice?.thinking;
+  
+  // DeepSeek Reasoner 有时会返回重复字符，尝试去重
   if (typeof reasoning === "string" && reasoning) {
+    // 检测并修复连续重复的字符模式（如 "我我喜喜欢欢" -> "我喜欢"）
+    // 使用更宽松的检测：如果超过 50% 的字符是连续重复的，就进行去重
+    const originalLength = reasoning.length;
+    const deduped = reasoning.replace(/(.)\1/g, '$1');
+    const removedCount = originalLength - deduped.length;
+    // 如果去除的重复字符超过原长度的 40%，说明确实有大量重复
+    if (originalLength > 4 && removedCount > originalLength * 0.4) {
+      reasoning = deduped;
+    }
+    
     return {
       type: "reasoning",
       reasoning,
@@ -182,6 +194,18 @@ export async function* openAIChatCompletionsStream(
       include_usage: true,
     },
   };
+
+  // Debug: 检查 assistant 消息是否符合 DeepSeek 要求
+  for (const msg of args.messages) {
+    if (msg.role === "assistant") {
+      const hasContent = msg.content !== null && msg.content !== undefined && 
+        (typeof msg.content === 'string' ? msg.content.length > 0 : true);
+      const hasToolCalls = msg.tool_calls && msg.tool_calls.length > 0;
+      if (!hasContent && !hasToolCalls) {
+        console.warn("[openAI] Warning: assistant message has no content and no tool_calls:", msg);
+      }
+    }
+  }
 
   // Add tools if provided
   if (args.tools && args.tools.length > 0) {

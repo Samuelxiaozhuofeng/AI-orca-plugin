@@ -8,11 +8,13 @@ import { memoryStore } from "../store/memory-store";
 import { getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import { generateSuggestedReplies } from "../services/suggestion-service";
+import { estimateTokens, formatTokenCount } from "../utils/token-utils";
 import ChatInput from "./ChatInput";
 import MarkdownMessage from "../components/MarkdownMessage";
 import MessageItem from "./MessageItem";
 import ChatHistoryMenu from "./ChatHistoryMenu";
 import HeaderMenu from "./HeaderMenu";
+import CompressionSettingsModal from "./CompressionSettingsModal";
 import EmptyState from "./EmptyState";
 import LoadingDots from "../components/LoadingDots";
 import MemoryManager from "./MemoryManager";
@@ -20,11 +22,13 @@ import ChatNavigation from "../components/ChatNavigation";
 import FlashcardReview, { type Flashcard } from "../components/FlashcardReview";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
-  buildAiModelOptions,
   getAiChatSettings,
-  resolveAiModel,
+  getModelApiConfig,
+  getCurrentApiConfig,
+  getSelectedProvider,
   updateAiChatSettings,
-  validateAiChatSettingsWithModel,
+  validateCurrentConfig,
+  type AiChatSettings,
 } from "../settings/ai-chat-settings";
 import {
   loadSessions,
@@ -39,6 +43,7 @@ import {
   type Message,
   type FileRef,
 } from "../services/session-service";
+import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
 import { TOOLS, executeTool } from "../services/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
@@ -52,6 +57,14 @@ import {
   loadingContainerStyle,
   loadingBubbleStyle,
 } from "../styles/ai-chat-styles";
+import { multiModelStore } from "../store/multi-model-store";
+import MultiModelResponse, { type ModelResponse } from "../components/MultiModelResponse";
+import {
+  streamMultiModelChat,
+  createInitialResponses,
+  updateModelResponse,
+  getModelDisplayInfo,
+} from "../services/multi-model-service";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -99,6 +112,120 @@ function smoothScrollToBottom(el: HTMLDivElement | null, duration = 300) {
   requestAnimationFrame(animation);
 }
 
+function restoreScrollPosition(el: HTMLDivElement | null, savedPosition?: number) {
+  if (!el) return;
+  if (savedPosition !== undefined) {
+    el.scrollTop = savedPosition;
+  } else {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EditableTitle Component - 可编辑的会话标题
+// ─────────────────────────────────────────────────────────────────────────────
+
+type EditableTitleProps = {
+  title: string;
+  onSave: (newTitle: string) => void;
+};
+
+function EditableTitle({ title, onSave }: EditableTitleProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(title);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setEditValue(title);
+  }, [title]);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  const handleSave = useCallback(() => {
+    const trimmed = editValue.trim();
+    if (trimmed && trimmed !== title) {
+      onSave(trimmed);
+    }
+    setIsEditing(false);
+  }, [editValue, title, onSave]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      handleSave();
+    } else if (e.key === "Escape") {
+      setEditValue(title);
+      setIsEditing(false);
+    }
+  }, [handleSave, title]);
+
+  if (isEditing) {
+    return createElement("input", {
+      ref: inputRef as any,
+      type: "text",
+      value: editValue,
+      onChange: (e: any) => setEditValue(e.target.value),
+      onBlur: handleSave,
+      onKeyDown: handleKeyDown,
+      style: {
+        ...headerTitleStyle,
+        border: "1px solid var(--orca-color-primary)",
+        borderRadius: 4,
+        padding: "2px 8px",
+        background: "var(--orca-color-bg-1)",
+        color: "var(--orca-color-text-1)",
+        outline: "none",
+        minWidth: 100,
+        maxWidth: 200,
+      },
+    });
+  }
+
+  return createElement(
+    "div",
+    {
+      style: {
+        ...headerTitleStyle,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 4px",
+        borderRadius: 4,
+        transition: "background 0.15s",
+      },
+      onClick: () => setIsEditing(true),
+      title: "点击编辑标题",
+      onMouseOver: (e: any) => {
+        e.currentTarget.style.background = "var(--orca-color-bg-2)";
+      },
+      onMouseOut: (e: any) => {
+        e.currentTarget.style.background = "transparent";
+      },
+    },
+    createElement("span", {
+      style: {
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        maxWidth: 180,
+      },
+    }, title),
+    createElement("i", {
+      className: "ti ti-edit",
+      style: {
+        fontSize: 12,
+        opacity: 0.5,
+        flexShrink: 0,
+      },
+    })
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,8 +240,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [currentSession, setCurrentSession] = useState<SavedSession>(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const model = resolveAiModel(settings);
-    return { ...createNewSession(), model };
+    return { ...createNewSession(), model: settings.selectedModelId };
   });
   const [sessions, setSessions] = useState<SavedSession[]>([]);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -128,6 +254,17 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Flashcard review state
   const [flashcardMode, setFlashcardMode] = useState(false);
   const [pendingFlashcards, setPendingFlashcards] = useState<Flashcard[]>([]);
+
+  // Multi-model parallel response state
+  const [multiModelResponses, setMultiModelResponses] = useState<ModelResponse[]>([]);
+  const [isMultiModelMode, setIsMultiModelMode] = useState(false);
+
+  // Compression settings modal state
+  const [showCompressionSettings, setShowCompressionSettings] = useState(false);
+
+  // Message selection mode state (for batch save)
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -148,7 +285,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   useEffect(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     loadSessions().then((data) => {
       setSessions(data.sessions);
@@ -163,6 +300,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
           }
+          // 恢复滚动位置
+          queueMicrotask(() => {
+            restoreScrollPosition(listRef.current, active.scrollPosition);
+          });
         }
       }
       setSessionsLoaded(true);
@@ -172,7 +313,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleNewSession = useCallback(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     setCurrentSession({ ...createNewSession(), model: defaultModel });
     setMessages([
@@ -190,10 +331,18 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleSelectSession = useCallback(async (sessionId: string) => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
-    const defaultModel = resolveAiModel(settings);
+    const defaultModel = settings.selectedModelId;
 
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
+
+    // 保存当前会话的滚动位置
+    if (listRef.current && currentSession.id !== sessionId) {
+      setCurrentSession((prev) => ({
+        ...prev,
+        scrollPosition: listRef.current?.scrollTop ?? 0,
+      }));
+    }
 
     setCurrentSession({
       ...session,
@@ -201,7 +350,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
     setMessages(session.messages.length > 0 ? session.messages : []);
     contextStore.selected = session.contexts || [];
-  }, [sessions]);
+
+    // 恢复目标会话的滚动位置
+    queueMicrotask(() => {
+      restoreScrollPosition(listRef.current, session.scrollPosition);
+    });
+  }, [sessions, currentSession.id]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
     await deleteSession(sessionId);
@@ -258,6 +412,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         ...currentSession,
         messages,
         contexts: [...contextStore.selected],
+        scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
       };
       await autoCacheSession(sessionToCache);
       const data = await loadSessions();
@@ -279,7 +434,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
   }, [messages, currentSession]);
 
-  useEffect(() => injectChatStyles(), []);
+  useEffect(() => {
+    // 注入样式，但不返回清理函数，避免面板关闭时影响样式
+    injectChatStyles();
+  }, []);
   useEffect(() => () => { clearSessionStore(); }, []);
   useEffect(() => () => { if (abortRef.current) abortRef.current.abort(); }, []);
 
@@ -294,6 +452,52 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleCloseMemoryManager = useCallback(() => {
     setViewMode('chat');
   }, []);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Message Selection Mode (for batch save)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const handleToggleSelectionMode = useCallback(() => {
+    setSelectionMode(prev => {
+      if (prev) {
+        // 退出选择模式时清空选中
+        setSelectedMessageIds(new Set());
+      }
+      return !prev;
+    });
+  }, []);
+
+  const handleToggleMessageSelection = useCallback((messageId: string) => {
+    setSelectedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSaveSelectedMessages = useCallback(async () => {
+    if (selectedMessageIds.size === 0) {
+      orca.notify("warn", "请先选择要保存的消息");
+      return;
+    }
+    
+    // 按原始顺序获取选中的消息
+    const selectedMessages = messages.filter(m => selectedMessageIds.has(m.id));
+    
+    const result = await saveMessagesToJournal(selectedMessages, undefined, currentSession.model);
+    if (result.success) {
+      orca.notify("success", result.message);
+      // 保存成功后退出选择模式
+      setSelectionMode(false);
+      setSelectedMessageIds(new Set());
+    } else {
+      orca.notify("error", result.message);
+    }
+  }, [selectedMessageIds, messages, currentSession.model]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Chat Send Logic
@@ -388,7 +592,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 4. 对比项要一一对应，便于比较`;
 	    }
 
-	    // /localgraph - 链接关系图谱（直接调用工具，不走 AI）
+	    // /localgraph - 链接关系图谱（直接渲染图谱，不走 AI）
 	    if (content.includes("/localgraph")) {
 	      const graphQuery = processedContent.replace(/\/localgraph/g, "").trim();
 	      const cleanedQuery = graphQuery.replace(/^(显示|查看|分析|的)?\s*/g, "").replace(/\s*(的)?(链接)?(关系)?(图谱)?$/g, "").trim();
@@ -402,18 +606,27 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      };
 	      setMessages((prev) => [...prev, userMsg]);
 	      
-	      // 直接调用 executeTool 生成图谱
-	      import("../services/ai-tools").then(async ({ executeTool }) => {
-	        let toolArgs: any = {};
+	      // 直接获取 blockId 并渲染图谱
+	      (async () => {
+	        let blockId: number | null = null;
+	        let pageName: string | null = null;
 	        
 	        if (cleanedQuery) {
 	          // 检查是否是 blockId 格式：纯数字、blockid 123、blockid:123
 	          const blockIdMatch = cleanedQuery.match(/^(?:blockid[:\s]*)?(\d+)$/i);
 	          if (blockIdMatch) {
-	            toolArgs = { blockId: parseInt(blockIdMatch[1], 10) };
+	            blockId = parseInt(blockIdMatch[1], 10);
 	          } else {
-	            // 否则当作页面名称
-	            toolArgs = { pageName: cleanedQuery };
+	            // 否则当作页面名称，需要查找对应的 blockId
+	            pageName = cleanedQuery;
+	            try {
+	              const block = await orca.invokeBackend("get-block-by-alias", cleanedQuery);
+	              if (block && block.id) {
+	                blockId = block.id;
+	              }
+	            } catch (err) {
+	              console.warn("[/localgraph] Failed to find page:", cleanedQuery, err);
+	            }
 	          }
 	        } else {
 	          // 使用当前打开的页面
@@ -422,33 +635,37 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	            if (activePanel && activePanel !== uiStore.aiChatPanelId) {
 	              const vp = orca.nav.findViewPanel(activePanel, orca.state.panels);
 	              if (vp?.view === "block" && vp.viewArgs?.blockId) {
-	                toolArgs = { blockId: vp.viewArgs.blockId };
+	                blockId = vp.viewArgs.blockId;
 	              }
 	            }
 	          } catch {}
 	        }
 	        
-	        if (!toolArgs.pageName && !toolArgs.blockId) {
+	        if (!blockId) {
+	          const errorMsg = pageName 
+	            ? `找不到页面「${pageName}」，请检查名称是否正确`
+	            : "请先选择一个页面，或指定页面名称，例如：/localgraph 阿拉丁";
 	          const assistantMsg: Message = {
 	            id: nowId(),
 	            role: "assistant",
-	            content: "请先选择一个页面，或指定页面名称，例如：/localgraph 阿拉丁",
+	            content: errorMsg,
 	            createdAt: Date.now(),
 	          };
 	          setMessages((prev) => [...prev, assistantMsg]);
 	          return;
 	        }
 	        
-	        const result = await executeTool("getBlockLinks", toolArgs);
+	        // 直接输出 localgraph 代码块格式，让 MarkdownMessage 渲染图谱
+	        const graphContent = "```localgraph\n" + blockId + "\n```";
 	        const assistantMsg: Message = {
 	          id: nowId(),
 	          role: "assistant",
-	          content: result,
+	          content: graphContent,
 	          createdAt: Date.now(),
 	        };
 	        setMessages((prev) => [...prev, assistantMsg]);
 	        queueMicrotask(scrollToBottom);
-	      });
+	      })();
 	      
 	      return; // 直接返回，不走 AI
 	    }
@@ -494,7 +711,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      };
 	      const conversationForFlashcard: Message[] = [...historyMessages, flashcardRequestMsg];
 	      
-	      const model = (currentSession.model || "").trim() || resolveAiModel(settings);
+	      const model = (currentSession.model || "").trim() || settings.selectedModelId;
 	      const memoryText = memoryStore.getFullMemoryText();
 	      
 	      // 构建上下文
@@ -502,7 +719,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      try {
 	        const contexts = contextStore.selected;
 	        if (contexts.length) {
-	          const result = await buildContextForSend(contexts);
+	          const result = await buildContextForSend(contexts, { maxChars: settings.maxContextChars });
 	          contextText = result.text;
 	        }
 	      } catch {}
@@ -519,6 +736,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      
 	      console.log("[Flashcard] API messages built:", apiMessages.length);
 	      
+	      // 获取模型特定的 API 配置
+	      const apiConfig = getModelApiConfig(settings, model);
+	      
 	      // 调用 AI 生成闪卡
 	      let fullContent = "";
 	      const aborter = new AbortController();
@@ -527,8 +747,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      try {
 	        for await (const chunk of streamChatWithRetry(
 	          {
-	            apiUrl: settings.apiUrl,
-	            apiKey: settings.apiKey,
+	            apiUrl: apiConfig.apiUrl,
+	            apiKey: apiConfig.apiKey,
 	            model,
 	            temperature: settings.temperature,
 	            maxTokens: settings.maxTokens,
@@ -585,14 +805,23 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    const currentChatMode = getMode();
 	    const includeTools = currentChatMode !== 'ask';
 
-	    const model = (currentSession.model || "").trim() || resolveAiModel(settings);
-	    const validationError = validateAiChatSettingsWithModel(settings, model);
+	    const model = (currentSession.model || "").trim() || settings.selectedModelId;
+	    const validationError = validateCurrentConfig(settings);
 	    if (validationError) {
 	      orca.notify("warn", validationError);
       return;
     }
 
     setSending(true);
+
+    // 获取高优先级上下文（拖入的块）用于显示
+    const highPriorityContexts = contextStore.selected
+      .filter(c => (c.priority ?? 0) > 0)
+      .map(c => ({
+        title: c.kind === 'page' ? c.title : `#${c.tag}`,
+        kind: c.kind,
+        blockId: c.kind === 'page' ? c.rootBlockId : undefined,
+      }));
 
     // 先添加用户消息到列表
     const userMsg: Message = { 
@@ -601,6 +830,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       content, 
       createdAt: Date.now(),
       files: files && files.length > 0 ? files : undefined,
+      contextRefs: highPriorityContexts.length > 0 ? highPriorityContexts : undefined,
     };
 
     // Use override if provided (for regeneration), otherwise append to current state
@@ -611,6 +841,73 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
     
     queueMicrotask(scrollToBottom);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 多模型并行模式处理
+    // ─────────────────────────────────────────────────────────────────────────
+    if (multiModelStore.enabled && multiModelStore.selectedModels.length >= 2) {
+      setIsMultiModelMode(true);
+      const selectedModels = [...multiModelStore.selectedModels];
+      
+      // 初始化多模型响应状态
+      const initialResponses = createInitialResponses(selectedModels);
+      setMultiModelResponses(initialResponses);
+      
+      const aborter = new AbortController();
+      abortRef.current = aborter;
+      
+      try {
+        // 构建上下文
+        let contextText = "";
+        try {
+          const contexts = contextStore.selected;
+          if (contexts.length) {
+            const result = await buildContextForSend(contexts, { maxChars: settings.maxContextChars });
+            contextText = result.text;
+          }
+        } catch {}
+        
+        const memoryText = memoryStore.getFullMemoryText();
+        const baseMessages = historyOverride || messages;
+        const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), {
+          ...userMsg,
+          content: processedContent,
+        }];
+        
+        // 构建 API 消息（不包含工具，多模型模式下简化处理）
+        const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
+          messages: conversation,
+          systemPrompt,
+          contextText,
+          customMemory: memoryText,
+          chatMode: "ask", // 多模型模式下不使用工具
+        });
+        
+        // 并行流式请求所有模型
+        for await (const update of streamMultiModelChat({
+          modelIds: selectedModels,
+          messages: apiMessages,
+          fallbackMessages: apiMessagesFallback,
+          temperature: settings.temperature,
+          maxTokens: settings.maxTokens,
+          signal: aborter.signal,
+        })) {
+          setMultiModelResponses(prev => updateModelResponse(prev, update));
+        }
+        
+      } catch (err: any) {
+        const isAbort = String(err?.name ?? "") === "AbortError";
+        if (!isAbort) {
+          orca.notify("error", String(err?.message ?? err ?? "多模型请求失败"));
+        }
+      } finally {
+        if (abortRef.current === aborter) abortRef.current = null;
+        setSending(false);
+      }
+      
+      return; // 多模型模式处理完成，不走单模型流程
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // 发送给 API 的消息使用处理后的内容（去掉指令）
     const userMsgForApi: Message = { 
@@ -631,7 +928,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       try {
         const contexts = contextStore.selected;
         if (contexts.length) {
-          const result = await buildContextForSend(contexts);
+          const result = await buildContextForSend(contexts, { maxChars: settings.maxContextChars });
           contextText = result.text;
           contextAssets = result.assets;
         }
@@ -668,18 +965,26 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       // Uses getFullMemoryText which combines portrait (higher priority) + unextracted memories
       const memoryText = memoryStore.getFullMemoryText();
 
+      // 获取模型特定的 API 配置
+      const apiConfig = getModelApiConfig(settings, model);
+
       const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
         messages: conversation,
         systemPrompt,
         contextText,
         customMemory: memoryText,
         chatMode: currentChatMode,
+        maxHistoryMessages: settings.maxHistoryMessages,
+        enableCompression: settings.enableCompression,
+        compressAfterMessages: settings.compressAfterMessages,
+        sessionId: currentSession.id,
+        apiConfig: { apiUrl: apiConfig.apiUrl, apiKey: apiConfig.apiKey, model },
       });
 
       for await (const chunk of streamChatWithRetry(
         {
-          apiUrl: settings.apiUrl,
-          apiKey: settings.apiKey,
+          apiUrl: apiConfig.apiUrl,
+          apiKey: apiConfig.apiKey,
           model,
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
@@ -695,18 +1000,19 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             reasoningMessageId = nowId();
             reasoningCreatedAt = Date.now();
             setStreamingMessageId(reasoningMessageId);
+            currentReasoning = chunk.reasoning;
             setMessages((prev) => [...prev, { 
               id: reasoningMessageId!, 
               role: "assistant", 
               content: "", 
-              reasoning: chunk.reasoning,
+              reasoning: currentReasoning,
               createdAt: reasoningCreatedAt!,
+              model,
             }]);
           } else {
             currentReasoning += chunk.reasoning;
             updateMessage(reasoningMessageId, { reasoning: currentReasoning });
           }
-          currentReasoning += chunk.reasoning;
         } else if (chunk.type === "content") {
           // 第一次收到 content 时，创建 assistant 消息（如果还没有 reasoning 消息，或者 reasoning 已完成）
           if (!reasoningMessageId) {
@@ -718,7 +1024,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               id: assistantId, 
               role: "assistant", 
               content: chunk.content, 
-              createdAt: assistantCreatedAt 
+              createdAt: assistantCreatedAt,
+              model,
             }]);
             currentContent = chunk.content;
             reasoningMessageId = assistantId; // 复用这个 ID 作为 assistant ID
@@ -732,7 +1039,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               id: assistantId, 
               role: "assistant", 
               content: chunk.content, 
-              createdAt: assistantCreatedAt 
+              createdAt: assistantCreatedAt,
+              model,
             }]);
             currentContent = chunk.content;
             reasoningMessageId = assistantId; // 更新为 assistant ID
@@ -759,7 +1067,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             id: assistantId, 
             role: "assistant", 
             content: "(empty response)", 
-            createdAt: assistantCreatedAt 
+            createdAt: assistantCreatedAt,
+            model,
           }]);
         } else {
           // 完全空响应
@@ -767,7 +1076,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             id: assistantId, 
             role: "assistant", 
             content: "(empty response)", 
-            createdAt: assistantCreatedAt 
+            createdAt: assistantCreatedAt,
+            model,
           }]);
         }
       } else if (!currentContent && toolCalls.length > 0) {
@@ -776,7 +1086,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           id: assistantId, 
           role: "assistant", 
           content: "", 
-          createdAt: assistantCreatedAt 
+          createdAt: assistantCreatedAt,
+          model,
         }]);
       }
 
@@ -885,6 +1196,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           contextText,
           customMemory: memoryText,
           chatMode: currentChatMode,
+          maxHistoryMessages: settings.maxHistoryMessages,
+          enableCompression: settings.enableCompression,
+          compressAfterMessages: settings.compressAfterMessages,
+          sessionId: currentSession.id,
+          apiConfig: { apiUrl: apiConfig.apiUrl, apiKey: apiConfig.apiKey, model },
         });
 
         // Stream next response with reasoning support
@@ -895,11 +1211,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         let nextReasoningCreatedAt: number | null = null;
         const enableTools = toolRound < MAX_TOOL_ROUNDS;
 
+        // 获取模型特定的 API 配置
+        const toolApiConfig = getModelApiConfig(settings, model);
+
         try {
           for await (const chunk of streamChatWithRetry(
             {
-              apiUrl: settings.apiUrl,
-              apiKey: settings.apiKey,
+              apiUrl: toolApiConfig.apiUrl,
+              apiKey: toolApiConfig.apiKey,
               model,
               temperature: settings.temperature,
               maxTokens: settings.maxTokens,
@@ -916,18 +1235,19 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                 nextReasoningMessageId = nowId();
                 nextReasoningCreatedAt = Date.now();
                 setStreamingMessageId(nextReasoningMessageId);
+                nextReasoning = chunk.reasoning;
                 setMessages((prev) => [...prev, { 
                   id: nextReasoningMessageId!, 
                   role: "assistant", 
                   content: "", 
                   reasoning: chunk.reasoning,
                   createdAt: nextReasoningCreatedAt!,
+                  model,
                 }]);
               } else {
                 nextReasoning += chunk.reasoning;
                 updateMessage(nextReasoningMessageId, { reasoning: nextReasoning });
               }
-              nextReasoning += chunk.reasoning;
             } else if (chunk.type === "content") {
               // 第一次收到 content 时，创建 assistant 消息
               if (!nextReasoningMessageId) {
@@ -939,7 +1259,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                   id: nextAssistantId, 
                   role: "assistant", 
                   content: chunk.content, 
-                  createdAt: nextAssistantCreatedAt 
+                  createdAt: nextAssistantCreatedAt,
+                  model,
                 }]);
                 nextContent = chunk.content;
                 nextReasoningMessageId = nextAssistantId;
@@ -953,7 +1274,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
                   id: nextAssistantId, 
                   role: "assistant", 
                   content: chunk.content, 
-                  createdAt: nextAssistantCreatedAt 
+                  createdAt: nextAssistantCreatedAt,
+                  model,
                 }]);
                 nextContent = chunk.content;
                 nextReasoningMessageId = nextAssistantId;
@@ -983,7 +1305,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
             id: nextAssistantId, 
             role: "assistant", 
             content: "(empty response)", 
-            createdAt: nextAssistantCreatedAt 
+            createdAt: nextAssistantCreatedAt,
+            model,
           }]);
         }
 
@@ -1101,6 +1424,20 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 
+  // 切换消息的重要标记（pinned）
+  const handleTogglePinned = useCallback((messageId: string) => {
+    setMessages((prev) => prev.map((m) => {
+      if (m.id === messageId) {
+        const newPinned = !(m as any).pinned;
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("success", newPinned ? "已标记为重要" : "已取消重要标记");
+        }
+        return { ...m, pinned: newPinned };
+      }
+      return m;
+    }));
+  }, []);
+
   // 回档到指定消息（删除该消息及之后的所有消息）
   const handleRollbackToMessage = useCallback((messageId: string) => {
     setMessages((prev) => {
@@ -1138,34 +1475,39 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [rootBlockId]);
 
   const pluginNameForUi = getAiChatPluginName();
-  const settingsForUi = getAiChatSettings(pluginNameForUi);
-  const defaultModelForUi = resolveAiModel(settingsForUi);
-  const selectedModel = (currentSession.model || "").trim() || defaultModelForUi;
-  const modelOptions = buildAiModelOptions(settingsForUi, [selectedModel]);
+  // 使用 settingsVersion 来强制重新获取设置
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  const settingsForUi = useMemo(() => getAiChatSettings(pluginNameForUi), [pluginNameForUi, settingsVersion]);
+  const selectedModel = (currentSession.model || "").trim() || settingsForUi.selectedModelId;
 
+  // 新的模型选择处理：同时更新 providerId 和 modelId
+  const handleModelSelect = useCallback((providerId: string, modelId: string) => {
+    setCurrentSession((prev) => ({ ...prev, model: modelId }));
+    // 同时更新设置中的选中状态
+    updateAiChatSettings("app", pluginNameForUi, {
+      selectedProviderId: providerId,
+      selectedModelId: modelId,
+    }).then(() => {
+      setSettingsVersion(v => v + 1); // 触发重新获取设置
+    }).catch(err => {
+      console.warn("[AiChatPanel] Failed to update model selection:", err);
+    });
+  }, [pluginNameForUi]);
+
+  // 更新设置（用于 ModelSelectorMenu 中的平台配置修改）
+  const handleUpdateSettings = useCallback(async (newSettings: AiChatSettings) => {
+    try {
+      await updateAiChatSettings("app", pluginNameForUi, newSettings);
+      setSettingsVersion(v => v + 1); // 触发重新获取设置
+    } catch (err: any) {
+      orca.notify("error", `保存设置失败: ${String(err?.message ?? err ?? "unknown error")}`);
+    }
+  }, [pluginNameForUi]);
+
+  // 兼容旧的 handleModelChange（用于 ChatInput）
   const handleModelChange = useCallback((nextModel: string) => {
     setCurrentSession((prev) => ({ ...prev, model: nextModel }));
   }, []);
-
-  const handleAddModelToSettings = useCallback(
-    async (model: string) => {
-      const trimmed = model.trim();
-      if (!trimmed) return;
-
-      try {
-        const current = getAiChatSettings(pluginNameForUi);
-        if (current.customModels.some((m) => m.model === trimmed)) return;
-
-        await updateAiChatSettings("app", pluginNameForUi, {
-          customModels: [...current.customModels, { model: trimmed }],
-        });
-        orca.notify("success", `Added model: ${trimmed}`);
-      } catch (err: any) {
-        orca.notify("error", `Failed to add model: ${String(err?.message ?? err ?? "unknown error")}`);
-      }
-    },
-    [pluginNameForUi]
-  );
 
   // ─────────────────────────────────────────────────────────────────────────
   // Render
@@ -1186,7 +1528,187 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       }
     });
 
+    // 计算系统开销 token（系统提示 + 记忆 + 上下文）
+    const systemPromptTokens = estimateTokens(settingsForUi.systemPrompt || "");
+    const memoryTokens = estimateTokens(memoryStore.getFullMemoryText() || "");
+    // 上下文 token 在 ChatInput 中已经显示，这里只计算基础开销
+    const baseOverheadTokens = systemPromptTokens + memoryTokens;
+
+    // 货币符号
+    const currencySymbol = settingsForUi.currency === 'CNY' ? '¥' : 
+                          settingsForUi.currency === 'EUR' ? '€' : 
+                          settingsForUi.currency === 'JPY' ? '¥' : '$';
+
+    // 辅助函数：根据模型名获取价格
+    const getModelPrices = (modelName?: string) => {
+      const model = modelName || selectedModel;
+      // 从 providers 中查找模型价格
+      for (const provider of settingsForUi.providers) {
+        const found = provider.models.find(m => m.id === model);
+        if (found) {
+          return {
+            inputPrice: found.inputPrice || 0,
+            outputPrice: found.outputPrice || 0,
+          };
+        }
+      }
+      return { inputPrice: 0, outputPrice: 0 };
+    };
+
+    // 计算每条消息的 token 统计和费用
+    const tokenStatsMap = new Map<string, { 
+      messageTokens: number; 
+      cumulativeTokens: number;
+      cost: number;
+      cumulativeCost: number;
+      currencySymbol: string;
+      totalInputTokens?: number;
+      totalOutputTokens?: number;
+      totalInputCost?: number;
+      totalOutputCost?: number;
+      isLastMessage?: boolean;
+    }>();
+    let cumulativeTokens = baseOverheadTokens;
+    let cumulativeCost = 0;
+    
+    // 输入/输出分开统计
+    let totalInputTokens = baseOverheadTokens; // 系统开销算作输入
+    let totalOutputTokens = 0;
+    let totalInputCost = 0;
+    let totalOutputCost = 0;
+    
+    // 系统开销按当前模型的输入价格计算
+    const currentPrices = getModelPrices(selectedModel);
+    const systemOverheadCost = (baseOverheadTokens / 1_000_000) * currentPrices.inputPrice;
+    cumulativeCost += systemOverheadCost;
+    totalInputCost += systemOverheadCost;
+    
+    // 过滤掉 tool 消息和 localOnly 消息，获取有效消息列表
+    const validMessages = messages.filter(m => m.role !== "tool" && !m.localOnly);
+    // 找到最后一条 AI 消息（总统计只显示在 AI 输出上，不显示在用户输入上）
+    const lastAiMessage = [...validMessages].reverse().find(m => m.role === "assistant");
+    const lastAiMessageId = lastAiMessage?.id || null;
+    
+    // 遍历有效消息计算 Token（排除 localOnly）
+    validMessages.forEach((m) => {
+      const messageTokens = estimateTokens(m.content || "") + 
+        (m.reasoning ? estimateTokens(m.reasoning) : 0);
+      
+      // 获取该消息使用的模型价格
+      const prices = getModelPrices(m.model);
+      const isInput = m.role === "user";
+      
+      // 计算本条消息费用（用户消息用输入价，AI消息用输出价）
+      const messageCost = isInput 
+        ? (messageTokens / 1_000_000) * prices.inputPrice
+        : (messageTokens / 1_000_000) * prices.outputPrice;
+      
+      cumulativeTokens += messageTokens;
+      cumulativeCost += messageCost;
+      
+      // 累计输入/输出
+      if (isInput) {
+        totalInputTokens += messageTokens;
+        totalInputCost += messageCost;
+      } else {
+        totalOutputTokens += messageTokens;
+        totalOutputCost += messageCost;
+      }
+      
+      // 只在最后一条 AI 消息上显示总统计
+      const isLastAi = m.id === lastAiMessageId;
+      
+      // 用户消息不显示 token 统计，只有 AI 消息显示
+      if (isInput) {
+        // 用户消息不添加 tokenStats
+        return;
+      }
+      
+      tokenStatsMap.set(m.id, { 
+        messageTokens, 
+        cumulativeTokens,
+        cost: messageCost,
+        cumulativeCost,
+        currencySymbol,
+        // 只在最后一条 AI 消息上附加总计信息
+        ...(isLastAi ? {
+          totalInputTokens,
+          totalOutputTokens,
+          totalInputCost,
+          totalOutputCost,
+          isLastMessage: true,
+        } : {}),
+      });
+    });
+
     const messageElements: any[] = [];
+    
+    // 在消息列表顶部显示系统开销
+    if (baseOverheadTokens > 0) {
+      messageElements.push(
+        createElement(
+          "div",
+          {
+            key: "system-overhead",
+            style: {
+              display: "flex",
+              justifyContent: "center",
+              padding: "8px 16px",
+              marginBottom: "8px",
+            },
+          },
+          createElement(
+            "div",
+            {
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "12px",
+                fontSize: "11px",
+                color: "var(--orca-color-text-3)",
+                background: "var(--orca-color-bg-2)",
+                padding: "6px 12px",
+                borderRadius: "12px",
+                border: "1px solid var(--orca-color-border)",
+              },
+            },
+            createElement(
+              "span",
+              {
+                style: { display: "flex", alignItems: "center", gap: "4px" },
+                title: "系统提示词消耗",
+              },
+              createElement("i", { className: "ti ti-prompt", style: { fontSize: "12px" } }),
+              `提示词 ${formatTokenCount(systemPromptTokens)}`
+            ),
+            memoryTokens > 0 && createElement(
+              "span",
+              {
+                style: { display: "flex", alignItems: "center", gap: "4px" },
+                title: "记忆消耗（用户画像+记忆）",
+              },
+              createElement("i", { className: "ti ti-brain", style: { fontSize: "12px" } }),
+              `记忆 ${formatTokenCount(memoryTokens)}`
+            ),
+            createElement(
+              "span",
+              {
+                style: { 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "4px",
+                  fontWeight: 500,
+                  color: "var(--orca-color-text-2)",
+                },
+                title: "基础开销合计",
+              },
+              `= ${formatTokenCount(baseOverheadTokens)} tokens`
+            )
+          )
+        )
+      );
+    }
+
     messages.forEach((m, i) => {
       // 跳过 tool 消息，它们会被合并到 assistant 消息的工具调用区域
       if (m.role === "tool") return;
@@ -1201,12 +1723,18 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           messageIndex: i,
           isLastAiMessage: isLastAi,
           isStreaming: streamingMessageId === m.id,
+          // 选择模式相关
+          selectionMode,
+          isSelected: selectedMessageIds.has(m.id),
+          onToggleSelection: selectionMode ? () => handleToggleMessageSelection(m.id) : undefined,
           onRegenerate: isLastAi ? handleRegenerate : undefined,
           onDelete: () => handleDeleteMessage(m.id),
           onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
+          onTogglePinned: () => handleTogglePinned(m.id),
           toolResults: m.tool_calls ? toolResultsMap : undefined,
           onSuggestedReply: isLastAi ? (text: string) => handleSend(text) : undefined,
           onGenerateSuggestions: isLastAi && m.content ? createSuggestionGenerator(m.content) : undefined,
+          tokenStats: tokenStatsMap.get(m.id),
         })
       );
     });
@@ -1337,6 +1865,100 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       );
       messageListContent = messageElements;
     }
+
+    // 如果在多模型模式，在消息列表末尾添加多模型响应组件
+    if (isMultiModelMode && multiModelResponses.length > 0) {
+      messageElements.push(
+        createElement(
+          "div",
+          {
+            key: "multi-model-response",
+            style: {
+              margin: "16px 0",
+              padding: "16px",
+              background: "var(--orca-color-bg-2)",
+              borderRadius: "16px",
+              border: "1px solid var(--orca-color-border)",
+            },
+          },
+          // 标题栏
+          createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "12px",
+                paddingBottom: "12px",
+                borderBottom: "1px solid var(--orca-color-border)",
+              },
+            },
+            createElement(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  color: "var(--orca-color-text-1)",
+                },
+              },
+              createElement("i", { className: "ti ti-layout-columns", style: { fontSize: "18px", color: "var(--orca-color-primary)" } }),
+              `多模型对比 (${multiModelResponses.length})`
+            ),
+            // 关闭按钮
+            createElement(
+              "button",
+              {
+                onClick: () => {
+                  setIsMultiModelMode(false);
+                  setMultiModelResponses([]);
+                },
+                style: {
+                  padding: "4px 8px",
+                  border: "1px solid var(--orca-color-border)",
+                  borderRadius: "4px",
+                  background: "transparent",
+                  color: "var(--orca-color-text-2)",
+                  cursor: "pointer",
+                  fontSize: "12px",
+                },
+              },
+              "关闭对比"
+            )
+          ),
+          // 多模型响应内容
+          createElement(MultiModelResponse, {
+            responses: multiModelResponses,
+            layout: multiModelResponses.length <= 2 ? "side-by-side" : "stacked",
+            onCopy: (modelId: string, content: string) => {
+              navigator.clipboard.writeText(content).then(() => {
+                orca.notify("success", "已复制到剪贴板");
+              });
+            },
+            onAdopt: (modelId: string, content: string) => {
+              // 采用某个模型的回答，添加到消息列表
+              const info = getModelDisplayInfo(modelId);
+              const adoptedMsg: Message = {
+                id: nowId(),
+                role: "assistant",
+                content,
+                createdAt: Date.now(),
+                model: modelId,
+              };
+              setMessages((prev) => [...prev, adoptedMsg]);
+              setIsMultiModelMode(false);
+              setMultiModelResponses([]);
+              orca.notify("success", `已采用 ${info.modelLabel} 的回答`);
+            },
+          })
+        )
+      );
+      messageListContent = messageElements;
+    }
   }
 
   // If in memory manager view, render MemoryManager instead of chat
@@ -1355,7 +1977,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       {
         style: headerStyle,
       },
-      createElement("div", { style: headerTitleStyle }, "AI Chat"),
+      // Editable session title
+      createElement(EditableTitle, {
+        title: currentSession.title || "新对话",
+        onSave: (newTitle: string) => {
+          if (currentSession.id) {
+            handleRenameSession(currentSession.id, newTitle);
+          }
+        },
+      }),
       // New Session Button
       createElement(
         Button,
@@ -1378,11 +2008,40 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         onToggleFavorite: handleToggleFavorite,
         onRename: handleRenameSession,
       }),
-      // More Menu (Settings, Memory, Clear)
+      // More Menu (Settings, Memory, Clear, Export)
       createElement(HeaderMenu, {
         onClearChat: clear,
-        onOpenSettings: () => void orca.commands.invokeCommand("core.openSettings"),
+        onOpenSettings: () => {
+          if (orca.commands?.invokeCommand) {
+            orca.commands.invokeCommand("core.openSettings");
+          }
+        },
         onOpenMemoryManager: handleOpenMemoryManager,
+        onOpenCompressionSettings: () => setShowCompressionSettings(true),
+        onExportMarkdown: () => {
+          if (messages.length === 0) {
+            orca.notify("warn", "没有可导出的消息");
+            return;
+          }
+          exportSessionAsFile(currentSession);
+          orca.notify("success", "已导出 Markdown 文件");
+        },
+        onSaveToJournal: async () => {
+          if (messages.length === 0) {
+            orca.notify("warn", "没有可保存的消息");
+            return;
+          }
+          const result = await saveSessionToJournal(currentSession);
+          if (result.success) {
+            orca.notify("success", result.message);
+          } else {
+            orca.notify("error", result.message);
+          }
+        },
+        onToggleSelectionMode: handleToggleSelectionMode,
+        selectionMode,
+        selectedCount: selectedMessageIds.size,
+        onSaveSelected: handleSaveSelectedMessages,
       }),
       // Close Button
       createElement(Button, { variant: "plain", onClick: () => closeAiChatPanel(panelId), title: "Close" }, createElement("i", { className: "ti ti-x" }))
@@ -1413,10 +2072,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       disabled: sending,
       currentPageId: rootBlockId,
       currentPageTitle,
-      modelOptions,
+      settings: settingsForUi,
       selectedModel,
-      onModelChange: handleModelChange,
-      onAddModel: handleAddModelToSettings,
+      onModelSelect: handleModelSelect,
+      onUpdateSettings: handleUpdateSettings,
+      currency: settingsForUi.currency,
+    }),
+    // Compression Settings Modal
+    createElement(CompressionSettingsModal, {
+      isOpen: showCompressionSettings,
+      onClose: () => setShowCompressionSettings(false),
     })
   );
 }
