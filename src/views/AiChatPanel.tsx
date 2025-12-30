@@ -112,6 +112,15 @@ function smoothScrollToBottom(el: HTMLDivElement | null, duration = 300) {
   requestAnimationFrame(animation);
 }
 
+function restoreScrollPosition(el: HTMLDivElement | null, savedPosition?: number) {
+  if (!el) return;
+  if (savedPosition !== undefined) {
+    el.scrollTop = savedPosition;
+  } else {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EditableTitle Component - 可编辑的会话标题
 // ─────────────────────────────────────────────────────────────────────────────
@@ -293,9 +302,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
           // 恢复滚动位置
           queueMicrotask(() => {
-            if (listRef.current && active.scrollPosition !== undefined) {
-              listRef.current.scrollTop = active.scrollPosition;
-            }
+            restoreScrollPosition(listRef.current, active.scrollPosition);
           });
         }
       }
@@ -346,9 +353,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     // 恢复目标会话的滚动位置
     queueMicrotask(() => {
-      if (listRef.current && session.scrollPosition !== undefined) {
-        listRef.current.scrollTop = session.scrollPosition;
-      }
+      restoreScrollPosition(listRef.current, session.scrollPosition);
     });
   }, [sessions, currentSession.id]);
 

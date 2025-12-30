@@ -164,14 +164,15 @@ function convertMessages(messages: Message[]): SavedMessage[] {
  */
 function generateSearchableText(title: string, messages: SavedMessage[]): string {
   const parts: string[] = [`AI 对话: ${title}`];
-  
+
   for (const msg of messages) {
     if (msg.content) {
-      parts.push(msg.content);
+      const role = msg.role === "user" ? "用户" : "AI";
+      parts.push(`【${role}】${msg.content}`);
     }
   }
-  
-  return parts.join(" ");
+
+  return parts.join("\n\n");
 }
 
 /**

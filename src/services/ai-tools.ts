@@ -478,6 +478,34 @@ export const TOOLS: OpenAITool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "getSavedAiConversations",
+      description: `获取已保存的 AI 对话记录。这些对话是用户之前与 AI 交流后保存到笔记中的内容。
+可用于：
+- 查找之前讨论过的话题
+- 回顾历史对话内容
+- 继续之前的讨论`,
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "搜索关键词（可选），用于过滤对话内容",
+          },
+          maxResults: {
+            type: "number",
+            description: "返回的最大结果数（默认 10，最大 30）",
+          },
+          briefMode: {
+            type: "boolean",
+            description: "简洁模式：仅返回标题和摘要，不返回完整对话内容",
+          },
+        },
+      },
+    },
+  },
 ];
 
 /**
@@ -1473,6 +1501,77 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return result.trim();
       } catch (err: any) {
         return `Error getting block links: ${err.message}`;
+      }
+    } else if (toolName === "getSavedAiConversations") {
+      try {
+        const query = args.query || "";
+        const maxResults = Math.min(args.maxResults || 10, 30);
+        const briefMode = args.briefMode === true;
+
+        // 通过标签搜索已保存的 AI 对话
+        const result = await orca.invokeBackend("get-blocks-with-tags", ["Ai会话保存"]);
+        
+        if (!result || !Array.isArray(result) || result.length === 0) {
+          return "未找到已保存的 AI 对话记录。";
+        }
+
+        // 过滤和处理结果
+        let conversations = result;
+        
+        // 如果有搜索关键词，过滤结果
+        if (query) {
+          const lowerQuery = query.toLowerCase();
+          conversations = conversations.filter((block: any) => {
+            const text = block.text || "";
+            const repr = block._repr || {};
+            const title = repr.title || "";
+            return text.toLowerCase().includes(lowerQuery) || title.toLowerCase().includes(lowerQuery);
+          });
+        }
+
+        // 限制结果数量
+        conversations = conversations.slice(0, maxResults);
+
+        if (conversations.length === 0) {
+          return query 
+            ? `未找到包含 "${query}" 的 AI 对话记录。`
+            : "未找到已保存的 AI 对话记录。";
+        }
+
+        // 格式化输出
+        const parts: string[] = [`找到 ${conversations.length} 条已保存的 AI 对话：\n`];
+
+        for (const block of conversations) {
+          const repr = block._repr || {};
+          const title = repr.title || "AI 对话";
+          const messages = repr.messages || [];
+          const model = repr.model || "";
+          const createdAt = repr.createdAt ? new Date(repr.createdAt).toLocaleString("zh-CN") : "";
+          const blockId = block.id;
+
+          parts.push(`## [${title}](orca-block:${blockId})`);
+          if (model) parts.push(`模型: ${model}`);
+          if (createdAt) parts.push(`时间: ${createdAt}`);
+          parts.push(`消息数: ${messages.length}`);
+
+          if (!briefMode && messages.length > 0) {
+            parts.push("\n对话内容:");
+            for (const msg of messages.slice(0, 5)) {
+              const role = msg.role === "user" ? "👤 用户" : "🤖 AI";
+              const content = msg.content || "";
+              const preview = content.length > 300 ? content.slice(0, 300) + "..." : content;
+              parts.push(`\n**${role}**: ${preview}`);
+            }
+            if (messages.length > 5) {
+              parts.push(`\n...还有 ${messages.length - 5} 条消息`);
+            }
+          }
+          parts.push("\n---\n");
+        }
+
+        return parts.join("\n");
+      } catch (err: any) {
+        return `Error getting saved AI conversations: ${err.message}`;
       }
     } else {
       console.error("[Tool] Unknown tool:", toolName);
