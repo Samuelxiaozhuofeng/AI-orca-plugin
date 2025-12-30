@@ -294,10 +294,7 @@ function buildSystemContent(
   const parts: string[] = [];
   if (systemPrompt?.trim()) parts.push(systemPrompt.trim());
   if (customMemory?.trim()) parts.push(`用户信息:\n${customMemory.trim()}`);
-  if (contextText?.trim()) {
-    // 添加明确提示：上下文中的块已经是精确引用，无需再搜索
-    parts.push(`用户提供的上下文（已包含完整内容和块ID，请直接使用，无需调用搜索工具查找这些内容）:\n${contextText.trim()}`);
-  }
+  if (contextText?.trim()) parts.push(`用户上下文:\n${contextText.trim()}`);
   
   // Append Ask mode instruction when in Ask mode
   if (chatMode === 'ask') {

@@ -870,21 +870,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         const memoryText = memoryStore.getFullMemoryText();
         const baseMessages = historyOverride || messages;
         
-        // 构建发送给 API 的内容：如果有高优先级上下文（拖入的块），在内容前注入块引用
-        let contentForApiMulti = processedContent;
-        if (highPriorityContexts.length > 0) {
-          const blockRefs = highPriorityContexts
-            .filter(c => c.blockId)
-            .map(c => `- "${c.title}" (blockId: ${c.blockId})`)
-            .join("\n");
-          if (blockRefs) {
-            contentForApiMulti = `[用户引用了以下块，请直接基于上下文中这些块的内容回答，不要调用搜索工具查找]\n${blockRefs}\n\n${processedContent}`;
-          }
-        }
-        
         const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), {
           ...userMsg,
-          content: contentForApiMulti,
+          content: processedContent,
         }];
         
         // 构建 API 消息（不包含工具，多模型模式下简化处理）
@@ -922,23 +910,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // 构建发送给 API 的内容：如果有高优先级上下文（拖入的块），在内容前注入块引用
-    let contentForApi = processedContent;
-    if (highPriorityContexts.length > 0) {
-      const blockRefs = highPriorityContexts
-        .filter(c => c.blockId)
-        .map(c => `- "${c.title}" (blockId: ${c.blockId})`)
-        .join("\n");
-      if (blockRefs) {
-        contentForApi = `[用户引用了以下块，请直接基于上下文中这些块的内容回答，不要调用搜索工具查找]\n${blockRefs}\n\n${processedContent}`;
-      }
-    }
-
     // 发送给 API 的消息使用处理后的内容（去掉指令）
     const userMsgForApi: Message = { 
       id: userMsg.id, 
       role: "user", 
-      content: contentForApi, 
+      content: processedContent, 
       createdAt: userMsg.createdAt,
       files: userMsg.files,
     };

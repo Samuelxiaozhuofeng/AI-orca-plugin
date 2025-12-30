@@ -576,7 +576,8 @@ export const TOOLS: OpenAITool[] = [
 
 /**
  * 搜索类工具名称列表 - 当用户拖入块时禁用这些工具
- * 因为用户已经明确指定了要讨论的块，不需要再搜索
+ * 因为用户已经明确指定了要讨论的块，不需要再搜索笔记
+ * 注意：日记工具保留，用户可能同时问日记相关问题
  */
 const SEARCH_TOOL_NAMES = new Set([
   "searchBlocksByTag",
@@ -586,11 +587,6 @@ const SEARCH_TOOL_NAMES = new Set([
   "searchBlocksByReference",
   "getPage",
   "getSavedAiConversations",
-  // 日记搜索工具也禁用，除非用户明确问日记
-  "getRecentJournals",
-  "getTodayJournal",
-  "getJournalByDate",
-  "getJournalsByDateRange",
 ]);
 
 /**
