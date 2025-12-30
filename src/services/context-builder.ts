@@ -385,9 +385,11 @@ export async function extractBlockContent(
   };
 
   try {
-    const block = (orca.state.blocks as any)?.[blockId];
     const tree = await getBlockTree(blockId);
     const resolveById = await buildResolverFromTree(tree, options);
+    
+    // 使用 resolveById 获取完整的块数据（包含 properties）
+    const block = resolveById(blockId) || (orca.state.blocks as any)?.[blockId];
     
     const lines: string[] = [];
     const state = { blocks: 0, depth: 0, hitLimit: false, assets: [] as BlockAssetInfo[] };

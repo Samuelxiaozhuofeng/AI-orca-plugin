@@ -1652,7 +1652,10 @@ cache:${cacheId}
   }
 
   function stop() {
-    if (abortRef.current) abortRef.current.abort();
+    if (abortRef.current) {
+      abortRef.current.abort();
+      orca.notify("info", "已停止回复");
+    }
   }
 
   // 删除单条消息
