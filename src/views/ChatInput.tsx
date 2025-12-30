@@ -22,6 +22,8 @@ import { loadFromStorage } from "../store/chat-mode-store";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
 import { MultiModelToggleButton } from "../components/MultiModelSelector";
 import { multiModelStore } from "../store/multi-model-store";
+import ToolPanel from "../components/ToolPanel";
+import { loadToolSettings } from "../store/tool-store";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -161,6 +163,7 @@ export default function ChatInput({
   // Load chat mode from storage on mount (Requirements: 5.2)
   useEffect(() => {
     loadFromStorage();
+    loadToolSettings();
   }, []);
 
   const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled && !isSending;
@@ -426,6 +429,9 @@ export default function ChatInput({
     createElement(
       "div",
       { style: { ...textareaWrapperStyle(isFocused), position: "relative" } },
+
+      // Tool Panel (only in Agent mode)
+      createElement(ToolPanel, null),
 
       // Slash Command Menu
       slashMenuOpen && filteredCommands.length > 0 && createElement(

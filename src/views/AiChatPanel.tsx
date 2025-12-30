@@ -45,7 +45,8 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { TOOLS, executeTool, getToolsForDraggedContext } from "../services/ai-tools";
+import { TOOLS, FLASHCARD_TOOL, executeTool, getToolsForDraggedContext } from "../services/ai-tools";
+import { getToolStatus, isToolDisabled, shouldAskForTool } from "../store/tool-store";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/chat-stream-handler";
@@ -254,6 +255,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Flashcard review state
   const [flashcardMode, setFlashcardMode] = useState(false);
   const [pendingFlashcards, setPendingFlashcards] = useState<Flashcard[]>([]);
+  const [flashcardIndex, setFlashcardIndex] = useState(0);
+  const [flashcardKeptCount, setFlashcardKeptCount] = useState(0);
+  const [flashcardSkippedCount, setFlashcardSkippedCount] = useState(0);
 
   // Multi-model parallel response state
   const [multiModelResponses, setMultiModelResponses] = useState<ModelResponse[]>([]);
@@ -291,14 +295,30 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       setSessions(data.sessions);
       if (data.activeSessionId) {
         const active = data.sessions.find((s) => s.id === data.activeSessionId);
-        if (active && active.messages.length > 0) {
+        if (active) {
+          // 恢复会话（即使没有消息，也可能有闪卡状态）
           setCurrentSession({
             ...active,
             model: (active.model || "").trim() || defaultModel,
           });
-          setMessages(active.messages);
+          if (active.messages.length > 0) {
+            setMessages(active.messages);
+          }
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
+          }
+          // 恢复闪卡状态
+          if (active.flashcardState && active.flashcardState.cards.length > 0) {
+            const state = active.flashcardState;
+            // 只有还有未完成的卡片才恢复
+            if (state.currentIndex < state.cards.length) {
+              console.log("[AiChatPanel] Restoring flashcard state:", state.currentIndex, "/", state.cards.length);
+              setPendingFlashcards(state.cards as Flashcard[]);
+              setFlashcardIndex(state.currentIndex);
+              setFlashcardKeptCount(state.keptCount);
+              setFlashcardSkippedCount(state.skippedCount);
+              setFlashcardMode(true);
+            }
           }
           // 恢复滚动位置
           queueMicrotask(() => {
@@ -326,6 +346,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       },
     ]);
     contextStore.selected = [];
+    // 重置闪卡状态
+    setFlashcardMode(false);
+    setPendingFlashcards([]);
+    setFlashcardIndex(0);
+    setFlashcardKeptCount(0);
+    setFlashcardSkippedCount(0);
   }, []);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
@@ -350,6 +376,32 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
     setMessages(session.messages.length > 0 ? session.messages : []);
     contextStore.selected = session.contexts || [];
+
+    // 恢复闪卡状态
+    if (session.flashcardState && session.flashcardState.cards.length > 0) {
+      const state = session.flashcardState;
+      if (state.currentIndex < state.cards.length) {
+        setPendingFlashcards(state.cards as Flashcard[]);
+        setFlashcardIndex(state.currentIndex);
+        setFlashcardKeptCount(state.keptCount);
+        setFlashcardSkippedCount(state.skippedCount);
+        setFlashcardMode(true);
+      } else {
+        // 闪卡已完成，重置状态
+        setFlashcardMode(false);
+        setPendingFlashcards([]);
+        setFlashcardIndex(0);
+        setFlashcardKeptCount(0);
+        setFlashcardSkippedCount(0);
+      }
+    } else {
+      // 没有闪卡状态，重置
+      setFlashcardMode(false);
+      setPendingFlashcards([]);
+      setFlashcardIndex(0);
+      setFlashcardKeptCount(0);
+      setFlashcardSkippedCount(0);
+    }
 
     // 恢复目标会话的滚动位置
     queueMicrotask(() => {
@@ -397,34 +449,49 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
   }, [currentSession.id]);
 
-  // Auto-cache session when messages change (debounced)
+  // Auto-cache session when messages or flashcard state change (debounced)
   const autoCacheTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const hasRealMessages = messages.some((m) => !m.localOnly);
-    if (!hasRealMessages || !sessionsLoaded) return;
+    const hasFlashcards = flashcardMode && pendingFlashcards.length > 0;
+    
+    // 需要有真实消息或闪卡状态才保存
+    if ((!hasRealMessages && !hasFlashcards) || !sessionsLoaded) return;
 
     // Debounce auto-cache to avoid too frequent saves
     if (autoCacheTimeoutRef.current) {
       clearTimeout(autoCacheTimeoutRef.current);
     }
     autoCacheTimeoutRef.current = setTimeout(async () => {
+      const flashcardState = hasFlashcards ? {
+        cards: pendingFlashcards,
+        currentIndex: flashcardIndex,
+        keptCount: flashcardKeptCount,
+        skippedCount: flashcardSkippedCount,
+      } : undefined;
+      
+      if (hasFlashcards) {
+        console.log("[AiChatPanel] Saving flashcard state:", flashcardIndex, "/", pendingFlashcards.length);
+      }
+      
       const sessionToCache: SavedSession = {
         ...currentSession,
         messages,
         contexts: [...contextStore.selected],
         scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
+        flashcardState,
       };
       await autoCacheSession(sessionToCache);
       const data = await loadSessions();
       setSessions(data.sessions);
-    }, 2000); // 2 second debounce
+    }, 1000); // 1 second debounce for faster flashcard state saving
 
     return () => {
       if (autoCacheTimeoutRef.current) {
         clearTimeout(autoCacheTimeoutRef.current);
       }
     };
-  }, [messages, currentSession, sessionsLoaded]);
+  }, [messages, currentSession, sessionsLoaded, flashcardMode, pendingFlashcards, flashcardIndex, flashcardKeptCount, flashcardSkippedCount]);
 
   // Sync state to session store for auto-save on close
   useEffect(() => {
@@ -670,7 +737,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      return; // 直接返回，不走 AI
 	    }
 
-	    // /card - 闪卡生成模式（直接进入交互界面，不显示 AI 文本回复）
+	    // /card - 闪卡生成模式（使用工具调用强制格式）
 	    const isFlashcardMode = content.includes("/card") || content.includes("帮我构建闪卡") || content.includes("生成闪卡");
 	    if (isFlashcardMode) {
 	      // 提取用户指定的主题（如果有）
@@ -692,16 +759,23 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      // 设置发送状态，显示加载中
 	      setSending(true);
 	      
-	      // 构建闪卡生成的提示
-	      const { getFlashcardSystemPrompt, parseFlashcards } = await import("../services/flashcard-service");
-	      const flashcardSystemPrompt = systemPrompt + "\n\n" + getFlashcardSystemPrompt();
+	      // 构建闪卡生成的系统提示词
+	      const flashcardSystemPrompt = `你是一个闪卡生成助手。当用户要求生成闪卡时，你必须调用 generateFlashcards 工具。
+
+闪卡生成原则：
+- 简洁：答案≤20字为佳
+- 5-8 张卡片
+- 答案是结论，不是解释
+- 选择题需要 2-4 个选项，标记正确答案
+
+⚠️ 重要：必须调用 generateFlashcards 工具，不要用文本回复！`;
 	      
+	      // 用户请求消息
 	      let flashcardPrompt = cardTopic 
-	        ? `请结合我们之前的对话，生成关于「${cardTopic}」的闪卡`
-	        : "请根据我们的对话内容生成闪卡";
+	        ? `请根据我们之前的对话，生成关于「${cardTopic}」的闪卡。调用 generateFlashcards 工具生成。`
+	        : "请根据我们的对话内容生成闪卡。调用 generateFlashcards 工具生成。";
 	      
-	      // 构建对话历史（用于 AI 理解上下文）
-	      // 过滤掉 localOnly 消息，并添加闪卡请求
+	      // 构建对话历史
 	      const historyMessages = messages.filter((m) => !m.localOnly);
 	      const flashcardRequestMsg: Message = { 
 	        id: nowId(), 
@@ -724,27 +798,28 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        }
 	      } catch {}
 	      
-	      console.log("[Flashcard] Building messages for API, history count:", historyMessages.length);
+	      console.log("[Flashcard] Building messages for API with tool calling");
 	      
+	      // 使用专用的闪卡工具（不在普通 TOOLS 列表中）
 	      const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
 	        messages: conversationForFlashcard,
 	        systemPrompt: flashcardSystemPrompt,
 	        contextText,
 	        customMemory: memoryText,
-	        chatMode: "ask", // 不需要工具
+	        chatMode: "agent", // 使用工具模式
 	      });
-	      
-	      console.log("[Flashcard] API messages built:", apiMessages.length);
 	      
 	      // 获取模型特定的 API 配置
 	      const apiConfig = getModelApiConfig(settings, model);
 	      
-	      // 调用 AI 生成闪卡
-	      let fullContent = "";
 	      const aborter = new AbortController();
 	      abortRef.current = aborter;
 	      
 	      try {
+	        let toolCallResult: any = null;
+	        let textContent = "";
+	        
+	        // 使用工具调用模式
 	        for await (const chunk of streamChatWithRetry(
 	          {
 	            apiUrl: apiConfig.apiUrl,
@@ -753,31 +828,63 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	            temperature: settings.temperature,
 	            maxTokens: settings.maxTokens,
 	            signal: aborter.signal,
+	            tools: [FLASHCARD_TOOL],
 	          },
 	          apiMessages,
-	          apiMessagesFallback,
+	          apiMessagesFallback || apiMessages,
 	        )) {
 	          if (chunk.type === "content") {
-	            fullContent += chunk.content;
+	            textContent += chunk.content;
+	          } else if (chunk.type === "tool_calls" && chunk.toolCalls) {
+	            // 找到 generateFlashcards 工具调用
+	            for (const tc of chunk.toolCalls) {
+	              if (tc.function.name === "generateFlashcards") {
+	                console.log("[Flashcard] Tool call received:", tc.function.name);
+	                try {
+	                  const args = typeof tc.function.arguments === "string" 
+	                    ? JSON.parse(tc.function.arguments) 
+	                    : tc.function.arguments;
+	                  // 执行工具
+	                  const resultStr = await executeTool("generateFlashcards", args);
+	                  toolCallResult = JSON.parse(resultStr);
+	                } catch (e) {
+	                  console.error("[Flashcard] Tool execution error:", e);
+	                }
+	              }
+	            }
 	          }
 	        }
 	        
-	        console.log("[Flashcard] AI response length:", fullContent.length);
+	        console.log("[Flashcard] Tool result:", toolCallResult);
 	        
-	        // 解析闪卡
-	        const cards = parseFlashcards(fullContent);
-	        console.log("[Flashcard] Parsed cards:", cards.length);
-	        
-	        if (cards.length > 0) {
-	          // 直接进入闪卡交互界面
-	          setPendingFlashcards(cards);
+	        // 检查工具调用结果
+	        if (toolCallResult && toolCallResult.success && toolCallResult.cards) {
+	          // 工具调用成功，进入闪卡界面
+	          setPendingFlashcards(toolCallResult.cards);
 	          setFlashcardMode(true);
+	        } else if (textContent) {
+	          // 没有工具调用，尝试从文本解析（兼容不支持工具的模型）
+	          const { parseFlashcards } = await import("../services/flashcard-service");
+	          const cards = parseFlashcards(textContent);
+	          if (cards.length > 0) {
+	            setPendingFlashcards(cards);
+	            setFlashcardMode(true);
+	          } else {
+	            // 显示 AI 的文本回复
+	            const assistantMsg: Message = {
+	              id: nowId(),
+	              role: "assistant",
+	              content: textContent || "抱歉，无法生成闪卡。请提供更多上下文或指定主题。",
+	              createdAt: Date.now(),
+	            };
+	            setMessages((prev) => [...prev, assistantMsg]);
+	          }
 	        } else {
-	          // 没有解析到闪卡，显示 AI 的回复
+	          // 既没有工具调用也没有文本
 	          const assistantMsg: Message = {
 	            id: nowId(),
 	            role: "assistant",
-	            content: fullContent || "抱歉，无法生成闪卡。请提供更多上下文或指定主题。",
+	            content: "抱歉，无法生成闪卡。请提供更多上下文或指定主题。",
 	            createdAt: Date.now(),
 	          };
 	          setMessages((prev) => [...prev, assistantMsg]);
@@ -985,9 +1092,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       // 根据是否有拖入的块来选择工具列表
       // 有拖入块时禁用搜索类工具，强制 AI 使用已提供的上下文
       const hasHighPriorityContext = highPriorityContexts.length > 0;
-      const toolsToUse = includeTools 
-        ? (hasHighPriorityContext ? getToolsForDraggedContext() : TOOLS)
-        : undefined;
+      // 根据用户工具设置过滤工具列表（排除禁用的工具）
+      const baseTools = hasHighPriorityContext ? getToolsForDraggedContext() : TOOLS;
+      const filteredTools = baseTools.filter(tool => !isToolDisabled(tool.function.name));
+      const toolsToUse = includeTools && filteredTools.length > 0 ? filteredTools : undefined;
 
       for await (const chunk of streamChatWithRetry(
         {
@@ -1162,20 +1270,35 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           if (parseError) {
              result = `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`;
           } else {
-             // Execute tool with timeout protection
-             const TOOL_TIMEOUT_MS = 60000; // 60s timeout for tool execution
-             try {
-               const timeoutPromise = new Promise<string>((_, reject) => {
-                 setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
-               });
-               
-               result = await Promise.race([
-                 executeTool(toolName, args),
-                 timeoutPromise
-               ]);
-             } catch (err: any) {
-               console.error(`[AI] [Round ${toolRound}] Tool execution error/timeout:`, err);
-               result = `Error: ${err.message || "Tool execution failed"}`;
+             // 检查工具是否需要询问用户
+             const needsConfirm = shouldAskForTool(toolName);
+             let userApproved = true;
+             
+             if (needsConfirm) {
+               // 使用确认对话框询问用户
+               const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
+               userApproved = await createToolConfirmPromise(toolName, args);
+             }
+             
+             if (!userApproved) {
+               result = `用户拒绝执行此工具。请尝试其他方式或直接回答用户的问题。`;
+               console.log(`[AI] [Round ${toolRound}] Tool ${toolName} denied by user`);
+             } else {
+               // Execute tool with timeout protection
+               const TOOL_TIMEOUT_MS = 60000; // 60s timeout for tool execution
+               try {
+                 const timeoutPromise = new Promise<string>((_, reject) => {
+                   setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+                 });
+                 
+                 result = await Promise.race([
+                   executeTool(toolName, args),
+                   timeoutPromise
+                 ]);
+               } catch (err: any) {
+                 console.error(`[AI] [Round ${toolRound}] Tool execution error/timeout:`, err);
+                 result = `Error: ${err.message || "Tool execution failed"}`;
+               }
              }
           }
 
@@ -1231,7 +1354,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               temperature: settings.temperature,
               maxTokens: settings.maxTokens,
               signal: aborter.signal,
-              tools: enableTools ? (hasHighPriorityContext ? getToolsForDraggedContext() : TOOLS) : undefined, // Last round: disable tools to force an answer
+              tools: enableTools ? filteredTools : undefined, // Last round: disable tools to force an answer
             },
             standard,
             fallback,
@@ -1820,15 +1943,64 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           {
             key: "flashcard-review",
             style: {
-              margin: "16px 0",
-              padding: "16px",
+              margin: "12px 0",
               background: "var(--orca-color-bg-2)",
-              borderRadius: "16px",
+              borderRadius: "12px",
               border: "1px solid var(--orca-color-border)",
+              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
+              overflow: "hidden",
             },
           },
+          // 闪卡标题栏
+          createElement(
+            "div",
+            {
+              style: {
+                padding: "10px 16px",
+                borderBottom: "1px solid var(--orca-color-border)",
+                background: "var(--orca-color-bg-1)",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              },
+            },
+            createElement("i", {
+              className: "ti ti-cards",
+              style: { fontSize: "16px", color: "var(--orca-color-primary)" },
+            }),
+            createElement(
+              "span",
+              {
+                style: {
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  color: "var(--orca-color-text-1)",
+                },
+              },
+              "闪卡复习"
+            ),
+            createElement(
+              "span",
+              {
+                style: {
+                  fontSize: "12px",
+                  color: "var(--orca-color-text-3)",
+                  marginLeft: "auto",
+                },
+              },
+              `共 ${pendingFlashcards.length} 张`
+            )
+          ),
           createElement(FlashcardReview, {
             cards: pendingFlashcards,
+            initialIndex: flashcardIndex,
+            initialKeptCount: flashcardKeptCount,
+            initialSkippedCount: flashcardSkippedCount,
+            onStateChange: (index: number, kept: number, skipped: number) => {
+              setFlashcardIndex(index);
+              setFlashcardKeptCount(kept);
+              setFlashcardSkippedCount(skipped);
+            },
             onKeepCard: async (card: Flashcard) => {
               const { saveCardToJournal } = await import("../services/flashcard-service");
               const result = await saveCardToJournal(card);
@@ -1850,10 +2022,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               };
               setMessages((prev) => [...prev, summaryMsg]);
               
-              // 完成后延迟关闭闪卡界面
+              // 完成后延迟关闭闪卡界面，并重置状态
               setTimeout(() => {
                 setFlashcardMode(false);
                 setPendingFlashcards([]);
+                setFlashcardIndex(0);
+                setFlashcardKeptCount(0);
+                setFlashcardSkippedCount(0);
               }, 500);
             },
             onCancel: () => {
@@ -1867,6 +2042,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
               setMessages((prev) => [...prev, cancelMsg]);
               setFlashcardMode(false);
               setPendingFlashcards([]);
+              setFlashcardIndex(0);
+              setFlashcardKeptCount(0);
+              setFlashcardSkippedCount(0);
             },
           })
         )

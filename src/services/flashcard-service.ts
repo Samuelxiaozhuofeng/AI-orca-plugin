@@ -296,45 +296,58 @@ export async function saveCardsToJournal(cards: Flashcard[]): Promise<{ success:
  * 生成闪卡的系统提示词
  */
 export function getFlashcardSystemPrompt(): string {
-  return `【闪卡生成】
+  return `【强制闪卡生成模式】
 
-## 原则
-- 能短则短，必要时可长
-- 简单概念：答案≤8字（如 1+1=2）
-- 需解释的：答案≤20字
-- 复杂内容拆成多张卡
+⚠️ 重要：你现在处于闪卡生成模式，必须且只能输出 \`\`\`flashcard 代码块格式！
+⚠️ 禁止输出任何其他文字、解释、说明！直接输出闪卡代码块！
 
-## 格式
+## 输出格式（必须严格遵守）
 
 \`\`\`flashcard
-Q: 问题
-A: 答案
+Q: 问题1
+A: 答案1
 ---
-Q: 选择题
+Q: 问题2
+A: 答案2
+---
+Q: 选择题问题
 TYPE: choice
-O: A选项 (correct)
-O: B选项
+O: A选项
+O: B选项 (correct)
 O: C选项
+O: D选项
 \`\`\`
+
+## 格式规则
+1. 必须以 \`\`\`flashcard 开头，以 \`\`\` 结尾
+2. 每张卡片用 --- 分隔
+3. Q: 开头是问题（必填）
+4. A: 开头是答案（普通卡必填）
+5. TYPE: choice 表示选择题
+6. O: 开头是选项，(correct) 标记正确答案
+
+## 内容原则
+- 答案简洁：简单概念≤8字，复杂概念≤20字
+- 复杂内容拆成多张卡
+- 生成 5-8 张卡
+- 答案是结论，不是解释
 
 ## 示例
 
-✅ Q: useState 返回？
-   A: [值, setter]
+\`\`\`flashcard
+Q: useState 返回什么？
+A: [状态值, setter函数]
+---
+Q: useEffect 空依赖数组的作用？
+A: 仅在组件挂载时执行一次
+---
+Q: React 中哪个 Hook 用于副作用？
+TYPE: choice
+O: useState
+O: useEffect (correct)
+O: useMemo
+O: useCallback
+\`\`\`
 
-✅ Q: useEffect 空数组？
-   A: 仅挂载时执行一次
-
-✅ Q: 间隔重复的核心？
-   A: 在遗忘前复习，强化记忆
-
-❌ A: useEffect 是 React 提供的用于处理副作用的 Hook，当依赖数组为空时...（太啰嗦）
-
-## 要求
-- 5-8 张卡
-- 优先极简，必要时补充
-- 答案是结论，不是解释过程
-- 选项简短有区分度
-
-从对话提取核心点。`;
+现在请直接输出 \`\`\`flashcard 代码块，不要输出任何其他内容！`;
 }

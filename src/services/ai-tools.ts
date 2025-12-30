@@ -575,6 +575,64 @@ export const TOOLS: OpenAITool[] = [
 ];
 
 /**
+ * 闪卡生成工具 - 仅供 /card 命令使用，不包含在普通对话工具列表中
+ */
+export const FLASHCARD_TOOL: OpenAITool = {
+  type: "function",
+  function: {
+    name: "generateFlashcards",
+    description: `生成闪卡。根据对话内容或指定主题，生成 5-8 张闪卡用于记忆学习。必须调用此工具，不要用文本回复！`,
+    parameters: {
+      type: "object",
+      properties: {
+        cards: {
+          type: "array",
+          description: "闪卡列表，5-8 张",
+          items: {
+            type: "object",
+            properties: {
+              question: {
+                type: "string",
+                description: "问题（简洁明了）",
+              },
+              answer: {
+                type: "string",
+                description: "答案（简洁，≤20字为佳）。选择题不需要此字段",
+              },
+              type: {
+                type: "string",
+                enum: ["basic", "choice"],
+                description: "卡片类型：basic（问答）或 choice（选择题）",
+              },
+              options: {
+                type: "array",
+                description: "选择题选项（仅 type=choice 时需要）",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: {
+                      type: "string",
+                      description: "选项文本",
+                    },
+                    isCorrect: {
+                      type: "boolean",
+                      description: "是否为正确答案",
+                    },
+                  },
+                  required: ["text", "isCorrect"],
+                },
+              },
+            },
+            required: ["question", "type"],
+          },
+        },
+      },
+      required: ["cards"],
+    },
+  },
+};
+
+/**
  * 搜索类工具名称列表 - 当用户拖入块时禁用这些工具
  * 因为用户已经明确指定了要讨论的块，不需要再搜索笔记
  * 注意：日记工具保留，用户可能同时问日记相关问题
@@ -1810,6 +1868,80 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return parts.join("\n");
       } catch (err: any) {
         return `Error getting saved AI conversations: ${err.message}`;
+      }
+    } else if (toolName === "generateFlashcards") {
+      // 闪卡生成工具 - 返回结构化数据供前端处理
+      try {
+        const cards = args.cards;
+        if (!cards || !Array.isArray(cards) || cards.length === 0) {
+          return JSON.stringify({ 
+            success: false, 
+            error: "No cards provided",
+            _flashcardToolResult: true 
+          });
+        }
+        
+        // 验证并转换卡片格式
+        const validCards = cards.map((card: any, index: number) => {
+          const cardType = card.type === "choice" ? "choice" : "basic";
+          const result: any = {
+            id: `card-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+            front: card.question || "",
+            cardType,
+          };
+          
+          if (cardType === "choice") {
+            // 选择题
+            result.back = "";
+            result.options = (card.options || []).map((opt: any) => ({
+              text: opt.text || "",
+              isCorrect: opt.isCorrect === true,
+            }));
+            // 验证至少有一个正确答案
+            if (!result.options.some((o: any) => o.isCorrect)) {
+              // 如果没有标记正确答案，默认第一个为正确
+              if (result.options.length > 0) {
+                result.options[0].isCorrect = true;
+              }
+            }
+          } else {
+            // 普通问答卡
+            result.back = card.answer || "";
+          }
+          
+          return result;
+        }).filter((card: any) => {
+          // 过滤无效卡片
+          if (!card.front) return false;
+          if (card.cardType === "basic" && !card.back) return false;
+          if (card.cardType === "choice" && (!card.options || card.options.length < 2)) return false;
+          return true;
+        });
+        
+        if (validCards.length === 0) {
+          return JSON.stringify({ 
+            success: false, 
+            error: "No valid cards after validation",
+            _flashcardToolResult: true 
+          });
+        }
+        
+        console.log(`[Tool] generateFlashcards: Generated ${validCards.length} valid cards`);
+        
+        // 返回结构化结果，前端会识别 _flashcardToolResult 标记
+        return JSON.stringify({
+          success: true,
+          cards: validCards,
+          count: validCards.length,
+          _flashcardToolResult: true,
+        });
+      } catch (err: any) {
+        console.error("[Tool] Error in generateFlashcards:", err);
+        return JSON.stringify({ 
+          success: false, 
+          error: err.message,
+          _flashcardToolResult: true 
+        });
       }
     } else {
       console.error("[Tool] Unknown tool:", toolName);

@@ -61,6 +61,29 @@ export type Message = {
 };
 
 /**
+ * Pending flashcard for session persistence
+ */
+export type PendingFlashcard = {
+  id: string;
+  front: string;
+  back: string;
+  tags?: string[];
+  cardType?: "basic" | "choice";
+  options?: { text: string; isCorrect: boolean }[];
+  ordered?: boolean;
+};
+
+/**
+ * Flashcard review state for session persistence
+ */
+export type FlashcardState = {
+  cards: PendingFlashcard[];
+  currentIndex: number;
+  keptCount: number;
+  skippedCount: number;
+};
+
+/**
  * Saved session structure
  */
 export type SavedSession = {
@@ -74,6 +97,7 @@ export type SavedSession = {
   pinned?: boolean; // 置顶标记
   favorited?: boolean; // 收藏标记
   scrollPosition?: number; // 滚动位置（像素）
+  flashcardState?: FlashcardState; // 闪卡复习状态
 };
 
 /**
@@ -386,6 +410,7 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     title: title || "",
     updatedAt,
     scrollPosition: session.scrollPosition,
+    flashcardState: session.flashcardState, // 保留闪卡状态
   };
 
   if (existingIndex >= 0) {
