@@ -120,6 +120,125 @@ function CodeBlock({ language, content }: { language?: string; content: string }
   );
 }
 
+// 全局缓存：存储大型日记导出数据
+const journalExportCache = new Map<string, { rangeLabel: string; entries: any[] }>();
+
+// Helper component for Journal Export Button
+function JournalExportBlock({ content }: { content: string }) {
+  const [exporting, setExporting] = useState(false);
+
+  // 尝试解析数据：先检查缓存，再尝试解析 JSON
+  const getData = () => {
+    const trimmed = content.trim();
+    
+    // 检查是否是缓存 ID（格式：cache:xxx）
+    if (trimmed.startsWith("cache:")) {
+      const cacheId = trimmed.substring(6);
+      const cached = journalExportCache.get(cacheId);
+      if (cached) {
+        console.log("[JournalExportBlock] Found cached data:", cacheId);
+        return cached;
+      }
+      console.warn("[JournalExportBlock] Cache miss:", cacheId);
+      return null;
+    }
+    
+    // 尝试解析 JSON
+    try {
+      console.log("[JournalExportBlock] Parsing JSON, length:", trimmed.length);
+      return JSON.parse(trimmed);
+    } catch (err) {
+      console.error("[JournalExportBlock] JSON parse error:", err);
+      console.error("[JournalExportBlock] Content preview:", trimmed.substring(0, 500));
+      return null;
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      setExporting(true);
+      const data = getData();
+      if (!data) {
+        throw new Error("无法解析日记数据");
+      }
+      const { exportJournalsAsFile } = await import("../services/export-service");
+      exportJournalsAsFile(data.entries, data.rangeLabel);
+    } catch (err) {
+      console.error("Failed to export journals:", err);
+      orca.notify("error", "导出失败: " + (err as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const data = getData();
+  const entryCount = data?.entries?.length || 0;
+  const rangeLabel = data?.rangeLabel || "";
+
+  return createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        padding: "16px",
+        background: "var(--orca-color-bg-2)",
+        borderRadius: "8px",
+        border: "1px solid var(--orca-color-border)",
+        marginTop: "8px",
+      },
+    },
+    createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          color: "var(--orca-color-text-2)",
+        },
+      },
+      createElement("i", { className: "ti ti-file-export", style: { fontSize: "20px" } }),
+      createElement("span", null, `${rangeLabel} - 共 ${entryCount} 篇日记`)
+    ),
+    createElement(
+      "button",
+      {
+        onClick: handleExport,
+        disabled: exporting || entryCount === 0,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "8px",
+          padding: "10px 20px",
+          background: exporting || entryCount === 0 ? "var(--orca-color-bg-3)" : "#2563eb",
+          color: exporting || entryCount === 0 ? "var(--orca-color-text-3)" : "#ffffff",
+          border: "none",
+          borderRadius: "6px",
+          cursor: exporting || entryCount === 0 ? "not-allowed" : "pointer",
+          fontSize: "14px",
+          fontWeight: 500,
+          transition: "all 0.2s",
+        },
+      },
+      createElement("i", { className: exporting ? "ti ti-loader" : "ti ti-download" }),
+      exporting ? "导出中..." : entryCount === 0 ? "无数据可导出" : "导出为 Markdown 文件"
+    ),
+    createElement(
+      "div",
+      {
+        style: {
+          fontSize: "12px",
+          color: "var(--orca-color-text-3)",
+        },
+      },
+      "💡 导出后可使用 ChatGPT、Claude 等 AI 工具进行分析"
+    )
+  );
+}
+
 // Table view types
 type TableViewMode = "table" | "card" | "list";
 
@@ -1014,6 +1133,13 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       );
 
     case "codeblock":
+      // 特殊处理 journal-export 代码块
+      if (node.language === "journal-export") {
+        return createElement(JournalExportBlock, {
+          key,
+          content: node.content,
+        });
+      }
       return createElement(CodeBlock, {
         key,
         language: node.language,
@@ -1122,3 +1248,6 @@ export default function MarkdownMessage({ content, role }: Props) {
     ...nodes.map((node: MarkdownNode, index: number) => renderBlockNode(node, index)),
   );
 }
+
+// 导出缓存供外部使用
+export { journalExportCache };

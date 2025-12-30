@@ -107,6 +107,45 @@ export function exportSessionAsFile(session: SavedSession): void {
 }
 
 /**
+ * 日记条目接口
+ */
+export interface JournalEntry {
+  date: string;
+  content: string;
+  blockId?: number;
+}
+
+/**
+ * 将日记条目导出为 Markdown 文件
+ * @param entries - 日记条目数组
+ * @param rangeLabel - 范围标签（如 "2024年" 或 "2024年5月"）
+ */
+export function exportJournalsAsFile(entries: JournalEntry[], rangeLabel: string): void {
+  const header = `# ${rangeLabel} 日记\n\n导出时间: ${new Date().toLocaleString("zh-CN")}\n共 ${entries.length} 篇日记\n\n---\n\n`;
+  
+  const content = entries.map(entry => {
+    const dateHeader = `## ${entry.date}\n\n`;
+    return dateHeader + entry.content + "\n";
+  }).join("\n---\n\n");
+  
+  const markdown = header + content;
+  const filename = `日记_${rangeLabel.replace(/[\\/:*?"<>|]/g, "_")}.md`;
+  
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  orca.notify("success", `已导出 ${entries.length} 篇日记到 ${filename}`);
+}
+
+/**
  * 转换消息用于保存（保留完整信息）
  */
 function convertMessages(messages: Message[]): SavedMessage[] {

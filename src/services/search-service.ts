@@ -587,6 +587,7 @@ export async function getTodayJournal(
 
 /**
  * Get recent journals in the past N days (including today).
+ * Uses get-journal-block API to fetch actual journal entries by date.
  * @param days - Number of days ago to include (default: 7)
  * @param includeChildren - Whether to include child blocks (default: true)
  * @param maxResults - Maximum number of journal entries to return (default: 20, max: 50)
@@ -608,13 +609,320 @@ export async function getRecentJournals(
     maxResults: normalizedMaxResults,
   });
 
-  const start: QueryDateSpec = { type: "relative", value: -normalizedDays, unit: "d" };
-  const end: QueryDateSpec = { type: "relative", value: 0, unit: "d" };
+  const results: SearchResult[] = [];
+  const today = new Date();
+  
+  // Iterate through each day and fetch journal using get-journal-block
+  for (let i = 0; i < normalizedDays && results.length < normalizedMaxResults; i++) {
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() - i);
+    
+    try {
+      const result = await orca.invokeBackend("get-journal-block", targetDate);
+      const payload = unwrapBackendResult<any>(result);
+      
+      if (!payload || (typeof payload === "object" && payload.code)) {
+        // No journal for this date, skip
+        continue;
+      }
+      
+      const block = payload;
+      if (!block || !block.id) continue;
+      
+      let tree: any = null;
+      if (includeChildren) {
+        try {
+          const treeResult = await orca.invokeBackend("get-block-tree", block.id);
+          const treePayload = unwrapBackendResult<any>(treeResult);
+          if (treePayload && !(typeof treePayload === "object" && treePayload.code)) {
+            tree = treePayload;
+          }
+        } catch (treeErr) {
+          console.warn(`[getRecentJournals] Failed to get tree for ${block.id}:`, treeErr);
+        }
+      }
+      
+      const transformed = transformToSearchResults([{ block, tree }], {
+        includeProperties: false,
+      });
+      
+      if (transformed.length > 0) {
+        // Format date as title for journal entries
+        const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+        transformed[0].title = dateStr;
+        results.push(transformed[0]);
+      }
+    } catch (err) {
+      console.warn(`[getRecentJournals] Failed to get journal for date ${targetDate.toISOString()}:`, err);
+      // Continue to next date
+    }
+  }
+  
+  console.log(`[getRecentJournals] Found ${results.length} journal entries`);
+  return results;
+}
 
-  return await searchJournalEntries(start, end, {
+/**
+ * Get journal for a specific date.
+ * @param date - The target date (Date object or string like "2024-12-25")
+ * @param includeChildren - Whether to include child blocks (default: true)
+ * @returns Journal entry as SearchResult, or null if not found
+ */
+export async function getJournalByDate(
+  date: Date | string,
+  includeChildren: boolean = true
+): Promise<SearchResult | null> {
+  const targetDate = typeof date === "string" ? new Date(date) : date;
+  
+  if (isNaN(targetDate.getTime())) {
+    console.error("[getJournalByDate] Invalid date:", date);
+    return null;
+  }
+  
+  const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+  console.log("[getJournalByDate] Called with:", { date: dateStr, includeChildren });
+
+  try {
+    const result = await orca.invokeBackend("get-journal-block", targetDate);
+    const payload = unwrapBackendResult<any>(result);
+    
+    if (!payload || (typeof payload === "object" && payload.code)) {
+      console.log(`[getJournalByDate] No journal found for ${dateStr}`);
+      return null;
+    }
+    
+    const block = payload;
+    if (!block || !block.id) return null;
+    
+    let tree: any = null;
+    if (includeChildren) {
+      try {
+        const treeResult = await orca.invokeBackend("get-block-tree", block.id);
+        const treePayload = unwrapBackendResult<any>(treeResult);
+        if (treePayload && !(typeof treePayload === "object" && treePayload.code)) {
+          tree = treePayload;
+        }
+      } catch (treeErr) {
+        console.warn(`[getJournalByDate] Failed to get tree for ${block.id}:`, treeErr);
+      }
+    }
+    
+    const transformed = transformToSearchResults([{ block, tree }], {
+      includeProperties: false,
+    });
+    
+    if (transformed.length > 0) {
+      transformed[0].title = dateStr;
+      return transformed[0];
+    }
+    
+    return null;
+  } catch (err: any) {
+    console.error(`[getJournalByDate] Failed:`, err);
+    throw new Error(`Failed to get journal for ${dateStr}: ${err?.message ?? err ?? "unknown error"}`);
+  }
+}
+
+/**
+ * 解析日期范围字符串，返回开始和结束日期
+ * 支持格式：
+ * - 年份：2024
+ * - 月份：2024-05
+ * - 周：2024-W20, this-week, last-week
+ * - 日期范围：startDate 和 endDate 参数
+ */
+function parseDateRange(
+  rangeType: "year" | "month" | "week" | "range",
+  value: string,
+  endValue?: string
+): { start: Date; end: Date } | null {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  switch (rangeType) {
+    case "year": {
+      // 格式：2024
+      const year = parseInt(value, 10);
+      if (isNaN(year)) return null;
+      return {
+        start: new Date(year, 0, 1),
+        end: new Date(year, 11, 31),
+      };
+    }
+    case "month": {
+      // 格式：2024-05
+      const match = value.match(/^(\d{4})-(\d{1,2})$/);
+      if (!match) return null;
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1; // 0-indexed
+      if (month < 0 || month > 11) return null;
+      const lastDay = new Date(year, month + 1, 0).getDate();
+      return {
+        start: new Date(year, month, 1),
+        end: new Date(year, month, lastDay),
+      };
+    }
+    case "week": {
+      // 格式：this-week, last-week, 2024-W20
+      if (value === "this-week") {
+        const dayOfWeek = today.getDay();
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        return { start: monday, end: sunday };
+      }
+      if (value === "last-week") {
+        const dayOfWeek = today.getDay();
+        const lastMonday = new Date(today);
+        lastMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1) - 7);
+        const lastSunday = new Date(lastMonday);
+        lastSunday.setDate(lastMonday.getDate() + 6);
+        return { start: lastMonday, end: lastSunday };
+      }
+      // ISO 周格式：2024-W20
+      const weekMatch = value.match(/^(\d{4})-W(\d{1,2})$/);
+      if (weekMatch) {
+        const year = parseInt(weekMatch[1], 10);
+        const week = parseInt(weekMatch[2], 10);
+        // 计算该年第一个周一
+        const jan4 = new Date(year, 0, 4);
+        const dayOfWeek = jan4.getDay();
+        const firstMonday = new Date(jan4);
+        firstMonday.setDate(jan4.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+        // 计算目标周的周一
+        const targetMonday = new Date(firstMonday);
+        targetMonday.setDate(firstMonday.getDate() + (week - 1) * 7);
+        const targetSunday = new Date(targetMonday);
+        targetSunday.setDate(targetMonday.getDate() + 6);
+        return { start: targetMonday, end: targetSunday };
+      }
+      return null;
+    }
+    case "range": {
+      // 格式：startDate 到 endDate
+      const start = new Date(value);
+      const end = endValue ? new Date(endValue) : start;
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+      return { start, end };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Get journals by date range.
+ * Supports year, month, week, or custom date range.
+ * @param rangeType - Type of range: "year", "month", "week", "range"
+ * @param value - Range value (e.g., "2024", "2024-05", "this-week", "2024-W20", or start date)
+ * @param endValue - End date for "range" type
+ * @param includeChildren - Whether to include child blocks (default: true)
+ * @param maxResults - Maximum number of results (default: 31, max: 366)
+ * @returns Array of journal entries as SearchResult[]
+ */
+export async function getJournalsByDateRange(
+  rangeType: "year" | "month" | "week" | "range",
+  value: string,
+  endValue?: string,
+  includeChildren: boolean = true,
+  maxResults: number = 31
+): Promise<SearchResult[]> {
+  const normalizedMaxResults = Math.min(Math.max(1, maxResults), 366);
+  console.log("[getJournalsByDateRange] Called with:", {
+    rangeType,
+    value,
+    endValue,
     includeChildren,
     maxResults: normalizedMaxResults,
   });
+
+  const range = parseDateRange(rangeType, value, endValue);
+  if (!range) {
+    console.error("[getJournalsByDateRange] Invalid range:", { rangeType, value, endValue });
+    return [];
+  }
+
+  const { start, end } = range;
+  const results: SearchResult[] = [];
+  
+  // 计算天数
+  const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  const daysToFetch = Math.min(daysDiff, normalizedMaxResults);
+  
+  console.log(`[getJournalsByDateRange] Fetching ${daysToFetch} days from ${start.toISOString()} to ${end.toISOString()}`);
+
+  // 并行获取日记（每批 10 个请求）
+  const batchSize = 10;
+  for (let batchStart = 0; batchStart < daysToFetch && results.length < normalizedMaxResults; batchStart += batchSize) {
+    const batchEnd = Math.min(batchStart + batchSize, daysToFetch);
+    const batchPromises: Promise<SearchResult | null>[] = [];
+    
+    for (let i = batchStart; i < batchEnd; i++) {
+      const targetDate = new Date(start);
+      targetDate.setDate(start.getDate() + i);
+      
+      if (targetDate > end) break;
+      
+      batchPromises.push((async () => {
+        try {
+          const result = await orca.invokeBackend("get-journal-block", targetDate);
+          const payload = unwrapBackendResult<any>(result);
+          
+          if (!payload || (typeof payload === "object" && payload.code)) {
+            return null;
+          }
+          
+          const block = payload;
+          if (!block || !block.id) return null;
+          
+          let tree: any = null;
+          if (includeChildren) {
+            try {
+              const treeResult = await orca.invokeBackend("get-block-tree", block.id);
+              const treePayload = unwrapBackendResult<any>(treeResult);
+              if (treePayload && !(typeof treePayload === "object" && treePayload.code)) {
+                tree = treePayload;
+              }
+            } catch {
+              // Skip tree fetch error
+            }
+          }
+          
+          const transformed = transformToSearchResults([{ block, tree }], {
+            includeProperties: false,
+          });
+          
+          if (transformed.length > 0) {
+            const dateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+            transformed[0].title = dateStr;
+            return transformed[0];
+          }
+          
+          return null;
+        } catch {
+          return null;
+        }
+      })());
+    }
+    
+    const batchResults = await Promise.all(batchPromises);
+    for (const r of batchResults) {
+      if (r && results.length < normalizedMaxResults) {
+        results.push(r);
+      }
+    }
+  }
+  
+  // 按日期排序（从早到晚）
+  results.sort((a, b) => {
+    const dateA = new Date(a.title).getTime();
+    const dateB = new Date(b.title).getTime();
+    return dateA - dateB;
+  });
+  
+  console.log(`[getJournalsByDateRange] Found ${results.length} journal entries`);
+  return results;
 }
 
 /**

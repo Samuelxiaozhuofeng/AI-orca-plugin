@@ -45,7 +45,7 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { TOOLS, executeTool } from "../services/ai-tools";
+import { TOOLS, executeTool, journalExportDataCache } from "../services/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/chat-stream-handler";
@@ -58,6 +58,7 @@ import {
   loadingBubbleStyle,
 } from "../styles/ai-chat-styles";
 import { multiModelStore } from "../store/multi-model-store";
+import { journalExportCache } from "../components/MarkdownMessage";
 import MultiModelResponse, { type ModelResponse } from "../components/MultiModelResponse";
 import {
   streamMultiModelChat,
@@ -112,11 +113,10 @@ function smoothScrollToBottom(el: HTMLDivElement | null, duration = 300) {
   requestAnimationFrame(animation);
 }
 
-function restoreScrollPosition(el: HTMLDivElement | null, savedPosition?: number) {
+function restoreScrollPosition(el: HTMLDivElement | null, scrollToEnd = true) {
   if (!el) return;
-  if (savedPosition !== undefined) {
-    el.scrollTop = savedPosition;
-  } else {
+  // 默认滚动到底部（最新消息），这是用户期望的行为
+  if (scrollToEnd) {
     el.scrollTop = el.scrollHeight;
   }
 }
@@ -300,9 +300,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
           }
-          // 恢复滚动位置
+          // 滚动到底部（最新消息）
           queueMicrotask(() => {
-            restoreScrollPosition(listRef.current, active.scrollPosition);
+            restoreScrollPosition(listRef.current);
           });
         }
       }
@@ -351,9 +351,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMessages(session.messages.length > 0 ? session.messages : []);
     contextStore.selected = session.contexts || [];
 
-    // 恢复目标会话的滚动位置
+    // 滚动到底部（最新消息）
     queueMicrotask(() => {
-      restoreScrollPosition(listRef.current, session.scrollPosition);
+      restoreScrollPosition(listRef.current);
     });
   }, [sessions, currentSession.id]);
 
@@ -665,6 +665,193 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        };
 	        setMessages((prev) => [...prev, assistantMsg]);
 	        queueMicrotask(scrollToBottom);
+	      })();
+	      
+	      return; // 直接返回，不走 AI
+	    }
+
+	    // 检测年份日记查询意图（直接提供导出按钮，不调用 AI）
+	    const yearJournalMatch = content.match(/(?:分析|总结|查看|导出|获取)?[^\d]*(\d{4})\s*年[的]?\s*(?:日记|日志|journal)/i);
+	    if (yearJournalMatch) {
+	      const year = yearJournalMatch[1];
+	      
+	      // 添加用户消息
+	      const userMsg: Message = { 
+	        id: nowId(), 
+	        role: "user", 
+	        content, 
+	        createdAt: Date.now(),
+	      };
+	      setMessages((prev) => [...prev, userMsg]);
+	      
+	      // 显示加载状态
+	      setSending(true);
+	      
+	      // 获取年份日记数据
+	      (async () => {
+	        try {
+	          const { getJournalsByDateRange } = await import("../services/search-service");
+	          const results = await getJournalsByDateRange("year", year, undefined, true, 366);
+	          
+	          if (results.length === 0) {
+	            const assistantMsg: Message = {
+	              id: nowId(),
+	              role: "assistant",
+	              content: `${year}年没有找到日记记录。`,
+	              createdAt: Date.now(),
+	            };
+	            setMessages((prev) => [...prev, assistantMsg]);
+	          } else {
+	            // 构建导出数据并过滤掉没有内容的日记
+	            const exportData = results
+	              .map((r: any) => ({
+	                date: r.title,
+	                content: (r.fullContent || r.content || "").trim(),
+	                blockId: r.id,
+	              }))
+	              .filter((entry: any) => entry.content.length > 0);
+	            
+	            if (exportData.length === 0) {
+	              const assistantMsg: Message = {
+	                id: nowId(),
+	                role: "assistant",
+	                content: `${year}年的日记都没有内容。`,
+	                createdAt: Date.now(),
+	              };
+	              setMessages((prev) => [...prev, assistantMsg]);
+	            } else {
+	              // 生成缓存 ID 并存储数据
+	              const cacheId = `year-${year}-${Date.now()}`;
+	              journalExportCache.set(cacheId, { rangeLabel: `${year}年`, entries: exportData });
+	              
+	              const responseContent = `📅 **${year}年日记**
+
+找到 **${exportData.length}** 篇日记
+
+由于年度日记数据量较大，无法在对话中直接分析。请点击下方按钮导出为 Markdown 文件，然后使用 ChatGPT、Claude 等在线 AI 工具进行分析。
+
+\`\`\`journal-export
+cache:${cacheId}
+\`\`\``;
+	              
+	              const assistantMsg: Message = {
+	                id: nowId(),
+	                role: "assistant",
+	                content: responseContent,
+	                createdAt: Date.now(),
+	              };
+	              setMessages((prev) => [...prev, assistantMsg]);
+	            }
+	          }
+	        } catch (err: any) {
+	          const assistantMsg: Message = {
+	            id: nowId(),
+	            role: "assistant",
+	            content: `获取${year}年日记失败: ${err.message}`,
+	            createdAt: Date.now(),
+	          };
+	          setMessages((prev) => [...prev, assistantMsg]);
+	        } finally {
+	          setSending(false);
+	          queueMicrotask(scrollToBottom);
+	        }
+	      })();
+	      
+	      return; // 直接返回，不走 AI
+	    }
+
+	    // 检测月份日记查询意图（直接提供导出按钮，不调用 AI）
+	    // 匹配：2024年5月日记、24年5月日志、5月日记、5月份日记
+	    const monthJournalMatch = content.match(/(?:分析|总结|查看|导出|获取)?[^\d]*(?:(\d{2,4})\s*年)?[^\d]*(\d{1,2})\s*月(?:份)?[的]?\s*(?:日记|日志|journal)/i);
+	    if (monthJournalMatch) {
+	      const currentYear = new Date().getFullYear();
+	      let year = monthJournalMatch[1] ? monthJournalMatch[1] : String(currentYear);
+	      // 处理两位数年份
+	      if (year.length === 2) {
+	        year = "20" + year;
+	      }
+	      const month = monthJournalMatch[2].padStart(2, "0");
+	      const monthValue = `${year}-${month}`;
+	      const rangeLabel = `${year}年${parseInt(month)}月`;
+	      
+	      // 添加用户消息
+	      const userMsg: Message = { 
+	        id: nowId(), 
+	        role: "user", 
+	        content, 
+	        createdAt: Date.now(),
+	      };
+	      setMessages((prev) => [...prev, userMsg]);
+	      
+	      // 显示加载状态
+	      setSending(true);
+	      
+	      // 获取月份日记数据
+	      (async () => {
+	        try {
+	          const { getJournalsByDateRange } = await import("../services/search-service");
+	          const results = await getJournalsByDateRange("month", monthValue, undefined, true, 31);
+	          
+	          if (results.length === 0) {
+	            const assistantMsg: Message = {
+	              id: nowId(),
+	              role: "assistant",
+	              content: `${rangeLabel}没有找到日记记录。`,
+	              createdAt: Date.now(),
+	            };
+	            setMessages((prev) => [...prev, assistantMsg]);
+	          } else {
+	            // 构建导出数据并过滤掉没有内容的日记
+	            const exportData = results
+	              .map((r: any) => ({
+	                date: r.title,
+	                content: (r.fullContent || r.content || "").trim(),
+	                blockId: r.id,
+	              }))
+	              .filter((entry: any) => entry.content.length > 0);
+	            
+	            if (exportData.length === 0) {
+	              const assistantMsg: Message = {
+	                id: nowId(),
+	                role: "assistant",
+	                content: `${rangeLabel}的日记都没有内容。`,
+	                createdAt: Date.now(),
+	              };
+	              setMessages((prev) => [...prev, assistantMsg]);
+	            } else {
+	              // 生成缓存 ID 并存储数据
+	              const cacheId = `month-${monthValue}-${Date.now()}`;
+	              journalExportCache.set(cacheId, { rangeLabel, entries: exportData });
+	              
+	              const responseContent = `📅 **${rangeLabel}日记**
+
+找到 **${exportData.length}** 篇日记
+
+\`\`\`journal-export
+cache:${cacheId}
+\`\`\``;
+	              
+	              const assistantMsg: Message = {
+	                id: nowId(),
+	                role: "assistant",
+	                content: responseContent,
+	                createdAt: Date.now(),
+	              };
+	              setMessages((prev) => [...prev, assistantMsg]);
+	            }
+	          }
+	        } catch (err: any) {
+	          const assistantMsg: Message = {
+	            id: nowId(),
+	            role: "assistant",
+	            content: `获取${rangeLabel}日记失败: ${err.message}`,
+	            createdAt: Date.now(),
+	          };
+	          setMessages((prev) => [...prev, assistantMsg]);
+	        } finally {
+	          setSending(false);
+	          queueMicrotask(scrollToBottom);
+	        }
 	      })();
 	      
 	      return; // 直接返回，不走 AI
@@ -1172,6 +1359,53 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
 
           console.log(`[AI] [Round ${toolRound}] Tool result: ${result.substring(0, 100)}${result.length > 100 ? "..." : ""}`);
+
+          // 检测年份/月份日记查询：直接中断 AI 流程，显示导出按钮
+          // 格式：__JOURNAL_EXPORT__:cacheId:count:rangeLabel
+          if (toolName === "getJournalsByDateRange" && result.startsWith("__JOURNAL_EXPORT__:")) {
+            const parts = result.split(":");
+            const cacheId = parts[1];
+            const count = parts[2];
+            const rangeLabel = parts.slice(3).join(":"); // rangeLabel 可能包含冒号
+            
+            console.log(`[AI] [Round ${toolRound}] Year/month journal query detected, cacheId=${cacheId}, count=${count}`);
+            
+            // 从缓存获取数据，生成导出按钮
+            const cachedData = journalExportDataCache.get(cacheId);
+            if (cachedData) {
+              // 存入 MarkdownMessage 的缓存供渲染使用
+              journalExportCache.set(cacheId, cachedData);
+            }
+            
+            // 直接创建 assistant 消息显示导出按钮
+            const exportContent = `📅 **${rangeLabel}日记**
+
+找到 **${count}** 篇日记
+
+由于数据量较大，请使用下方按钮导出后用其他 AI 工具分析：
+
+\`\`\`journal-export
+cache:${cacheId}
+\`\`\``;
+            
+            const exportAssistantId = nowId();
+            const exportMessage: Message = {
+              id: exportAssistantId,
+              role: "assistant",
+              content: exportContent,
+              createdAt: Date.now(),
+            };
+            
+            setMessages((prev) => [...prev, exportMessage]);
+            conversation.push(exportMessage);
+            queueMicrotask(scrollToBottom);
+            
+            // 保存会话并退出
+            updateSessionStore(currentSession, [...messages, exportMessage], [...contextStore.selected]);
+            setSending(false);
+            setStreamingMessageId(null);
+            return; // 直接退出，不再继续 AI 流程
+          }
 
           toolResultMessages.push({
             id: nowId(),

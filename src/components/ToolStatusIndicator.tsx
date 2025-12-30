@@ -61,6 +61,9 @@ export default function ToolStatusIndicator({
     setIsExpanded((prev) => !prev);
   }, []);
 
+  // 显示名称格式：中文名称 (函数名)
+  const displayLabel = `${config.displayName} (${toolName})`;
+
   // Determine icon and text based on status
   let icon: string;
   let text: string;
@@ -69,20 +72,20 @@ export default function ToolStatusIndicator({
   switch (status) {
     case "loading":
       icon = config.icon;
-      text = `${config.displayName}: ${config.loadingText}`;
+      text = `${displayLabel}: ${config.loadingText}`;
       animationClass = `tool-animation-${config.animation}`;
       break;
     case "success":
       icon = config.successIcon;
-      text = `${config.displayName}: ${result ? generateResultSummary(toolName, result) : config.successText}`;
+      text = `${displayLabel}: ${result ? generateResultSummary(toolName, result) : config.successText}`;
       break;
     case "failed":
       icon = "❌";
-      text = `${config.displayName}: ${error ? `失败 - ${error.slice(0, 50)}` : "执行失败"}`;
+      text = `${displayLabel}: ${error ? `失败 - ${error.slice(0, 50)}` : "执行失败"}`;
       break;
     case "cancelled":
       icon = "⏸️";
-      text = `${config.displayName}: 已取消`;
+      text = `${displayLabel}: 已取消`;
       break;
     default:
       icon = "🔧";
