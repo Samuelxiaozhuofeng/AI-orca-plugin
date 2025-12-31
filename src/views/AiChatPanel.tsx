@@ -335,7 +335,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
-    setCurrentSession({ ...createNewSession(), model: defaultModel });
+    // 创建全新的会话，确保 ID 是新的
+    const newSession = { ...createNewSession(), model: defaultModel };
+    setCurrentSession(newSession);
     setMessages([
       {
         id: nowId(),
@@ -345,7 +347,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         localOnly: true,
       },
     ]);
+    // 清理上下文
     contextStore.selected = [];
+    // 清理 sessionStore 中的旧状态
+    clearSessionStore();
     // 重置闪卡状态
     setFlashcardMode(false);
     setPendingFlashcards([]);

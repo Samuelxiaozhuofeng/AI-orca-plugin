@@ -200,11 +200,20 @@ async function messageToApiWithImages(m: Message): Promise<OpenAIChatMessage> {
       contentParts.push({ type: "text", text: m.content });
     }
     
-    // Add image content
+    // Add image content (with error handling for each image)
     for (const img of m.images) {
-      const imageContent = await buildImageContent(img);
-      if (imageContent) {
-        contentParts.push(imageContent);
+      try {
+        const imageContent = await buildImageContent(img);
+        if (imageContent) {
+          contentParts.push(imageContent);
+        } else {
+          // 图片转换失败，添加文本提示
+          console.warn(`[message-builder] Failed to convert image: ${img.name}`);
+          contentParts.push({ type: "text", text: `[图片加载失败: ${img.name}]` });
+        }
+      } catch (error) {
+        console.error(`[message-builder] Error processing image ${img.name}:`, error);
+        contentParts.push({ type: "text", text: `[图片处理错误: ${img.name}]` });
       }
     }
     
@@ -225,10 +234,21 @@ async function messageToApiWithImages(m: Message): Promise<OpenAIChatMessage> {
       contentParts.push({ type: "text", text: m.content });
     }
 
-    // Add file content (may return multiple items for video)
+    // Add file content (may return multiple items for video, with error handling)
     for (const file of m.files) {
-      const fileContents = await buildFileContentsForApi(file);
-      contentParts.push(...fileContents);
+      try {
+        const fileContents = await buildFileContentsForApi(file);
+        if (fileContents && fileContents.length > 0) {
+          contentParts.push(...fileContents);
+        } else {
+          // 文件处理失败，添加文本提示
+          console.warn(`[message-builder] Failed to process file: ${file.name}`);
+          contentParts.push({ type: "text", text: `[文件加载失败: ${file.name}]` });
+        }
+      } catch (error) {
+        console.error(`[message-builder] Error processing file ${file.name}:`, error);
+        contentParts.push({ type: "text", text: `[文件处理错误: ${file.name}]` });
+      }
     }
 
     if (contentParts.length > 0) {

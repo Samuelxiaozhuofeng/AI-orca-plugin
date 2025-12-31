@@ -365,6 +365,7 @@ export const chatAnimations = `
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Checklist Styles (- [ ] / - [x])
+   支持分组模式：标题项 + 子项
    ─────────────────────────────────────────────────────────────────────────── */
 
 .md-checklist {
@@ -374,6 +375,83 @@ export const chatAnimations = `
     gap: 8px;
 }
 
+/* 分组模式 */
+.md-checklist-grouped {
+    gap: 16px;
+}
+
+.md-checklist-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 标题项样式 */
+.md-checklist-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--orca-color-primary, #007bff) 0%, color-mix(in srgb, var(--orca-color-primary, #007bff) 80%, #000) 100%);
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.md-checklist-header.checked {
+    opacity: 0.7;
+    background: var(--orca-color-bg-3, rgba(128, 128, 128, 0.15));
+    color: var(--orca-color-text-2, #888);
+}
+
+.md-checklist-header.checked .md-checklist-header-text {
+    text-decoration: line-through;
+}
+
+.md-checkbox-header {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.md-checkbox-header.checked {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.9);
+    color: var(--orca-color-primary, #007bff);
+}
+
+.md-checklist-header-text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.md-checklist-header-text strong {
+    font-weight: 600;
+}
+
+/* 标题序号 */
+.md-checklist-header-index {
+    font-size: 13px;
+    font-weight: 700;
+    min-width: 24px;
+    opacity: 0.8;
+}
+
+/* 子项容器 */
+.md-checklist-subitems {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 12px;
+    margin-left: 10px;
+    border-left: 2px solid var(--orca-color-border, rgba(128, 128, 128, 0.2));
+}
+
+/* 普通项样式 */
 .md-checklist-item {
     display: flex;
     align-items: center;
@@ -395,6 +473,27 @@ export const chatAnimations = `
 .md-checklist-item.checked .md-checklist-text {
     text-decoration: line-through;
     color: var(--orca-color-text-2, #888);
+}
+
+/* 子项样式（描述性内容） */
+.md-checklist-subitem {
+    background: transparent;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--orca-color-text-2, #666);
+}
+
+.md-checklist-subitem:hover {
+    background: var(--orca-color-bg-2, rgba(128, 128, 128, 0.05));
+}
+
+.md-checklist-subitem .md-checkbox {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    border-width: 1.5px;
+    border-radius: 3px;
+    opacity: 0.6;
 }
 
 .md-checkbox {
