@@ -37,6 +37,14 @@ import {
   shouldRenderTimestamp,
 } from "../store/display-settings-store";
 
+// DEBUG: Check if all components are defined
+console.log("[MessageItem] Component imports check:", {
+  MarkdownMessage: typeof MarkdownMessage,
+  ToolStatusIndicator: typeof ToolStatusIndicator,
+  SuggestedReplies: typeof SuggestedReplies,
+  ExtractMemoryButton: typeof ExtractMemoryButton,
+});
+
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
@@ -894,6 +902,7 @@ export default function MessageItem({
         "div",
         {
           style: messageBubbleWithSettings,
+          className: `message-bubble-${message.role}`,
           onContextMenu: open,
         },
       // 文件显示（图片和其他文件）

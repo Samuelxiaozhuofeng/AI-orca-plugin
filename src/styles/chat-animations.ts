@@ -1244,6 +1244,19 @@ br + .md-block-dot {
     -webkit-user-select: none !important;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Responsive Message Bubble Styles
+   窄屏时消息气泡占满宽度
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* 窄屏时（面板宽度小于 500px）AI 消息占满宽度 */
+@container (max-width: 500px) {
+    .message-bubble-assistant {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
 `;
 
 let styleElement: HTMLStyleElement | null = null;

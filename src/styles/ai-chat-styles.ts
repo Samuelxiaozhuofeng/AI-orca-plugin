@@ -75,7 +75,12 @@ export const messageRowStyle = (role: string): React.CSSProperties => ({
  * **Validates: Requirements 1.1, 1.2**
  */
 export const messageBubbleStyle = (role: string): React.CSSProperties => ({
-  maxWidth: role === "user" ? "75%" : "90%",
+  // 用户消息：最大75%宽度，自适应内容
+  // AI消息：固定95%宽度
+  maxWidth: role === "user" ? "75%" : "95%",
+  width: role === "user" ? "fit-content" : "95%",
+  // 防止 flex 收缩
+  flexShrink: 0,
   // Gemini UX Review: Slightly reduced padding for density
   padding: role === "user" ? "10px 14px" : "14px 18px",
   borderRadius: role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",

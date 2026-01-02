@@ -24,7 +24,6 @@ import { MultiModelToggleButton } from "../components/MultiModelSelector";
 import { multiModelStore } from "../store/multi-model-store";
 import ToolPanel from "../components/ToolPanel";
 import { loadToolSettings } from "../store/tool-store";
-import TokenProgressBar from "../components/TokenProgressBar";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -78,7 +77,7 @@ const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
 };
-const { Button, CompositionTextArea } = orca.components;
+const { Button } = orca.components || {};
 
 type Props = {
   onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void | Promise<void>;
@@ -106,25 +105,25 @@ const inputContainerStyle: React.CSSProperties = {
 };
 
 const textareaWrapperStyle = (focused: boolean, isDragging: boolean = false): React.CSSProperties => ({
-  display: "flex",
-  flexDirection: "column",
-  gap: "8px",
+  display: "block", // 改为 block 让 textarea 可以自动增高
   background: isDragging 
     ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.08))" 
     : "var(--orca-color-bg-2)",
   borderRadius: "24px",
   padding: "12px 16px",
+  // 保持边框宽度一致，避免跳动
   border: isDragging
     ? "2px dashed var(--orca-color-primary, #007bff)"
     : focused 
-      ? "1px solid var(--orca-color-primary, #007bff)" 
-      : "1px solid var(--orca-color-border)",
+      ? "2px solid var(--orca-color-primary, #007bff)" 
+      : "2px solid transparent",
+  // 用 box-shadow 模拟普通状态的边框
   boxShadow: isDragging
     ? "0 4px 16px rgba(0,123,255,0.2)"
     : focused
       ? "0 4px 12px rgba(0,123,255,0.12)"
-      : "0 2px 8px rgba(0,0,0,0.04)",
-  transition: "all 0.2s ease",
+      : "0 0 0 1px var(--orca-color-border), 0 2px 8px rgba(0,0,0,0.04)",
+  transition: "all 0.15s ease",
   position: "relative",
 });
 
@@ -154,6 +153,24 @@ export default function ChatInput({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
+
+  // 自动调整 textarea 高度
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    // 重置高度以获取正确的 scrollHeight
+    textarea.style.height = "auto";
+    // 设置新高度，限制最大高度为 360px
+    const newHeight = Math.min(textarea.scrollHeight, 360);
+    textarea.style.height = `${newHeight}px`;
+    // 超过最大高度时显示滚动条
+    textarea.style.overflowY = textarea.scrollHeight > 360 ? "auto" : "hidden";
+  }, []);
+
+  // 文本变化时调整高度
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [text, adjustTextareaHeight]);
 
   // 获取当前选中模型的价格信息
   const selectedModelInfo = useMemo(() => {
@@ -1033,7 +1050,7 @@ export default function ChatInput({
       ),
 
       // Row 1: TextArea
-      createElement(CompositionTextArea as any, {
+      createElement("textarea", {
         ref: textareaRef as any,
         placeholder: pendingFiles.length > 0 ? "描述文件或直接发送..." : "Ask AI...",
         value: text,
@@ -1045,21 +1062,28 @@ export default function ChatInput({
         onDrop: handleDrop,
         onDragOver: handleDragOver,
         disabled,
-        style: { ...textareaStyle, width: "100%", background: "transparent", border: "none", padding: 0, minHeight: "24px" },
-      }),
-
-      // Token Progress Bar (显示在输入框下方)
-      tokenEstimate.inputTokens > 0 && createElement(TokenProgressBar, {
-        currentTokens: tokenEstimate.inputTokens,
-        maxTokens: Math.floor(settings.maxContextChars / 4), // 估算：约 4 字符 = 1 token
-        showLabel: true,
-        style: { marginBottom: "8px" },
+        rows: 1,
+        style: { 
+          ...textareaStyle, 
+          width: "100%", 
+          background: "transparent", 
+          border: "none", 
+          padding: 0, 
+          minHeight: "24px",
+          maxHeight: "360px",
+          overflowY: "auto",
+          resize: "none",
+          outline: "none",
+          fontFamily: "inherit",
+          fontSize: "15px",
+          lineHeight: "1.5",
+        },
       }),
 
       // Row 2: Bottom Toolbar (Tools Left, Send Right)
       createElement(
         "div",
-        { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" } },
         
         // Left Tools: @ Button + File Button + Clear Context + Model Selector + Injection Mode Selector
         createElement(

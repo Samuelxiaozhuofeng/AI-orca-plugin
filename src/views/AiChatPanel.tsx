@@ -25,6 +25,18 @@ import MemoryManager from "./MemoryManager";
 import ChatNavigation from "../components/ChatNavigation";
 import FlashcardReview, { type Flashcard } from "../components/FlashcardReview";
 import { injectChatStyles } from "../styles/chat-animations";
+
+// DEBUG: Check if all components are defined
+console.log("[AiChatPanel] Component imports check:", {
+  DateSeparator: typeof DateSeparator,
+  ScrollToBottomButton: typeof ScrollToBottomButton,
+  ErrorMessage: typeof ErrorMessage,
+  TypingIndicator: typeof TypingIndicator,
+  ChatNavigation: typeof ChatNavigation,
+  MessageItem: typeof MessageItem,
+  EmptyState: typeof EmptyState,
+  MarkdownMessage: typeof MarkdownMessage,
+});
 import {
   getAiChatSettings,
   getModelApiConfig,
@@ -411,6 +423,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     contextStore.selected = [];
     // 清理 sessionStore 中的旧状态
     clearSessionStore();
+    // 清除错误状态
+    setLastError(null);
     // 重置闪卡状态
     setFlashcardMode(false);
     setPendingFlashcards([]);
@@ -670,7 +684,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // ─────────────────────────────────────────────────────────────────────────
 
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
-    if ((!content && (!files || files.length === 0)) || sending) return;
+    if (!content && (!files || files.length === 0)) return;
+    
+    // 如果正在生成，先停止当前生成
+    if (sending) {
+      if (abortRef.current) abortRef.current.abort();
+      // 等待一小段时间让 abort 生效
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
 
 	    const pluginName = getAiChatPluginName();
 	    const settings = getAiChatSettings(pluginName);
@@ -2526,7 +2547,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         handleSend(text, files, clearContext ? [] : undefined);
       },
       onStop: stop,
-      disabled: sending,
+      disabled: false, // 允许在生成时输入，发送时会自动停止当前生成
       currentPageId: rootBlockId,
       currentPageTitle,
       settings: settingsForUi,
