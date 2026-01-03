@@ -25,9 +25,10 @@ test("markdown: parses bold inside list items", () => {
   assertEqual(list.ordered, false);
   assertEqual(list.items.length, 1);
 
-  const item: any[] = list.items[0];
-  assertEqual(item[0].type, "bold");
-  assertDeepEqual(item[0].children, [{ type: "text", content: "多巴胺（Dopamine）："}]);
+  // ListItem is now an object with content property (not an array)
+  const item: any = list.items[0];
+  assertEqual(item.content[0].type, "bold");
+  assertDeepEqual(item.content[0].children, [{ type: "text", content: "多巴胺（Dopamine）："}]);
 });
 
 test("markdown: parses bold inside paragraphs", () => {

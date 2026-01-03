@@ -9,7 +9,7 @@
  */
 
 import type { SavedSession } from "../services/session-service";
-import { formatSessionTime } from "../services/session-service";
+import { formatSessionTime, generateSessionTitle } from "../services/session-service";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -259,10 +259,16 @@ export default function ChatHistoryMenu({
     onToggleFavorite?.(sessionId);
   }, [onToggleFavorite]);
 
+  const getDisplayTitle = useCallback((session: SavedSession) => {
+    const title = (session.title || "").trim();
+    if (title) return title;
+    return generateSessionTitle(session.messages || []);
+  }, []);
+
   const handleStartRename = useCallback((e: React.MouseEvent, session: SavedSession) => {
     e.stopPropagation();
     setRenamingId(session.id);
-    setRenameValue(session.title);
+    setRenameValue(getDisplayTitle(session));
   }, []);
 
   const handleFinishRename = useCallback(() => {
@@ -343,7 +349,7 @@ export default function ChatHistoryMenu({
           : createElement(
               Fragment,
               null,
-              createElement("div", { style: sessionTitleStyle }, session.title || "未命名"),
+              createElement("div", { style: sessionTitleStyle }, getDisplayTitle(session)),
               createElement(
                 "div",
                 { style: sessionMetaStyle },

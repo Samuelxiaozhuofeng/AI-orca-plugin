@@ -134,6 +134,7 @@ export function unregisterAiChatRenderer(): void {
     orca.converters.unregisterBlock("plain", BLOCK_TYPE);
     orca.converters.unregisterBlock("html", BLOCK_TYPE);
     orca.converters.unregisterBlock("markdown", BLOCK_TYPE);
+    orca.renderers.unregisterBlock(BLOCK_TYPE);
   } catch (e) {
     // ignore
   }

@@ -13,6 +13,22 @@ export const chatAnimations = `
     0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
     40% { transform: scale(1); opacity: 1; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Typing Indicator Animation (Bouncing Dots)
+   Three dots with sequential bouncing pattern, 200ms delay between dots
+   **Feature: chat-ui-enhancement**
+   **Validates: Requirements 2.1, 2.2**
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes typingBounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+    }
+    30% {
+        transform: translateY(-8px);
+    }
+}
 @keyframes messageSlideIn {
     from {
         opacity: 0;
@@ -22,6 +38,86 @@ export const chatAnimations = `
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Message Entrance Animation (Enhanced)
+   Fade-in + slide-up effect for message bubbles
+   **Feature: chat-ui-enhancement**
+   **Validates: Requirements 1.3**
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes messageFadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Empty State Staggered Fade-In Animation
+   Staggered entrance effect for empty state content
+   **Feature: chat-ui-enhancement**
+   **Validates: Requirements 3.3**
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes emptyStateFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(16px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Staggered animation classes for empty state elements */
+.empty-state-stagger-1 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 0ms;
+    opacity: 0;
+}
+
+.empty-state-stagger-2 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 100ms;
+    opacity: 0;
+}
+
+.empty-state-stagger-3 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 200ms;
+    opacity: 0;
+}
+
+/* Suggestion card staggered animations */
+.suggestion-card-stagger-0 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 200ms;
+    opacity: 0;
+}
+
+.suggestion-card-stagger-1 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 280ms;
+    opacity: 0;
+}
+
+.suggestion-card-stagger-2 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 360ms;
+    opacity: 0;
+}
+
+.suggestion-card-stagger-3 {
+    animation: emptyStateFadeIn 0.4s ease-out forwards;
+    animation-delay: 440ms;
+    opacity: 0;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +166,22 @@ export const chatAnimations = `
     0% { opacity: 0.6; }
     50% { opacity: 1; }
     100% { opacity: 0.6; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Skeleton Loading Animation
+   Shimmer effect for skeleton placeholders
+   **Feature: chat-ui-enhancement**
+   **Validates: Requirements 11.1**
+   ─────────────────────────────────────────────────────────────────────────── */
+
+@keyframes skeletonShimmer {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
 }
 
 /* Spin Animation for Loading States */
@@ -365,6 +477,7 @@ export const chatAnimations = `
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Checklist Styles (- [ ] / - [x])
+   支持分组模式：标题项 + 子项
    ─────────────────────────────────────────────────────────────────────────── */
 
 .md-checklist {
@@ -374,6 +487,83 @@ export const chatAnimations = `
     gap: 8px;
 }
 
+/* 分组模式 */
+.md-checklist-grouped {
+    gap: 16px;
+}
+
+.md-checklist-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* 标题项样式 */
+.md-checklist-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--orca-color-primary, #007bff) 0%, color-mix(in srgb, var(--orca-color-primary, #007bff) 80%, #000) 100%);
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.md-checklist-header.checked {
+    opacity: 0.7;
+    background: var(--orca-color-bg-3, rgba(128, 128, 128, 0.15));
+    color: var(--orca-color-text-2, #888);
+}
+
+.md-checklist-header.checked .md-checklist-header-text {
+    text-decoration: line-through;
+}
+
+.md-checkbox-header {
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.md-checkbox-header.checked {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.9);
+    color: var(--orca-color-primary, #007bff);
+}
+
+.md-checklist-header-text {
+    flex: 1;
+    line-height: 1.4;
+}
+
+.md-checklist-header-text strong {
+    font-weight: 600;
+}
+
+/* 标题序号 */
+.md-checklist-header-index {
+    font-size: 13px;
+    font-weight: 700;
+    min-width: 24px;
+    opacity: 0.8;
+}
+
+/* 子项容器 */
+.md-checklist-subitems {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-left: 12px;
+    margin-left: 10px;
+    border-left: 2px solid var(--orca-color-border, rgba(128, 128, 128, 0.2));
+}
+
+/* 普通项样式 */
 .md-checklist-item {
     display: flex;
     align-items: center;
@@ -395,6 +585,27 @@ export const chatAnimations = `
 .md-checklist-item.checked .md-checklist-text {
     text-decoration: line-through;
     color: var(--orca-color-text-2, #888);
+}
+
+/* 子项样式（描述性内容） */
+.md-checklist-subitem {
+    background: transparent;
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--orca-color-text-2, #666);
+}
+
+.md-checklist-subitem:hover {
+    background: var(--orca-color-bg-2, rgba(128, 128, 128, 0.05));
+}
+
+.md-checklist-subitem .md-checkbox {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    border-width: 1.5px;
+    border-radius: 3px;
+    opacity: 0.6;
 }
 
 .md-checkbox {
@@ -1031,6 +1242,19 @@ br + .md-block-dot {
 .aichat-repr-conversation input {
     user-select: none !important;
     -webkit-user-select: none !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Responsive Message Bubble Styles
+   窄屏时消息气泡占满宽度
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* 窄屏时（面板宽度小于 500px）AI 消息占满宽度 */
+@container (max-width: 500px) {
+    .message-bubble-assistant {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
 }
 
 `;

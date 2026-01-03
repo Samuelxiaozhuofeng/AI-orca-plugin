@@ -395,7 +395,8 @@ export async function buildContextForSend(
           ctx.title ??
           safeTextFromBlockLike((orca.state.blocks as any)?.[ctx.rootBlockId]) ??
           `Page ${ctx.rootBlockId}`;
-        sections.push(`## Page: ${title}`);
+        // 包含块 ID，让 AI 知道这是精确的块引用，无需再搜索
+        sections.push(`## Page: ${title} (blockId: ${ctx.rootBlockId})`);
 
         const tree = await getBlockTree(ctx.rootBlockId);
         const resolveById = await buildResolverFromTree(tree, options);

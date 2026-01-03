@@ -48,6 +48,13 @@ export const messageListStyle: React.CSSProperties = {
 // Message Bubble Styles
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Message row style with entrance animation
+ * - Fade-in + slide-up effect over 300ms
+ * 
+ * **Feature: chat-ui-enhancement**
+ * **Validates: Requirements 1.3**
+ */
 export const messageRowStyle = (role: string): React.CSSProperties => ({
   width: "100%",
   display: "flex",
@@ -55,18 +62,41 @@ export const messageRowStyle = (role: string): React.CSSProperties => ({
   // Gemini UX Review: Message rhythm over density
   // Same speaker: 4-8px, Different speaker: 24px (handled in component)
   marginBottom: "12px",
-  animation: "messageSlideIn 0.3s ease-out",
+  // Enhanced entrance animation: fade-in + slide-up (Requirements 1.3)
+  animation: "messageFadeSlideIn 300ms ease-out",
 });
 
+/**
+ * Message bubble style with visual enhancements
+ * - User messages: gradient background from primary to darker shade
+ * - Assistant messages: soft box-shadow without hard borders
+ * 
+ * **Feature: chat-ui-enhancement**
+ * **Validates: Requirements 1.1, 1.2**
+ */
 export const messageBubbleStyle = (role: string): React.CSSProperties => ({
-  maxWidth: role === "user" ? "75%" : "90%",
+  // 用户消息：最大75%宽度，自适应内容
+  // AI消息：固定95%宽度
+  maxWidth: role === "user" ? "75%" : "95%",
+  width: role === "user" ? "fit-content" : "95%",
+  // 防止 flex 收缩
+  flexShrink: 0,
   // Gemini UX Review: Slightly reduced padding for density
   padding: role === "user" ? "10px 14px" : "14px 18px",
   borderRadius: role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-  background: role === "user" ? "var(--orca-color-primary)" : "var(--orca-color-bg-2)",
+  // User messages: gradient background (Requirements 1.1)
+  // Assistant messages: solid background (Requirements 1.2)
+  background: role === "user" 
+    ? "linear-gradient(135deg, var(--orca-color-primary) 0%, var(--orca-color-primary-dark, color-mix(in srgb, var(--orca-color-primary) 85%, #000)) 100%)"
+    : "var(--orca-color-bg-2)",
   color: role === "user" ? "var(--orca-color-text-inverse)" : "var(--orca-color-text-1)",
-  border: role === "assistant" ? "1px solid var(--orca-color-border)" : "none",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+  // Assistant messages: no hard border, soft shadow only (Requirements 1.2)
+  border: "none",
+  // User messages: subtle shadow with primary color tint
+  // Assistant messages: soft layered shadow for depth
+  boxShadow: role === "user"
+    ? "0 2px 12px rgba(0, 123, 255, 0.2)"
+    : "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)",
   position: "relative",
 });
 

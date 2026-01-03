@@ -29,6 +29,21 @@ import {
 import type { Message } from "../services/session-service";
 import type { ToolCallInfo } from "../services/chat-stream-handler";
 import { formatTokenCount } from "../utils/token-utils";
+import {
+  displaySettingsStore,
+  fontSizeMap,
+  getMessageGap,
+  getBubblePadding,
+  shouldRenderTimestamp,
+} from "../store/display-settings-store";
+
+// DEBUG: Check if all components are defined
+console.log("[MessageItem] Component imports check:", {
+  MarkdownMessage: typeof MarkdownMessage,
+  ToolStatusIndicator: typeof ToolStatusIndicator,
+  SuggestedReplies: typeof SuggestedReplies,
+  ExtractMemoryButton: typeof ExtractMemoryButton,
+});
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -39,6 +54,12 @@ const React = window.React as unknown as {
   Fragment: typeof window.React.Fragment;
 };
 const { createElement, useState, useCallback, useMemo, useEffect, Fragment } = React;
+
+const { ContextMenu, Menu, MenuText } = orca.components;
+
+const { useSnapshot } = (window as any).Valtio as {
+  useSnapshot: <T extends object>(proxyObject: T) => T;
+};
 
 // 格式化消息时间
 function formatMessageTime(timestamp: number): string {
@@ -64,17 +85,94 @@ function formatMessageTime(timestamp: number): string {
 }
 
 /**
+ * 解析推理内容，提取步骤信息
+ * 识别常见的步骤模式：
+ * - 数字编号：1. 2. 3. 或 1) 2) 3)
+ * - 步骤关键词：首先、其次、然后、最后、第一步、第二步等
+ * - Markdown 标题：## 或 ###
+ */
+function parseReasoningSteps(reasoning: string): { steps: string[]; summary: string } {
+  if (!reasoning) return { steps: [], summary: "" };
+
+  const lines = reasoning.split("\n").filter(line => line.trim());
+  const steps: string[] = [];
+  
+  // 步骤匹配模式
+  const stepPatterns = [
+    /^(\d+)[.、)]\s*(.+)/,           // 1. xxx 或 1、xxx 或 1) xxx
+    /^第[一二三四五六七八九十\d]+步[：:]\s*(.+)/,  // 第一步：xxx
+    /^(首先|其次|然后|接着|最后|另外|此外)[，,：:]\s*(.+)/,  // 首先，xxx
+    /^#{2,3}\s*(.+)/,                // ## xxx 或 ### xxx
+    /^[-*]\s*(.+)/,                  // - xxx 或 * xxx (列表项)
+  ];
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    for (const pattern of stepPatterns) {
+      const match = trimmedLine.match(pattern);
+      if (match) {
+        // 提取步骤内容（取最后一个捕获组或整个匹配）
+        const stepContent = match[match.length - 1] || match[1] || trimmedLine;
+        if (stepContent && stepContent.length > 5) { // 过滤太短的内容
+          steps.push(stepContent.slice(0, 50) + (stepContent.length > 50 ? "..." : ""));
+        }
+        break;
+      }
+    }
+  }
+
+  // 生成摘要：取前两个步骤或推理内容的前100字符
+  let summary = "";
+  if (steps.length > 0) {
+    summary = steps.slice(0, 2).join(" → ");
+    if (steps.length > 2) {
+      summary += ` → ... (共${steps.length}步)`;
+    }
+  } else {
+    // 没有识别到步骤，取前100字符作为摘要
+    const cleanText = reasoning.replace(/\n+/g, " ").trim();
+    summary = cleanText.slice(0, 80) + (cleanText.length > 80 ? "..." : "");
+  }
+
+  return { steps, summary };
+}
+
+/**
  * ReasoningBlock - 显示 AI 推理过程（可折叠）
  * 类似 Cherry Studio 的显示方式：显示为独立的消息块
+ * 
+ * 增强功能：
+ * - 步骤进度指示（流式时显示）
+ * - 完成摘要
+ * - 折叠时显示时长和步骤数
  */
 function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming?: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
   const [showActions, setShowActions] = useState(false);
+  const [startTime] = useState(() => Date.now()); // 记录开始时间
+  const [elapsedTime, setElapsedTime] = useState(0);
+  
+  // 流式时更新耗时
+  useEffect(() => {
+    if (isStreaming) {
+      const timer = setInterval(() => {
+        setElapsedTime(Math.round((Date.now() - startTime) / 1000));
+      }, 1000);
+      return () => clearInterval(timer);
+    } else {
+      // 流式结束时，计算最终耗时
+      setElapsedTime(Math.round((Date.now() - startTime) / 1000));
+    }
+  }, [isStreaming, startTime]);
   
   if (!reasoning) return null;
 
-  // 计算推理时间（简单估算：每100字符约1秒）
-  const estimatedSeconds = Math.max(1, Math.round(reasoning.length / 100));
+  // 解析步骤信息
+  const { steps, summary } = useMemo(() => parseReasoningSteps(reasoning), [reasoning]);
+  const stepCount = steps.length || Math.max(1, Math.floor(reasoning.length / 200)); // 估算步骤数
+  
+  // 计算推理时间（流式时使用实时计时，否则估算）
+  const displayTime = isStreaming ? elapsedTime : Math.max(1, Math.round(reasoning.length / 100));
 
   // 复制功能
   const handleCopy = useCallback(() => {
@@ -84,6 +182,11 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
       }
     });
   }, [reasoning]);
+
+  // 当前步骤索引（流式时根据内容长度估算）
+  const currentStepIndex = isStreaming 
+    ? Math.min(steps.length - 1, Math.floor(reasoning.length / 200))
+    : steps.length - 1;
 
   return createElement(
     "div",
@@ -98,7 +201,7 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
       onMouseEnter: () => setShowActions(true),
       onMouseLeave: () => setShowActions(false),
     },
-    // Header - 显示 "已深度思考 (用时 X 秒)"
+    // Header - 显示 "已深度思考 (用时 X 秒, Y 步)"
     createElement(
       "div",
       {
@@ -130,18 +233,93 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
         },
       }),
       createElement(
-        "span",
+        "div",
         { 
           style: { 
-            fontSize: "13px", 
-            fontWeight: 500, 
-            color: "var(--orca-color-text-1)",
             flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px",
           } 
         },
-        isStreaming 
-          ? "深度思考中..." 
-          : `已深度思考 (用时约 ${estimatedSeconds} 秒)`
+        // 主标题
+        createElement(
+          "span",
+          { 
+            style: { 
+              fontSize: "13px", 
+              fontWeight: 500, 
+              color: "var(--orca-color-text-1)",
+            } 
+          },
+          isStreaming 
+            ? `深度思考中... (${elapsedTime}秒)`
+            : `已深度思考 (${displayTime}秒, ${stepCount}步)`
+        ),
+        // 折叠时显示摘要
+        !isExpanded && !isStreaming && summary && createElement(
+          "span",
+          {
+            style: {
+              fontSize: "11px",
+              color: "var(--orca-color-text-3)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: "300px",
+            },
+          },
+          summary
+        ),
+        // 流式时显示当前步骤
+        isStreaming && steps.length > 0 && createElement(
+          "span",
+          {
+            style: {
+              fontSize: "11px",
+              color: "var(--orca-color-text-2)",
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+            },
+          },
+          createElement("i", {
+            className: "ti ti-arrow-right",
+            style: { fontSize: "10px", color: "var(--orca-color-primary)" },
+          }),
+          steps[currentStepIndex] || "分析中..."
+        )
+      ),
+      // 步骤进度指示器（流式时显示）
+      isStreaming && steps.length > 1 && createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: "3px",
+            marginRight: "8px",
+          },
+        },
+        ...steps.slice(0, Math.min(5, steps.length)).map((_, idx) => 
+          createElement("div", {
+            key: idx,
+            style: {
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: idx <= currentStepIndex 
+                ? "var(--orca-color-primary)" 
+                : "var(--orca-color-border)",
+              transition: "background 0.3s",
+            },
+          })
+        ),
+        steps.length > 5 && createElement(
+          "span",
+          { style: { fontSize: "10px", color: "var(--orca-color-text-3)" } },
+          `+${steps.length - 5}`
+        )
       ),
       // 操作按钮（始终占据空间，通过透明度控制显示）
       !isStreaming && createElement(
@@ -190,6 +368,77 @@ function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStrea
           color: "var(--orca-color-text-3)",
         },
       })
+    ),
+    // 完成摘要（非流式、折叠状态、有步骤时显示）
+    !isStreaming && !isExpanded && steps.length > 0 && createElement(
+      "div",
+      {
+        style: {
+          padding: "8px 14px",
+          borderTop: "1px solid var(--orca-color-border)",
+          background: "var(--orca-color-bg-2)",
+        },
+      },
+      // 步骤列表预览（最多显示3个）
+      createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px",
+          },
+        },
+        ...steps.slice(0, 3).map((step, idx) =>
+          createElement(
+            "div",
+            {
+              key: idx,
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "11px",
+                color: "var(--orca-color-text-2)",
+              },
+            },
+            createElement("span", {
+              style: {
+                width: "16px",
+                height: "16px",
+                borderRadius: "50%",
+                background: "var(--orca-color-primary)",
+                color: "white",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "10px",
+                fontWeight: 600,
+                flexShrink: 0,
+              },
+            }, String(idx + 1)),
+            createElement("span", {
+              style: {
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              },
+            }, step)
+          )
+        ),
+        steps.length > 3 && createElement(
+          "div",
+          {
+            style: {
+              fontSize: "11px",
+              color: "var(--orca-color-text-3)",
+              paddingLeft: "22px",
+              fontStyle: "italic",
+            },
+          },
+          `还有 ${steps.length - 3} 个步骤...`
+        )
+      )
     ),
     // Content - 推理内容（可展开查看，支持 Markdown 渲染）
     isExpanded && createElement(
@@ -275,6 +524,9 @@ function ToolCallWithResult({
 /**
  * CollapsibleToolCalls - 可折叠的工具调用列表
  * 流式传输时展开，完成后自动折叠
+ * 
+ * Enhanced features (Requirements 10.3):
+ * - Shows parallel progress indicator (x/y 完成)
  */
 function CollapsibleToolCalls({
   toolCalls,
@@ -306,6 +558,9 @@ function CollapsibleToolCalls({
     ? toolCalls.filter((tc) => toolResults.has(tc.id)).length
     : 0;
 
+  // Format progress string (Requirements 10.3)
+  const progressText = `${completedCount}/${toolCount} 完成`;
+
   // 折叠状态的摘要头部
   const collapsedHeader = createElement(
     "div",
@@ -328,45 +583,124 @@ function CollapsibleToolCalls({
       className: "ti ti-tools",
       style: { fontSize: "14px", color: "var(--orca-color-primary)" },
     }),
-    `已执行 ${completedCount}/${toolCount} 个工具`,
+    // Progress indicator (Requirements 10.3)
+    createElement(
+      "span",
+      {
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "4px",
+        },
+      },
+      `已执行 ${progressText}`,
+      // Progress bar
+      toolCount > 1 && createElement(
+        "span",
+        {
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "2px",
+            marginLeft: "4px",
+          },
+        },
+        ...Array.from({ length: toolCount }, (_, i) =>
+          createElement("span", {
+            key: i,
+            style: {
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: i < completedCount
+                ? "var(--orca-color-success)"
+                : "var(--orca-color-border)",
+              transition: "background 0.3s",
+            },
+          })
+        )
+      )
+    ),
     createElement("i", {
       className: "ti ti-chevron-down",
       style: { fontSize: "12px", marginLeft: "auto" },
     })
   );
 
-  // 展开状态的头部（带折叠按钮）
-  const expandedHeader =
-    allCompleted &&
-    !isStreaming &&
+  // 展开状态的头部（带折叠按钮和进度指示）
+  const expandedHeader = createElement(
+    "div",
+    {
+      onClick: () => setIsExpanded(false),
+      style: {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "6px 10px",
+        marginBottom: "8px",
+        borderRadius: "6px",
+        background: "var(--orca-color-bg-2)",
+        border: "1px solid var(--orca-color-border)",
+        cursor: "pointer",
+        fontSize: "12px",
+        color: "var(--orca-color-text-2)",
+      },
+    },
+    createElement("i", {
+      className: isStreaming && !allCompleted ? "ti ti-loader" : "ti ti-tools",
+      style: {
+        fontSize: "14px",
+        color: "var(--orca-color-primary)",
+        animation: isStreaming && !allCompleted ? "spin 1s linear infinite" : undefined,
+      },
+    }),
+    // Progress indicator (Requirements 10.3)
     createElement(
-      "div",
+      "span",
       {
-        onClick: () => setIsExpanded(false),
         style: {
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
-          gap: "6px",
-          padding: "6px 10px",
-          marginBottom: "8px",
-          borderRadius: "6px",
-          background: "var(--orca-color-bg-2)",
-          border: "1px solid var(--orca-color-border)",
-          cursor: "pointer",
-          fontSize: "12px",
-          color: "var(--orca-color-text-2)",
+          gap: "4px",
         },
       },
-      createElement("i", {
-        className: "ti ti-tools",
-        style: { fontSize: "14px", color: "var(--orca-color-primary)" },
-      }),
-      `${completedCount} 个工具调用`,
-      createElement("i", {
-        className: "ti ti-chevron-up",
-        style: { fontSize: "12px", marginLeft: "auto" },
-      })
-    );
+      isStreaming && !allCompleted
+        ? `工具执行中 ${progressText}`
+        : `${toolCount} 个工具调用 (${progressText})`,
+      // Progress dots for multiple tools
+      toolCount > 1 && createElement(
+        "span",
+        {
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "2px",
+            marginLeft: "4px",
+          },
+        },
+        ...Array.from({ length: toolCount }, (_, i) =>
+          createElement("span", {
+            key: i,
+            style: {
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: i < completedCount
+                ? "var(--orca-color-success)"
+                : isStreaming
+                  ? "var(--orca-color-warning)"
+                  : "var(--orca-color-border)",
+              transition: "background 0.3s",
+            },
+          })
+        )
+      )
+    ),
+    createElement("i", {
+      className: "ti ti-chevron-up",
+      style: { fontSize: "12px", marginLeft: "auto" },
+    })
+  );
 
   // 工具调用列表
   const toolList = toolCalls.map((tc) =>
@@ -439,6 +773,10 @@ export default function MessageItem({
   const isAssistant = message.role === "assistant";
   const isPinned = (message as any).pinned === true;
 
+  // Display settings from store
+  const displaySettings = useSnapshot(displaySettingsStore);
+  const showTimestamp = shouldRenderTimestamp(displaySettings.showTimestamps);
+
   // Keep action bar visible when dropdown is open
   const showActionBar = isHovered || isExtractDropdownOpen;
 
@@ -452,6 +790,25 @@ export default function MessageItem({
       });
     }
   }, [message.content]);
+
+  // 复制选中的文本
+  const handleCopySelection = useCallback(() => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString();
+    if (selectedText) {
+      navigator.clipboard.writeText(selectedText).then(() => {
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("success", "已复制选中内容");
+        }
+      });
+    }
+  }, []);
+
+  // 检查是否有选中的文本
+  const hasSelection = useCallback(() => {
+    const selection = window.getSelection();
+    return selection && selection.toString().length > 0;
+  }, []);
 
   // Check if any tool calls are still loading
   const toolCallsLoading = useMemo(() => {
@@ -472,10 +829,23 @@ export default function MessageItem({
     transition: "border-color 0.2s",
   } : {};
 
+  // Apply display settings to message row
+  const messageRowWithSettings: React.CSSProperties = {
+    ...messageRowStyle(message.role),
+    marginBottom: `${getMessageGap(displaySettings.compactMode)}px`,
+  };
+
+  // Apply display settings to message bubble
+  const messageBubbleWithSettings: React.CSSProperties = {
+    ...messageBubbleStyle(message.role),
+    padding: getBubblePadding(displaySettings.compactMode),
+    fontSize: fontSizeMap[displaySettings.fontSize],
+  };
+
   return createElement(
     "div",
     {
-      style: { ...messageRowStyle(message.role), ...selectionModeStyle },
+      style: { ...messageRowWithSettings, ...selectionModeStyle },
       "data-message-index": messageIndex,
       "data-message-id": message.id,
       onMouseEnter: () => setIsHovered(true),
@@ -503,10 +873,38 @@ export default function MessageItem({
       })
     ),
     createElement(
-      "div",
+      ContextMenu as any,
       {
-        style: messageBubbleStyle(message.role),
+        menu: (close: () => void) => createElement(
+          Menu as any,
+          null,
+          // 复制选中内容（仅当有选中时显示）
+          hasSelection() && createElement(MenuText as any, {
+            preIcon: "ti ti-copy",
+            title: "复制选中内容",
+            onClick: () => {
+              handleCopySelection();
+              close();
+            },
+          }),
+          // 复制全部内容
+          message.content && createElement(MenuText as any, {
+            preIcon: "ti ti-clipboard",
+            title: "复制全部内容",
+            onClick: () => {
+              handleCopy();
+              close();
+            },
+          })
+        ),
       },
+      (open: (e: any) => void) => createElement(
+        "div",
+        {
+          style: messageBubbleWithSettings,
+          className: `message-bubble-${message.role}`,
+          onContextMenu: open,
+        },
       // 文件显示（图片和其他文件）
       message.files &&
         message.files.length > 0 &&
@@ -742,8 +1140,8 @@ export default function MessageItem({
               flexWrap: "wrap",
             } 
           },
-          // 时间
-          message.createdAt && formatMessageTime(message.createdAt),
+          // 时间 (controlled by showTimestamps setting)
+          showTimestamp && message.createdAt && formatMessageTime(message.createdAt),
           // Token 统计
           tokenStats && createElement(
             "span",
@@ -952,6 +1350,7 @@ export default function MessageItem({
             createElement("i", { className: "ti ti-refresh" })
           )
       )
+    )
     )
   );
 }

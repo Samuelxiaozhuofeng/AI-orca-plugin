@@ -2,12 +2,14 @@
  * ModeSelectorButton - Chat mode selector component
  * Displays current mode (Agent/Ask) with icon
  * Provides dropdown menu for mode selection
+ * In Agent mode, shows tool management button
  * 
  * Requirements: 1.1, 1.2, 1.3, 6.1, 6.2, 6.3, 6.4
  */
 
 import type { ChatMode } from "../../store/chat-mode-store";
 import { chatModeStore, setMode } from "../../store/chat-mode-store";
+import { toolStore, toggleToolPanel } from "../../store/tool-store";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -115,7 +117,9 @@ const checkIconStyle: React.CSSProperties = {
 
 export default function ModeSelectorButton() {
   const snap = useSnapshot(chatModeStore);
+  const toolSnap = useSnapshot(toolStore);
   const currentMode = snap.mode as ChatMode;
+  const isAgentMode = currentMode === "agent";
 
   // Get current mode config
   const currentConfig = useMemo(() => {
@@ -126,6 +130,11 @@ export default function ModeSelectorButton() {
   const handleSelectMode = useCallback((mode: ChatMode, close: () => void) => {
     setMode(mode);
     close();
+  }, []);
+
+  // Handle tool button click
+  const handleToolClick = useCallback(() => {
+    toggleToolPanel();
   }, []);
 
   // Render menu item
@@ -185,25 +194,44 @@ export default function ModeSelectorButton() {
   );
 
   return createElement(
-    ContextMenu as any,
-    {
-      defaultPlacement: "top",
-      placement: "vertical",
-      alignment: "left",
-      allowBeyondContainer: true,
-      offset: 8,
-      menu: renderMenu,
-    },
-    (openMenu: (e: any) => void) =>
-      createElement(
-        Button,
-        {
-          variant: "plain",
-          onClick: openMenu,
-          title: `${currentConfig.label}: ${currentConfig.description}`,
-          style: selectorButtonStyle,
+    "div",
+    { style: { display: "flex", alignItems: "center", gap: 4 } },
+    // Tool button (only in Agent mode)
+    isAgentMode && createElement(
+      Button,
+      {
+        variant: "plain",
+        onClick: handleToolClick,
+        title: "工具管理",
+        style: {
+          ...selectorButtonStyle,
+          color: toolSnap.showPanel ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
         },
-        createElement("i", { className: currentConfig.icon })
-      )
+      },
+      createElement("i", { className: "ti ti-tool" })
+    ),
+    // Mode selector
+    createElement(
+      ContextMenu as any,
+      {
+        defaultPlacement: "top",
+        placement: "vertical",
+        alignment: "left",
+        allowBeyondContainer: true,
+        offset: 8,
+        menu: renderMenu,
+      },
+      (openMenu: (e: any) => void) =>
+        createElement(
+          Button,
+          {
+            variant: "plain",
+            onClick: openMenu,
+            title: `${currentConfig.label}: ${currentConfig.description}`,
+            style: selectorButtonStyle,
+          },
+          createElement("i", { className: currentConfig.icon })
+        )
+    )
   );
 }

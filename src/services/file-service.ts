@@ -2,7 +2,7 @@
  * File Service - 处理各种文件类型的导入
  *
  * 支持的文件类型：
- * - 图片：PNG, JPEG, GIF, WebP
+ * - 图片：PNG, JPEG, GIF, WebP, AVIF（支持动图帧切割）
  * - 视频：MP4, WebM, MOV（抽帧+音频识别）
  * - 音频：MP3, WAV, OGG
  * - 文档：PDF, TXT, Markdown, Word (docx)
@@ -12,6 +12,7 @@
 
 import type { FileRef } from "./session-service";
 import { buildVideoContentForApi, isVideoFile, generateVideoThumbnail } from "./video-service";
+import { isAnimatedImage, buildAnimatedImageContentForApi } from "./animated-image-service";
 import { parseDocument } from "./document-parser";
 
 /**
@@ -33,12 +34,12 @@ interface FileTypeConfig {
 }
 
 const FILE_TYPE_CONFIGS: Record<string, FileTypeConfig> = {
-  // 图片类型
+  // 图片类型（包括动图 GIF、AVIF）
   image: {
-    extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"],
-    mimeTypes: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml"],
+    extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"],
+    mimeTypes: ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/svg+xml", "image/avif"],
     category: "image",
-    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSize: 20 * 1024 * 1024, // 20MB（动图可能较大）
     icon: "ti ti-photo",
     canPreview: true,
     extractText: false,
@@ -507,7 +508,9 @@ export async function fileToBase64(fileRef: FileRef): Promise<string | null> {
     }
 
     const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      return null;
+    }
 
     const blob = await response.blob();
     
@@ -590,13 +593,32 @@ export async function buildFileContentForApi(
 
 /**
  * 构建发送给 API 的文件内容（支持返回多个内容）
- * 主要用于视频处理（抽帧返回多张图片）
+ * 主要用于视频和动图处理（抽帧返回多张图片）
  */
 export async function buildFileContentsForApi(
   fileRef: FileRef
 ): Promise<Array<{ type: string; [key: string]: any }>> {
   const config = getFileTypeConfig(fileRef.name, fileRef.mimeType);
-  if (!config) return [];
+  if (!config) {
+    return [];
+  }
+
+  // 动图类型（GIF、AVIF）- 帧切割
+  if (isAnimatedImage(fileRef)) {
+    try {
+      return await buildAnimatedImageContentForApi(fileRef);
+    } catch (error) {
+      // 降级：尝试作为静态图片发送
+      const base64 = await fileToBase64(fileRef);
+      if (base64) {
+        return [{
+          type: "image_url",
+          image_url: { url: `data:image/jpeg;base64,${base64}` },
+        }];
+      }
+      return [{ type: "text", text: `[动图处理失败: ${fileRef.name}]` }];
+    }
+  }
 
   // 视频类型 - 抽帧 + 音频识别
   if (config.category === "video" || isVideoFile(fileRef)) {

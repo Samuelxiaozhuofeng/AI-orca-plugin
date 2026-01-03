@@ -8,7 +8,7 @@
  */
 
 import MarkdownMessage from "./MarkdownMessage";
-import LoadingDots from "./LoadingDots";
+import TypingIndicator from "./TypingIndicator";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -348,7 +348,7 @@ function ModelResponseCard({
                 fontSize: "13px",
               },
             },
-            createElement(LoadingDots, null),
+            createElement(TypingIndicator, null),
             "正在生成..."
           )
         : null

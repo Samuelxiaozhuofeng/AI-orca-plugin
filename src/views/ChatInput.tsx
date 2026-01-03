@@ -22,6 +22,8 @@ import { loadFromStorage } from "../store/chat-mode-store";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
 import { MultiModelToggleButton } from "../components/MultiModelSelector";
 import { multiModelStore } from "../store/multi-model-store";
+import ToolPanel from "../components/ToolPanel";
+import { loadToolSettings } from "../store/tool-store";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -33,22 +35,49 @@ const React = window.React as unknown as {
 };
 const { createElement, useRef, useState, useCallback, useEffect, useMemo } = React;
 
-// 斜杠命令定义
-const SLASH_COMMANDS = [
-  { command: "/card", description: "生成闪卡，交互式复习并保存", icon: "ti ti-cards" },
-  { command: "/timeline", description: "以时间线格式展示结果", icon: "ti ti-clock" },
-  { command: "/brief", description: "简洁回答，不要长篇大论", icon: "ti ti-bolt" },
-  { command: "/detail", description: "详细回答，展开说明", icon: "ti ti-file-text" },
-  { command: "/table", description: "用表格格式展示结果", icon: "ti ti-table" },
-  { command: "/summary", description: "总结模式，精炼内容要点", icon: "ti ti-list" },
-  { command: "/compare", description: "对比模式，左右对比展示", icon: "ti ti-columns" },
-  { command: "/localgraph", description: "显示页面的链接关系图谱", icon: "ti ti-share" },
+// 斜杠命令定义 - 带分类
+import {
+  groupCommandsByCategory,
+  fuzzyMatch,
+  addRecentCommand,
+  getRecentCommands,
+  SlashCommand as SlashCommandType,
+  SlashCommandCategory,
+} from "../utils/chat-ui-utils";
+
+type SlashCommandDef = {
+  command: string;
+  description: string;
+  icon: string;
+  category: SlashCommandCategory;
+};
+
+const SLASH_COMMANDS: SlashCommandDef[] = [
+  // Format 格式类
+  { command: "/table", description: "用表格格式展示结果", icon: "ti ti-table", category: "format" },
+  { command: "/timeline", description: "以时间线格式展示结果", icon: "ti ti-clock", category: "format" },
+  { command: "/compare", description: "对比模式，左右对比展示", icon: "ti ti-columns", category: "format" },
+  // Style 风格类
+  { command: "/brief", description: "简洁回答，不要长篇大论", icon: "ti ti-bolt", category: "style" },
+  { command: "/detail", description: "详细回答，展开说明", icon: "ti ti-file-text", category: "style" },
+  { command: "/summary", description: "总结模式，精炼内容要点", icon: "ti ti-list", category: "style" },
+  // Visualization 可视化类
+  { command: "/card", description: "生成闪卡，交互式复习并保存", icon: "ti ti-cards", category: "visualization" },
+  { command: "/localgraph", description: "显示页面的链接关系图谱", icon: "ti ti-share", category: "visualization" },
+  { command: "/mindmap", description: "显示块及子块的思维导图", icon: "ti ti-binary-tree", category: "visualization" },
 ];
+
+// 分类显示名称
+const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
+  format: "格式",
+  style: "回答风格",
+  visualization: "可视化",
+};
 
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
 };
-const { Button, CompositionTextArea } = orca.components;
+const { Button } = orca.components || {};
 
 type Props = {
   onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void | Promise<void>;
@@ -75,20 +104,27 @@ const inputContainerStyle: React.CSSProperties = {
   background: "var(--orca-color-bg-1)",
 };
 
-const textareaWrapperStyle = (focused: boolean): React.CSSProperties => ({
-  display: "flex",
-  flexDirection: "column",
-  gap: "8px",
-  background: "var(--orca-color-bg-2)",
+const textareaWrapperStyle = (focused: boolean, isDragging: boolean = false): React.CSSProperties => ({
+  display: "block", // 改为 block 让 textarea 可以自动增高
+  background: isDragging 
+    ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.08))" 
+    : "var(--orca-color-bg-2)",
   borderRadius: "24px",
   padding: "12px 16px",
-  border: focused 
-    ? "1px solid var(--orca-color-primary, #007bff)" 
-    : "1px solid var(--orca-color-border)",
-  boxShadow: focused
-    ? "0 4px 12px rgba(0,123,255,0.12)"
-    : "0 2px 8px rgba(0,0,0,0.04)",
-  transition: "all 0.2s ease",
+  // 保持边框宽度一致，避免跳动
+  border: isDragging
+    ? "2px dashed var(--orca-color-primary, #007bff)"
+    : focused 
+      ? "2px solid var(--orca-color-primary, #007bff)" 
+      : "2px solid transparent",
+  // 用 box-shadow 模拟普通状态的边框
+  boxShadow: isDragging
+    ? "0 4px 16px rgba(0,123,255,0.2)"
+    : focused
+      ? "0 4px 12px rgba(0,123,255,0.12)"
+      : "0 0 0 1px var(--orca-color-border), 0 2px 8px rgba(0,0,0,0.04)",
+  transition: "all 0.15s ease",
+  position: "relative",
 });
 
 export default function ChatInput({
@@ -112,10 +148,29 @@ export default function ChatInput({
   const [isUploading, setIsUploading] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   const addContextBtnRef = useRef<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
+
+  // 自动调整 textarea 高度
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    // 重置高度以获取正确的 scrollHeight
+    textarea.style.height = "auto";
+    // 设置新高度，限制最大高度为 360px
+    const newHeight = Math.min(textarea.scrollHeight, 360);
+    textarea.style.height = `${newHeight}px`;
+    // 超过最大高度时显示滚动条
+    textarea.style.overflowY = textarea.scrollHeight > 360 ? "auto" : "hidden";
+  }, []);
+
+  // 文本变化时调整高度
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [text, adjustTextareaHeight]);
 
   // 获取当前选中模型的价格信息
   const selectedModelInfo = useMemo(() => {
@@ -142,12 +197,24 @@ export default function ChatInput({
     return { inputTokens, outputTokens, cost };
   }, [text, selectedModelInfo]);
 
-  // 检测是否显示斜杠命令菜单
+  // 检测是否显示斜杠命令菜单 - 使用模糊匹配
   const filteredCommands = useMemo(() => {
     if (!text.startsWith("/")) return [];
-    const query = text.toLowerCase();
-    return SLASH_COMMANDS.filter(cmd => cmd.command.toLowerCase().startsWith(query));
+    const query = text.slice(1).toLowerCase(); // 移除开头的 /
+    if (query.includes(" ")) return []; // 如果有空格，不显示菜单
+    
+    // 使用模糊匹配过滤命令
+    return SLASH_COMMANDS.filter(cmd => {
+      const cmdName = cmd.command.slice(1); // 移除命令开头的 /
+      return fuzzyMatch(query, cmdName);
+    });
   }, [text]);
+
+  // 获取最近使用的命令
+  const recentCommands = useMemo(() => {
+    const recent = getRecentCommands();
+    return SLASH_COMMANDS.filter(cmd => recent.includes(cmd.command));
+  }, []);
 
   useEffect(() => {
     if (filteredCommands.length > 0 && text.startsWith("/") && !text.includes(" ")) {
@@ -161,6 +228,7 @@ export default function ChatInput({
   // Load chat mode from storage on mount (Requirements: 5.2)
   useEffect(() => {
     loadFromStorage();
+    loadToolSettings();
   }, []);
 
   const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled && !isSending;
@@ -221,6 +289,8 @@ export default function ChatInput({
             if (textareaRef.current) {
               textareaRef.current.value = cmd.command + " ";
             }
+            // 保存到最近使用
+            addRecentCommand(cmd.command);
           }
           setSlashMenuOpen(false);
           return;
@@ -335,6 +405,7 @@ export default function ChatInput({
   const handleDrop = useCallback(async (e: DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    setIsDraggingFile(false); // 重置拖拽状态
     
     const dataTransfer = e.dataTransfer;
     if (!dataTransfer) return;
@@ -406,6 +477,25 @@ export default function ChatInput({
     e.stopPropagation();
   }, []);
 
+  // 处理拖拽进入
+  const handleDragEnter = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(true);
+  }, []);
+
+  // 处理拖拽离开
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // 只有当离开整个容器时才重置状态
+    const relatedTarget = e.relatedTarget as Node | null;
+    const currentTarget = e.currentTarget as Node;
+    if (!currentTarget.contains(relatedTarget)) {
+      setIsDraggingFile(false);
+    }
+  }, []);
+
   return createElement(
     "div",
     { style: inputContainerStyle },
@@ -425,9 +515,56 @@ export default function ChatInput({
     // Input Wrapper
     createElement(
       "div",
-      { style: { ...textareaWrapperStyle(isFocused), position: "relative" } },
+      { 
+        style: { ...textareaWrapperStyle(isFocused, isDraggingFile), position: "relative" },
+        onDragEnter: handleDragEnter,
+        onDragLeave: handleDragLeave,
+        onDragOver: handleDragOver,
+        onDrop: handleDrop,
+      },
 
-      // Slash Command Menu
+      // Drag Overlay (显示拖拽提示)
+      isDraggingFile && createElement(
+        "div",
+        {
+          style: {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            background: "rgba(var(--orca-color-primary-rgb, 0, 123, 255), 0.05)",
+            borderRadius: "22px",
+            zIndex: 10,
+            pointerEvents: "none",
+          },
+        },
+        createElement("i", { 
+          className: "ti ti-file-upload", 
+          style: { 
+            fontSize: "32px", 
+            color: "var(--orca-color-primary, #007bff)",
+            opacity: 0.8,
+          } 
+        }),
+        createElement("span", {
+          style: {
+            fontSize: "13px",
+            color: "var(--orca-color-primary, #007bff)",
+            fontWeight: 500,
+          },
+        }, "拖放文件或块到此处")
+      ),
+
+      // Tool Panel (only in Agent mode)
+      createElement(ToolPanel, null),
+
+      // Slash Command Menu - Enhanced with categories and recent commands
       slashMenuOpen && filteredCommands.length > 0 && createElement(
         "div",
         {
@@ -443,43 +580,182 @@ export default function ChatInput({
             boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
             overflow: "hidden",
             zIndex: 100,
+            maxHeight: "300px",
+            overflowY: "auto",
           },
         },
-        ...filteredCommands.map((cmd, index) =>
-          createElement(
-            "div",
-            {
-              key: cmd.command,
-              onClick: () => {
-                setText(cmd.command + " ");
-                if (textareaRef.current) {
-                  textareaRef.current.value = cmd.command + " ";
-                  textareaRef.current.focus();
-                }
-                setSlashMenuOpen(false);
-              },
-              style: {
-                padding: "8px 12px",
-                cursor: "pointer",
-                background: index === slashMenuIndex ? "var(--orca-color-bg-3)" : "transparent",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              },
-            },
-            createElement("i", { 
-              className: cmd.icon, 
-              style: { 
-                fontSize: "14px", 
-                color: "var(--orca-color-primary)",
-                width: "18px",
-                textAlign: "center",
-              } 
-            }),
-            createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-primary)" } }, cmd.command),
-            createElement("span", { style: { color: "var(--orca-color-text-2)", fontSize: "12px" } }, cmd.description)
-          )
-        )
+        // 渲染命令菜单内容
+        (() => {
+          const elements: any[] = [];
+          let globalIndex = 0;
+          const query = text.slice(1).toLowerCase();
+          
+          // 如果没有输入查询，显示分类视图
+          if (!query) {
+            // 最近使用区域
+            const recentCmds = recentCommands.filter(cmd => 
+              filteredCommands.some(fc => fc.command === cmd.command)
+            );
+            
+            if (recentCmds.length > 0) {
+              elements.push(
+                createElement("div", {
+                  key: "recent-header",
+                  style: {
+                    padding: "6px 12px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "var(--orca-color-text-3)",
+                    background: "var(--orca-color-bg-2)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                  },
+                }, "最近使用")
+              );
+              
+              for (const cmd of recentCmds) {
+                const currentIndex = globalIndex++;
+                elements.push(
+                  createElement("div", {
+                    key: `recent-${cmd.command}`,
+                    onClick: () => {
+                      setText(cmd.command + " ");
+                      if (textareaRef.current) {
+                        textareaRef.current.value = cmd.command + " ";
+                        textareaRef.current.focus();
+                      }
+                      addRecentCommand(cmd.command);
+                      setSlashMenuOpen(false);
+                    },
+                    style: {
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      background: currentIndex === slashMenuIndex ? "var(--orca-color-bg-3)" : "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    },
+                  },
+                    createElement("i", { 
+                      className: cmd.icon, 
+                      style: { fontSize: "14px", color: "var(--orca-color-primary)", width: "18px", textAlign: "center" } 
+                    }),
+                    createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-primary)" } }, cmd.command),
+                    createElement("span", { style: { color: "var(--orca-color-text-2)", fontSize: "12px" } }, cmd.description)
+                  )
+                );
+              }
+            }
+            
+            // 按分类分组显示
+            const grouped = groupCommandsByCategory(filteredCommands as SlashCommandType[]);
+            const categories: SlashCommandCategory[] = ["format", "style", "visualization"];
+            
+            for (const category of categories) {
+              const cmds = grouped[category];
+              if (cmds.length === 0) continue;
+              
+              // 分类标题
+              elements.push(
+                createElement("div", {
+                  key: `header-${category}`,
+                  style: {
+                    padding: "6px 12px",
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "var(--orca-color-text-3)",
+                    background: "var(--orca-color-bg-2)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                  },
+                }, CATEGORY_LABELS[category])
+              );
+              
+              // 分类下的命令
+              for (const cmd of cmds) {
+                // 跳过已在最近使用中显示的命令
+                if (recentCmds.some(rc => rc.command === cmd.command)) continue;
+                
+                const currentIndex = globalIndex++;
+                elements.push(
+                  createElement("div", {
+                    key: cmd.command,
+                    onClick: () => {
+                      setText(cmd.command + " ");
+                      if (textareaRef.current) {
+                        textareaRef.current.value = cmd.command + " ";
+                        textareaRef.current.focus();
+                      }
+                      addRecentCommand(cmd.command);
+                      setSlashMenuOpen(false);
+                    },
+                    style: {
+                      padding: "8px 12px",
+                      cursor: "pointer",
+                      background: currentIndex === slashMenuIndex ? "var(--orca-color-bg-3)" : "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    },
+                  },
+                    createElement("i", { 
+                      className: cmd.icon, 
+                      style: { fontSize: "14px", color: "var(--orca-color-primary)", width: "18px", textAlign: "center" } 
+                    }),
+                    createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-primary)" } }, cmd.command),
+                    createElement("span", { style: { color: "var(--orca-color-text-2)", fontSize: "12px" } }, cmd.description)
+                  )
+                );
+              }
+            }
+          } else {
+            // 有查询时，显示扁平的过滤结果
+            for (const cmd of filteredCommands) {
+              const currentIndex = globalIndex++;
+              elements.push(
+                createElement("div", {
+                  key: cmd.command,
+                  onClick: () => {
+                    setText(cmd.command + " ");
+                    if (textareaRef.current) {
+                      textareaRef.current.value = cmd.command + " ";
+                      textareaRef.current.focus();
+                    }
+                    addRecentCommand(cmd.command);
+                    setSlashMenuOpen(false);
+                  },
+                  style: {
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    background: currentIndex === slashMenuIndex ? "var(--orca-color-bg-3)" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  },
+                },
+                  createElement("i", { 
+                    className: cmd.icon, 
+                    style: { fontSize: "14px", color: "var(--orca-color-primary)", width: "18px", textAlign: "center" } 
+                  }),
+                  createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-primary)" } }, cmd.command),
+                  createElement("span", { style: { color: "var(--orca-color-text-2)", fontSize: "12px" } }, cmd.description),
+                  createElement("span", { 
+                    style: { 
+                      marginLeft: "auto", 
+                      fontSize: "10px", 
+                      color: "var(--orca-color-text-4)",
+                      padding: "2px 6px",
+                      background: "var(--orca-color-bg-3)",
+                      borderRadius: "4px",
+                    } 
+                  }, CATEGORY_LABELS[cmd.category])
+                )
+              );
+            }
+          }
+          
+          return elements;
+        })()
       ),
 
       // 文件预览区域
@@ -774,7 +1050,7 @@ export default function ChatInput({
       ),
 
       // Row 1: TextArea
-      createElement(CompositionTextArea as any, {
+      createElement("textarea", {
         ref: textareaRef as any,
         placeholder: pendingFiles.length > 0 ? "描述文件或直接发送..." : "Ask AI...",
         value: text,
@@ -786,13 +1062,28 @@ export default function ChatInput({
         onDrop: handleDrop,
         onDragOver: handleDragOver,
         disabled,
-        style: { ...textareaStyle, width: "100%", background: "transparent", border: "none", padding: 0, minHeight: "24px" },
+        rows: 1,
+        style: { 
+          ...textareaStyle, 
+          width: "100%", 
+          background: "transparent", 
+          border: "none", 
+          padding: 0, 
+          minHeight: "24px",
+          maxHeight: "360px",
+          overflowY: "auto",
+          resize: "none",
+          outline: "none",
+          fontFamily: "inherit",
+          fontSize: "15px",
+          lineHeight: "1.5",
+        },
       }),
 
       // Row 2: Bottom Toolbar (Tools Left, Send Right)
       createElement(
         "div",
-        { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" } },
         
         // Left Tools: @ Button + File Button + Clear Context + Model Selector + Injection Mode Selector
         createElement(

@@ -1,5 +1,6 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import LocalGraph from "./LocalGraph";
+import MindMapRenderer from "./MindMapRenderer";
 import {
   codeBlockContainerStyle,
   codeBlockHeaderStyle,
@@ -117,6 +118,176 @@ function CodeBlock({ language, content }: { language?: string; content: string }
       },
       content,
     ),
+  );
+}
+
+// 全局缓存：存储大型日记导出数据
+const journalExportCache = new Map<string, { rangeLabel: string; entries: any[] }>();
+
+// Helper component for Journal Export Button
+function JournalExportBlock({ content }: { content: string }) {
+  const [exporting, setExporting] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null as { rangeLabel: string; entries: any[] } | null);
+
+  // 解析缓存 ID 中的日期信息
+  // 格式：cache:year-2025-timestamp 或 cache:month-2025-01-timestamp
+  const parseCacheId = (cacheId: string) => {
+    const yearMatch = cacheId.match(/^year-(\d{4})-/);
+    if (yearMatch) {
+      return { type: "year" as const, value: yearMatch[1] };
+    }
+    const monthMatch = cacheId.match(/^month-(\d{4}-\d{2})-/);
+    if (monthMatch) {
+      return { type: "month" as const, value: monthMatch[1] };
+    }
+    return null;
+  };
+
+  // 初始化时尝试获取数据
+  React.useEffect(() => {
+    const trimmed = content.trim();
+    
+    // 检查是否是缓存 ID
+    if (trimmed.startsWith("cache:")) {
+      const cacheId = trimmed.substring(6);
+      const cached = journalExportCache.get(cacheId);
+      if (cached) {
+        console.log("[JournalExportBlock] Found cached data:", cacheId);
+        setData(cached);
+        return;
+      }
+      
+      // 缓存丢失，尝试重新获取
+      console.log("[JournalExportBlock] Cache miss, re-fetching:", cacheId);
+      const parsed = parseCacheId(cacheId);
+      if (parsed) {
+        setLoading(true);
+        (async () => {
+          try {
+            const { getJournalsByDateRange } = await import("../services/search-service");
+            const results = await getJournalsByDateRange(
+              parsed.type,
+              parsed.value,
+              undefined,
+              true,
+              parsed.type === "year" ? 366 : 31
+            );
+            
+            const exportData = results
+              .map((r: any) => ({
+                date: r.title || "",
+                content: (r.fullContent || r.content || "").trim(),
+                blockId: r.id,
+              }))
+              .filter((entry: any) => entry.content.length > 0);
+            
+            const rangeLabel = parsed.type === "year" 
+              ? `${parsed.value}年`
+              : (() => {
+                  const m = parsed.value.match(/^(\d{4})-(\d{2})$/);
+                  return m ? `${m[1]}年${parseInt(m[2])}月` : parsed.value;
+                })();
+            
+            const newData = { rangeLabel, entries: exportData };
+            journalExportCache.set(cacheId, newData);
+            setData(newData);
+          } catch (err) {
+            console.error("[JournalExportBlock] Failed to re-fetch:", err);
+          } finally {
+            setLoading(false);
+          }
+        })();
+      }
+      return;
+    }
+    
+    // 尝试解析 JSON
+    try {
+      setData(JSON.parse(trimmed));
+    } catch (err) {
+      console.error("[JournalExportBlock] JSON parse error:", err);
+    }
+  }, [content]);
+
+  const handleExport = async () => {
+    if (!data) return;
+    try {
+      setExporting(true);
+      const { exportJournalsAsFile } = await import("../services/export-service");
+      exportJournalsAsFile(data.entries, data.rangeLabel);
+    } catch (err) {
+      console.error("Failed to export journals:", err);
+      orca.notify("error", "导出失败: " + (err as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const entryCount = data?.entries?.length || 0;
+  const rangeLabel = data?.rangeLabel || "";
+
+  return createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        padding: "16px",
+        background: "var(--orca-color-bg-2)",
+        borderRadius: "8px",
+        border: "1px solid var(--orca-color-border)",
+        marginTop: "8px",
+      },
+    },
+    createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          color: "var(--orca-color-text-2)",
+        },
+      },
+      createElement("i", { className: loading ? "ti ti-loader" : "ti ti-file-export", style: { fontSize: "20px" } }),
+      createElement("span", null, loading ? "加载中..." : `${rangeLabel} - 共 ${entryCount} 篇日记`)
+    ),
+    createElement(
+      "button",
+      {
+        onClick: handleExport,
+        disabled: exporting || loading || entryCount === 0,
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "8px",
+          padding: "10px 20px",
+          background: exporting || loading || entryCount === 0 ? "var(--orca-color-bg-3)" : "#2563eb",
+          color: exporting || loading || entryCount === 0 ? "var(--orca-color-text-3)" : "#ffffff",
+          border: "none",
+          borderRadius: "6px",
+          cursor: exporting || loading || entryCount === 0 ? "not-allowed" : "pointer",
+          fontSize: "14px",
+          fontWeight: 500,
+          transition: "all 0.2s",
+        },
+      },
+      createElement("i", { className: exporting ? "ti ti-loader" : "ti ti-download" }),
+      exporting ? "导出中..." : loading ? "加载中..." : entryCount === 0 ? "无数据可导出" : "导出为 Markdown 文件"
+    ),
+    createElement(
+      "div",
+      {
+        style: {
+          fontSize: "12px",
+          color: "var(--orca-color-text-3)",
+        },
+      },
+      "💡 导出后可使用 ChatGPT、Claude 等 AI 工具进行分析"
+    )
   );
 }
 
@@ -324,6 +495,7 @@ function TableBlock({
 }
 
 // Helper component for Checklist (- [ ] / - [x])
+// 支持智能识别标题项、子项和普通项
 function ChecklistBlock({
   items,
   renderInline,
@@ -331,26 +503,132 @@ function ChecklistBlock({
   items: CheckboxItem[];
   renderInline: (node: MarkdownInlineNode, key: number) => any;
 }) {
-  return createElement(
-    "div",
-    { className: "md-checklist" },
-    ...items.map((item, index) =>
-      createElement(
-        "div",
-        { key: index, className: `md-checklist-item ${item.checked ? "checked" : ""}` },
+  // 分组：将连续的子项归属到前一个标题项下
+  const groups: { header?: CheckboxItem; items: CheckboxItem[] }[] = [];
+  let currentGroup: { header?: CheckboxItem; items: CheckboxItem[] } = { items: [] };
+
+  for (const item of items) {
+    if (item.isHeader) {
+      // 保存当前组（如果有内容）
+      if (currentGroup.header || currentGroup.items.length > 0) {
+        groups.push(currentGroup);
+      }
+      // 开始新组
+      currentGroup = { header: item, items: [] };
+    } else {
+      currentGroup.items.push(item);
+    }
+  }
+  // 保存最后一组
+  if (currentGroup.header || currentGroup.items.length > 0) {
+    groups.push(currentGroup);
+  }
+
+  // 如果没有任何标题项，使用简单渲染
+  const hasHeaders = groups.some((g) => g.header);
+
+  if (!hasHeaders) {
+    // 简单模式：所有项平铺
+    return createElement(
+      "div",
+      { className: "md-checklist md-checklist-simple" },
+      items.map((item, index) =>
         createElement(
-          "span",
-          { className: `md-checkbox ${item.checked ? "checked" : ""}` },
-          item.checked && createElement("i", { className: "ti ti-check" })
-        ),
-        createElement(
-          "span",
-          { className: "md-checklist-text" },
-          ...item.children.map((child, i) => renderInline(child, i))
+          "div",
+          {
+            key: index,
+            className: `md-checklist-item ${item.checked ? "checked" : ""} ${item.isSubItem ? "md-checklist-subitem" : ""}`,
+          },
+          createElement(
+            "span",
+            { className: `md-checkbox ${item.checked ? "checked" : ""}` },
+            item.checked && createElement("i", { className: "ti ti-check" })
+          ),
+          createElement(
+            "span",
+            { className: "md-checklist-text" },
+            item.children.map((child, i) => renderInline(child, i))
+          )
         )
       )
-    )
-  );
+    );
+  }
+
+  // 分组模式：标题 + 子项，按顺序渲染每个组
+  // 计算标题序号（只计算有 header 的组）
+  let headerIndex = 0;
+  const groupElements = groups.map((group, groupIndex) => {
+    const children: any[] = [];
+
+    // 标题项
+    if (group.header) {
+      headerIndex++;
+      children.push(
+        createElement(
+          "div",
+          {
+            key: `header-${groupIndex}`,
+            className: `md-checklist-header ${group.header.checked ? "checked" : ""}`,
+          },
+          // 序号标识
+          createElement(
+            "span",
+            { className: "md-checklist-header-index" },
+            `${headerIndex}.`
+          ),
+          createElement(
+            "span",
+            {
+              className: `md-checkbox md-checkbox-header ${group.header.checked ? "checked" : ""}`,
+            },
+            group.header.checked && createElement("i", { className: "ti ti-check" })
+          ),
+          createElement(
+            "span",
+            { className: "md-checklist-header-text" },
+            group.header.children.map((child, i) => renderInline(child, i))
+          )
+        )
+      );
+    }
+
+    // 子项列表
+    if (group.items.length > 0) {
+      children.push(
+        createElement(
+          "div",
+          { key: `items-${groupIndex}`, className: "md-checklist-subitems" },
+          group.items.map((item, itemIndex) =>
+            createElement(
+              "div",
+              {
+                key: itemIndex,
+                className: `md-checklist-item ${item.checked ? "checked" : ""} ${item.isSubItem ? "md-checklist-subitem" : ""}`,
+              },
+              createElement(
+                "span",
+                { className: `md-checkbox ${item.checked ? "checked" : ""}` },
+                item.checked && createElement("i", { className: "ti ti-check" })
+              ),
+              createElement(
+                "span",
+                { className: "md-checklist-text" },
+                item.children.map((child, i) => renderInline(child, i))
+              )
+            )
+          )
+        )
+      );
+    }
+
+    return createElement(
+      "div",
+      { key: groupIndex, className: "md-checklist-group" },
+      children
+    );
+  });
+
+  return createElement("div", { className: "md-checklist md-checklist-grouped" }, groupElements);
 }
 
 // 时间线事件类型颜色映射
@@ -1014,6 +1292,13 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
       );
 
     case "codeblock":
+      // 特殊处理 journal-export 代码块
+      if (node.language === "journal-export") {
+        return createElement(JournalExportBlock, {
+          key,
+          content: node.content,
+        });
+      }
       return createElement(CodeBlock, {
         key,
         language: node.language,
@@ -1058,6 +1343,13 @@ function renderBlockNode(node: MarkdownNode, key: number): any {
 
     case "localgraph": {
       return createElement(LocalGraph, {
+        key,
+        blockId: node.blockId,
+      });
+    }
+
+    case "mindmap": {
+      return createElement(MindMapRenderer, {
         key,
         blockId: node.blockId,
       });
@@ -1122,3 +1414,6 @@ export default function MarkdownMessage({ content, role }: Props) {
     ...nodes.map((node: MarkdownNode, index: number) => renderBlockNode(node, index)),
   );
 }
+
+// 导出缓存供外部使用
+export { journalExportCache };

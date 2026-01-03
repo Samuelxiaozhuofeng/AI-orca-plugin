@@ -58,7 +58,7 @@ export const textareaStyle = {
   flex: 1,
   resize: "none" as const,
   minHeight: 24,
-  maxHeight: 200,
+  maxHeight: 360,
   background: "transparent",
   border: "none",
   padding: 0,

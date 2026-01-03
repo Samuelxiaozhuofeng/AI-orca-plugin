@@ -12,6 +12,9 @@ export type TableAlignment = "left" | "center" | "right" | null;
 export type CheckboxItem = {
   checked: boolean;
   children: MarkdownInlineNode[];
+  isHeader?: boolean;      // 是否为标题项（加粗开头）
+  isSubItem?: boolean;     // 是否为子项（描述性内容）
+  indent?: number;         // 缩进层级
 };
 
 export type TimelineItem = {
@@ -46,6 +49,7 @@ export type MarkdownNode =
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
   | { type: "localgraph"; blockId: number }
+  | { type: "mindmap"; blockId: number }
   | { type: "gallery"; images: GalleryImage[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
@@ -125,14 +129,41 @@ function isTableRow(line: string): boolean {
 
 /**
  * Check if a line is a checkbox item: - [ ] or - [x] or - [X]
+ * Also captures indentation level
  */
-function isCheckboxLine(line: string): { checked: boolean; text: string } | null {
-  const match = line.match(/^\s*[-*+]\s+\[([ xX])\]\s*(.*)$/);
+function isCheckboxLine(line: string): { checked: boolean; text: string; indent: number } | null {
+  const match = line.match(/^(\s*)([-*+])\s+\[([ xX])\]\s*(.*)$/);
   if (!match) return null;
   return {
-    checked: match[1].toLowerCase() === "x",
-    text: match[2],
+    checked: match[3].toLowerCase() === "x",
+    text: match[4],
+    indent: match[1].length,
   };
+}
+
+/**
+ * Determine if a checkbox item is a header (starts with bold text)
+ */
+function isCheckboxHeader(text: string): boolean {
+  // 以 **xxx** 开头的是标题
+  return /^\*\*[^*]+\*\*/.test(text.trim());
+}
+
+/**
+ * Determine if a checkbox item is a sub-item (descriptive content)
+ * Sub-items typically start with specific patterns
+ */
+function isCheckboxSubItem(text: string): boolean {
+  const trimmed = text.trim();
+  // 以中文标签开头：用途：、剂量：、注意事项：、常见：等
+  if (/^(用途|剂量|注意事项|常见|说明|备注|提示|警告|建议|方法|步骤|原因|结果|效果|价格|规格|品牌|成分|功效|适用|禁忌|副作用|存储|保质期|产地|型号|颜色|尺寸|材质|重量|容量|数量|频率|时间|地点|人员|负责人|截止|优先级|状态|进度|来源|参考|链接|网址|电话|地址|邮箱)[：:]/i.test(trimmed)) {
+    return true;
+  }
+  // 以英文标签开头
+  if (/^(usage|dose|dosage|note|notes|warning|tip|tips|common|description|price|brand|effect|method|step|reason|result|status|priority|source|link|url|tel|email|address)[：:]/i.test(trimmed)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -459,6 +490,22 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
       }
     }
     
+    // Check if it's a mindmap code block
+    if (codeBlockLang.toLowerCase() === "mindmap") {
+      const blockIdStr = codeBlockLines.join("\n").trim();
+      const blockId = parseInt(blockIdStr, 10);
+      if (blockId > 0) {
+        nodes.push({
+          type: "mindmap",
+          blockId,
+        });
+        inCodeBlock = false;
+        codeBlockLang = "";
+        codeBlockLines = [];
+        return;
+      }
+    }
+    
     // Intercept graph/mermaid/dot code blocks - AI sometimes returns these despite instructions
     // Try to extract blockId from the content and convert to localgraph
     const graphLangs = ["graph", "mermaid", "flowchart", "dot", "graphviz", "diagram"];
@@ -630,9 +677,16 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
         currentChecklist = [];
       }
       
+      const text = checkboxData.text;
+      const isHeader = isCheckboxHeader(text);
+      const isSubItem = !isHeader && isCheckboxSubItem(text);
+      
       currentChecklist.push({
         checked: checkboxData.checked,
-        children: parseInlineMarkdown(checkboxData.text),
+        children: parseInlineMarkdown(text),
+        isHeader,
+        isSubItem,
+        indent: checkboxData.indent,
       });
       continue;
     }

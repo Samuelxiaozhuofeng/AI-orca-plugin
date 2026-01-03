@@ -15,6 +15,8 @@ import {
   getPageByName,
   searchBlocksByReference,
   getRecentJournals,
+  getJournalByDate,
+  getJournalsByDateRange,
   getTodayJournal,
 } from "./search-service";
 import {
@@ -26,6 +28,45 @@ import type {
   QueryCombineMode 
 } from "../utils/query-types";
 import { uiStore } from "../store/ui-store";
+
+type JournalExportCacheEntry = {
+  rangeLabel: string;
+  entries: any[];
+  cachedAt: number;
+};
+
+const JOURNAL_EXPORT_CACHE_TTL = 30 * 60 * 1000;
+const JOURNAL_EXPORT_CACHE_MAX = 5;
+
+// 全局缓存：存储大型日记导出数据（供前端使用）
+export const journalExportDataCache = new Map<string, JournalExportCacheEntry>();
+
+function pruneJournalExportCache(now: number): void {
+  for (const [key, entry] of journalExportDataCache.entries()) {
+    if (now - entry.cachedAt > JOURNAL_EXPORT_CACHE_TTL) {
+      journalExportDataCache.delete(key);
+    }
+  }
+}
+
+function setJournalExportCache(cacheId: string, rangeLabel: string, entries: any[]): void {
+  const now = Date.now();
+  pruneJournalExportCache(now);
+
+  journalExportDataCache.set(cacheId, { rangeLabel, entries, cachedAt: now });
+
+  if (journalExportDataCache.size <= JOURNAL_EXPORT_CACHE_MAX) {
+    return;
+  }
+
+  const sorted = Array.from(journalExportDataCache.entries()).sort(
+    (a, b) => a[1].cachedAt - b[1].cachedAt
+  );
+  const excess = sorted.length - JOURNAL_EXPORT_CACHE_MAX;
+  for (let i = 0; i < excess; i++) {
+    journalExportDataCache.delete(sorted[i][0]);
+  }
+}
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -206,24 +247,20 @@ export const TOOLS: OpenAITool[] = [
     type: "function",
     function: {
       name: "getRecentJournals",
-      description: `获取最近几天的日记完整内容（包括文字、图片、链接等）。
-✅ 用于：查看日记内容、查找日记中的图片/记录、了解用户最近动态
-⚠️ 如果只需要今天的日记，请使用 getTodayJournal（更高效）
-❌ 不要用 query_blocks 的 journal 条件查看日记内容（它只返回引用）`,
+      description: `获取最近几天的日记完整内容。
+✅ 用于：查看最近 1-7 天的日记
+⚠️ days 参数最大为 7，超过 7 天请使用 getJournalsByDateRange
+❌ 不要用于查询整月/整年日记`,
       parameters: {
         type: "object",
         properties: {
           days: {
             type: "number",
-            description: "追溯的天数（默认 7，如查昨天用 1）",
+            description: "追溯的天数（默认 7，最大 7）",
           },
           includeChildren: {
             type: "boolean",
             description: "是否包含日记条目的子块（默认 true）",
-          },
-          maxResults: {
-            type: "number",
-            description: "最大结果数",
           },
         },
       },
@@ -242,6 +279,70 @@ export const TOOLS: OpenAITool[] = [
             description: "是否包含日记条目的子块（默认 true）",
           },
         },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getJournalByDate",
+      description:
+        "获取指定日期的日记完整内容。日期格式必须为 YYYY-MM-DD（如 2026-01-01）或 today/yesterday。",
+      parameters: {
+        type: "object",
+        properties: {
+          date: {
+            type: "string",
+            description: "目标日期，格式 YYYY-MM-DD 或 today/yesterday",
+          },
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含日记条目的子块（默认 true）",
+          },
+        },
+        required: ["date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getJournalsByDateRange",
+      description: `按日期范围获取日记。支持按年、月、周或自定义范围查询。
+✅ 用于：
+- 某月的日记：rangeType="month", value="2024-05"
+- 本周日记：rangeType="week", value="this-week"
+- 上周日记：rangeType="week", value="last-week"
+- ISO周：rangeType="week", value="2024-W20"
+- 日期范围：rangeType="range", value="2024-05-01", endValue="2024-05-15"
+- 某年的日记：rangeType="year", value="2024"（建议设置 maxResults 限制数量）
+⚠️ 年份查询数据量大，建议设置 maxResults=30 或使用月份查询`,
+      parameters: {
+        type: "object",
+        properties: {
+          rangeType: {
+            type: "string",
+            enum: ["year", "month", "week", "range"],
+            description: "范围类型：year(年), month(月), week(周), range(自定义范围)",
+          },
+          value: {
+            type: "string",
+            description: "范围值：年份(2024)、月份(2024-05)、周(this-week/last-week/2024-W20)、或开始日期(2024-05-01)",
+          },
+          endValue: {
+            type: "string",
+            description: "结束日期，仅 rangeType=range 时需要，格式 YYYY-MM-DD",
+          },
+          includeChildren: {
+            type: "boolean",
+            description: "是否包含日记条目的子块（默认 true）",
+          },
+          maxResults: {
+            type: "number",
+            description: "最大结果数（默认 31，最大 366）。年份查询建议设置为 30",
+          },
+        },
+        required: ["rangeType", "value"],
       },
     },
   },
@@ -507,6 +608,87 @@ export const TOOLS: OpenAITool[] = [
     },
   },
 ];
+
+/**
+ * 闪卡生成工具 - 仅供 /card 命令使用，不包含在普通对话工具列表中
+ */
+export const FLASHCARD_TOOL: OpenAITool = {
+  type: "function",
+  function: {
+    name: "generateFlashcards",
+    description: `生成闪卡。根据对话内容或指定主题，生成 5-8 张闪卡用于记忆学习。必须调用此工具，不要用文本回复！`,
+    parameters: {
+      type: "object",
+      properties: {
+        cards: {
+          type: "array",
+          description: "闪卡列表，5-8 张",
+          items: {
+            type: "object",
+            properties: {
+              question: {
+                type: "string",
+                description: "问题（简洁明了）",
+              },
+              answer: {
+                type: "string",
+                description: "答案（简洁，≤20字为佳）。选择题不需要此字段",
+              },
+              type: {
+                type: "string",
+                enum: ["basic", "choice"],
+                description: "卡片类型：basic（问答）或 choice（选择题）",
+              },
+              options: {
+                type: "array",
+                description: "选择题选项（仅 type=choice 时需要）",
+                items: {
+                  type: "object",
+                  properties: {
+                    text: {
+                      type: "string",
+                      description: "选项文本",
+                    },
+                    isCorrect: {
+                      type: "boolean",
+                      description: "是否为正确答案",
+                    },
+                  },
+                  required: ["text", "isCorrect"],
+                },
+              },
+            },
+            required: ["question", "type"],
+          },
+        },
+      },
+      required: ["cards"],
+    },
+  },
+};
+
+/**
+ * 搜索类工具名称列表 - 当用户拖入块时禁用这些工具
+ * 因为用户已经明确指定了要讨论的块，不需要再搜索笔记
+ * 注意：日记工具保留，用户可能同时问日记相关问题
+ */
+const SEARCH_TOOL_NAMES = new Set([
+  "searchBlocksByTag",
+  "searchBlocksByText",
+  "query_blocks_by_tag",
+  "query_blocks",
+  "searchBlocksByReference",
+  "getPage",
+  "getSavedAiConversations",
+]);
+
+/**
+ * 获取限制后的工具列表（当用户拖入块时使用）
+ * 禁用搜索类工具，只保留读取和写入工具
+ */
+export function getToolsForDraggedContext(): OpenAITool[] {
+  return TOOLS.filter(tool => !SEARCH_TOOL_NAMES.has(tool.function.name));
+}
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -835,30 +1017,35 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       try {
         let days = args.days ?? 7;
         const includeChildren = args.includeChildren !== false; // default true
-        const maxResults = args.maxResults ?? 20;
 
         if (Array.isArray(days)) {
           days = days[0];
         }
 
-        const normalizedDays = Number.isFinite(Number(days))
+        let normalizedDays = Number.isFinite(Number(days))
           ? Math.abs(Math.trunc(Number(days)))
           : 7;
-        const normalizedMaxResults = Math.min(
-          Math.max(1, Number.isFinite(Number(maxResults)) ? Math.trunc(Number(maxResults)) : 20),
-          50
-        );
+        
+        // 限制最大 7 天
+        if (normalizedDays > 7) {
+          return `⛔ days 参数最大为 7，你请求了 ${normalizedDays} 天。
+
+如需查询更长时间范围的日记，请使用 getJournalsByDateRange 工具：
+- 某月日记：rangeType="month", value="2025-01"
+- 某周日记：rangeType="week", value="this-week"
+
+不要再用 getRecentJournals 查询超过 7 天的日记。`;
+        }
 
         console.log("[Tool] getRecentJournals:", {
           days: normalizedDays,
           includeChildren,
-          maxResults: normalizedMaxResults,
         });
 
         const results = await getRecentJournals(
           normalizedDays,
           includeChildren,
-          normalizedMaxResults
+          normalizedDays // maxResults = days
         );
         console.log(`[Tool] getRecentJournals found ${results.length} results`);
 
@@ -902,6 +1089,140 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       } catch (err: any) {
         console.error(`[Tool] Error in getTodayJournal:`, err);
         return `Error getting today's journal: ${err.message}`;
+      }
+    } else if (toolName === "getJournalByDate") {
+      try {
+        const dateStr = args.date;
+        const includeChildren = args.includeChildren !== false; // default true
+
+        if (!dateStr) {
+          return "Error: date parameter is required. Format: YYYY-MM-DD (e.g., 2024-12-25)";
+        }
+
+        console.log("[Tool] getJournalByDate:", { date: dateStr, includeChildren });
+
+        const journal = await getJournalByDate(dateStr, includeChildren);
+        
+        if (journal) {
+          const preservationNote = addLinkPreservationNote(1);
+          const formatted = formatBlockResult(journal, 0);
+          return `${preservationNote}Journal for ${dateStr}:\n${formatted}`;
+        }
+
+        return `No journal entry found for ${dateStr}.`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in getJournalByDate:`, err);
+        return `Error getting journal for specified date: ${err.message}`;
+      }
+    } else if (toolName === "getJournalsByDateRange") {
+      try {
+        const rangeType = args.rangeType;
+        const value = args.value;
+        const endValue = args.endValue;
+        const includeChildren = args.includeChildren !== false;
+        const maxResults = args.maxResults || 31;
+
+        if (!rangeType || !value) {
+          return "Error: rangeType and value parameters are required.";
+        }
+
+        if (!["year", "month", "week", "range"].includes(rangeType)) {
+          return "Error: rangeType must be one of: year, month, week, range";
+        }
+
+        if (rangeType === "range" && !endValue) {
+          return "Error: endValue is required when rangeType is 'range'";
+        }
+
+        console.log("[Tool] getJournalsByDateRange:", { rangeType, value, endValue, includeChildren, maxResults });
+
+        // 年份查询：直接获取数据并返回导出按钮
+        if (rangeType === "year") {
+          console.log("[Tool] getJournalsByDateRange: Year query, fetching data for export button");
+          
+          const results = await getJournalsByDateRange(
+            "year",
+            value,
+            undefined,
+            includeChildren,
+            366 // 最多一年的天数
+          );
+          
+          if (results.length === 0) {
+            return `${value}年没有找到任何日记。`;
+          }
+          
+          // 过滤掉没有内容的日记
+          const exportData = results
+            .map((r: any) => ({
+              date: r.title || "",
+              content: (r.fullContent || r.content || "").trim(),
+              blockId: r.id,
+            }))
+            .filter((entry: any) => entry.content.length > 0);
+          
+          if (exportData.length === 0) {
+            return `${value}年的日记都没有内容。`;
+          }
+          
+          const rangeLabel = `${value}年`;
+          
+          // 存入缓存，返回缓存 ID
+          const cacheId = `year-${value}-${Date.now()}`;
+          setJournalExportCache(cacheId, rangeLabel, exportData);
+          console.log(`[Tool] Cached ${exportData.length} entries with id: ${cacheId}`);
+
+          // 返回特殊标记，前端会检测并显示导出按钮
+          return `__JOURNAL_EXPORT__:${cacheId}:${exportData.length}:${rangeLabel}`;
+        }
+
+        const results = await getJournalsByDateRange(
+          rangeType as "year" | "month" | "week" | "range",
+          value,
+          endValue,
+          includeChildren,
+          maxResults
+        );
+
+        if (results.length === 0) {
+          return `No journal entries found for the specified range (${rangeType}: ${value}${endValue ? ` to ${endValue}` : ""}).`;
+        }
+
+        // 月份查询：只显示统计 + 导出按钮，不显示完整内容
+        if (rangeType === "month") {
+          // 过滤掉没有内容的日记
+          const exportData = results
+            .map((r: any) => ({
+              date: r.title || "",
+              content: (r.fullContent || r.content || "").trim(),
+              blockId: r.id,
+            }))
+            .filter((entry: any) => entry.content.length > 0);
+          
+          // 解析月份标签
+          const monthMatch = value.match(/^(\d{4})-(\d{1,2})$/);
+          const rangeLabel = monthMatch ? `${monthMatch[1]}年${parseInt(monthMatch[2])}月` : value;
+
+          if (exportData.length === 0) {
+            return `${rangeLabel}的日记都没有内容。`;
+          }
+
+          // 存入缓存，返回缓存 ID
+          const cacheId = `month-${value}-${Date.now()}`;
+          setJournalExportCache(cacheId, rangeLabel, exportData);
+          console.log(`[Tool] Cached ${exportData.length} entries with id: ${cacheId}`);
+
+          // 返回特殊标记，前端会检测并显示导出按钮
+          return `__JOURNAL_EXPORT__:${cacheId}:${exportData.length}:${rangeLabel}`;
+        }
+
+        const preservationNote = addLinkPreservationNote(results.length);
+        const summary = results.map((r: any, i: number) => formatBlockResult(r, i)).join("\n\n");
+
+        return `${preservationNote}Found ${results.length} journal entries for ${rangeType}: ${value}${endValue ? ` to ${endValue}` : ""}:\n${summary}`;
+      } catch (err: any) {
+        console.error(`[Tool] Error in getJournalsByDateRange:`, err);
+        return `Error getting journals for date range: ${err.message}`;
       }
     } else if (toolName === "query_blocks") {
       try {
@@ -1277,7 +1598,8 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
       }
     } else if (toolName === "createBlock") {
       try {
-        let refBlockIdRaw = args.refBlockId ?? args.ref_block_id ?? args.blockId ?? args.block_id;
+        // 兼容多种参数名格式
+        let refBlockIdRaw = args.refBlockId ?? args.ref_block_id ?? args.referenceBlockId ?? args.reference_block_id ?? args.blockId ?? args.block_id;
 
         if (typeof refBlockIdRaw === "string") {
           const match = refBlockIdRaw.match(/^orca-block:(\d+)$/);
@@ -1522,10 +1844,20 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         if (query) {
           const lowerQuery = query.toLowerCase();
           conversations = conversations.filter((block: any) => {
-            const text = block.text || "";
             const repr = block._repr || {};
             const title = repr.title || "";
-            return text.toLowerCase().includes(lowerQuery) || title.toLowerCase().includes(lowerQuery);
+            const messages = repr.messages || [];
+            
+            // 搜索标题
+            if (title.toLowerCase().includes(lowerQuery)) return true;
+            
+            // 搜索对话内容
+            for (const msg of messages) {
+              const content = msg.content || "";
+              if (content.toLowerCase().includes(lowerQuery)) return true;
+            }
+            
+            return false;
           });
         }
 
@@ -1572,6 +1904,80 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
         return parts.join("\n");
       } catch (err: any) {
         return `Error getting saved AI conversations: ${err.message}`;
+      }
+    } else if (toolName === "generateFlashcards") {
+      // 闪卡生成工具 - 返回结构化数据供前端处理
+      try {
+        const cards = args.cards;
+        if (!cards || !Array.isArray(cards) || cards.length === 0) {
+          return JSON.stringify({ 
+            success: false, 
+            error: "No cards provided",
+            _flashcardToolResult: true 
+          });
+        }
+        
+        // 验证并转换卡片格式
+        const validCards = cards.map((card: any, index: number) => {
+          const cardType = card.type === "choice" ? "choice" : "basic";
+          const result: any = {
+            id: `card-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+            front: card.question || "",
+            cardType,
+          };
+          
+          if (cardType === "choice") {
+            // 选择题
+            result.back = "";
+            result.options = (card.options || []).map((opt: any) => ({
+              text: opt.text || "",
+              isCorrect: opt.isCorrect === true,
+            }));
+            // 验证至少有一个正确答案
+            if (!result.options.some((o: any) => o.isCorrect)) {
+              // 如果没有标记正确答案，默认第一个为正确
+              if (result.options.length > 0) {
+                result.options[0].isCorrect = true;
+              }
+            }
+          } else {
+            // 普通问答卡
+            result.back = card.answer || "";
+          }
+          
+          return result;
+        }).filter((card: any) => {
+          // 过滤无效卡片
+          if (!card.front) return false;
+          if (card.cardType === "basic" && !card.back) return false;
+          if (card.cardType === "choice" && (!card.options || card.options.length < 2)) return false;
+          return true;
+        });
+        
+        if (validCards.length === 0) {
+          return JSON.stringify({ 
+            success: false, 
+            error: "No valid cards after validation",
+            _flashcardToolResult: true 
+          });
+        }
+        
+        console.log(`[Tool] generateFlashcards: Generated ${validCards.length} valid cards`);
+        
+        // 返回结构化结果，前端会识别 _flashcardToolResult 标记
+        return JSON.stringify({
+          success: true,
+          cards: validCards,
+          count: validCards.length,
+          _flashcardToolResult: true,
+        });
+      } catch (err: any) {
+        console.error("[Tool] Error in generateFlashcards:", err);
+        return JSON.stringify({ 
+          success: false, 
+          error: err.message,
+          _flashcardToolResult: true 
+        });
       }
     } else {
       console.error("[Tool] Unknown tool:", toolName);

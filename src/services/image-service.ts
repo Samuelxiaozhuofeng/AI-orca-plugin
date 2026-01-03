@@ -10,7 +10,7 @@
 import type { ImageRef } from "./session-service";
 
 /**
- * 支持的图片 MIME 类型
+ * 支持的图片 MIME 类型（包括动图）
  */
 const SUPPORTED_MIME_TYPES = [
   "image/png",
@@ -18,12 +18,13 @@ const SUPPORTED_MIME_TYPES = [
   "image/jpg",
   "image/gif",
   "image/webp",
+  "image/avif",
 ];
 
 /**
- * 最大图片大小 (10MB)
+ * 最大图片大小 (20MB，动图可能较大)
  */
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 
 /**
  * 从文件路径获取 MIME 类型
@@ -36,6 +37,7 @@ function getMimeType(filePath: string): string {
     jpeg: "image/jpeg",
     gif: "image/gif",
     webp: "image/webp",
+    avif: "image/avif",
   };
   return mimeMap[ext] || "image/png";
 }

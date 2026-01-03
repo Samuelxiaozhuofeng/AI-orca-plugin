@@ -8,6 +8,7 @@ import {
   suggestionTitleStyle,
   suggestionDescStyle,
 } from "../styles/ai-chat-styles";
+import { getTimeGreeting } from "../utils/chat-ui-utils";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -45,37 +46,67 @@ const SUGGESTIONS = [
   },
 ];
 
+/**
+ * Enhanced EmptyState component with:
+ * - Time-based greeting (早上好/下午好/晚上好)
+ * - Card hover animation (scale up slightly)
+ * - Staggered fade-in effect
+ * 
+ * **Feature: chat-ui-enhancement**
+ * **Validates: Requirements 3.1, 3.2, 3.3**
+ */
 export default function EmptyState({ onSuggestionClick }: EmptyStateProps) {
+  // Get time-based greeting (Requirements 3.1)
+  const greeting = getTimeGreeting();
+
   return createElement(
     "div",
     { style: emptyStateContainerStyle },
+    // Title with time greeting and staggered animation (Requirements 3.1, 3.3)
     createElement(
       "div",
-      { style: emptyStateTitleStyle },
-      "👋 Welcome to AI Chat"
+      { 
+        style: emptyStateTitleStyle,
+        className: "empty-state-stagger-1"
+      },
+      `👋 ${greeting}，欢迎使用 AI Chat`
     ),
+    // Subtitle with staggered animation (Requirements 3.3)
     createElement(
       "div",
-      { style: emptyStateSubtitleStyle },
-      "Choose a suggestion below or type your question to get started."
+      { 
+        style: emptyStateSubtitleStyle,
+        className: "empty-state-stagger-2"
+      },
+      "选择下方建议或输入问题开始对话"
     ),
+    // Suggestion grid with staggered card animations (Requirements 3.2, 3.3)
     createElement(
       "div",
-      { style: suggestionGridStyle },
+      { 
+        style: suggestionGridStyle,
+        className: "empty-state-stagger-3"
+      },
       ...SUGGESTIONS.map((item, index) =>
         createElement(
           "div",
           {
             key: index,
-            style: suggestionCardStyle,
+            style: {
+              ...suggestionCardStyle,
+              // Smooth transition for hover animation (Requirements 3.2)
+              transition: "all 0.2s ease",
+            },
+            className: `suggestion-card-stagger-${index}`,
             onClick: () => onSuggestionClick(item.prompt),
+            // Card hover animation: scale up slightly (Requirements 3.2)
             onMouseEnter: (e: any) => {
-              e.currentTarget.style.transform = "translateY(-2px)";
-              e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)";
+              e.currentTarget.style.transform = "scale(1.03)";
+              e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.1)";
               e.currentTarget.style.borderColor = "var(--orca-color-primary)";
             },
             onMouseLeave: (e: any) => {
-              e.currentTarget.style.transform = "none";
+              e.currentTarget.style.transform = "scale(1)";
               e.currentTarget.style.boxShadow = "none";
               e.currentTarget.style.borderColor = "var(--orca-color-border)";
             },

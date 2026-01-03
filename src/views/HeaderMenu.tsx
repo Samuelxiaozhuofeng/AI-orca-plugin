@@ -1,3 +1,5 @@
+import DisplaySettingsPanel from "./DisplaySettingsPanel";
+
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
@@ -33,18 +35,20 @@ export default function HeaderMenu({
   onSaveSelected,
 }: HeaderMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [showDisplaySettings, setShowDisplaySettings] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen && !showDisplaySettings) return;
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setShowDisplaySettings(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
+  }, [isOpen, showDisplaySettings]);
 
   const menuItemStyle: React.CSSProperties = {
     padding: "10px 16px",
@@ -78,6 +82,27 @@ export default function HeaderMenu({
       },
       createElement("i", { className: "ti ti-dots-vertical" })
     ),
+    // Display Settings Panel (shown as a popover)
+    showDisplaySettings && createElement(
+      "div",
+      {
+        style: {
+          position: "absolute",
+          top: "100%",
+          right: 0,
+          marginTop: 4,
+          background: "var(--orca-color-bg-1)",
+          border: "1px solid var(--orca-color-border)",
+          borderRadius: 8,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+          zIndex: 101,
+          overflow: "hidden",
+        },
+      },
+      createElement(DisplaySettingsPanel, {
+        onClose: () => setShowDisplaySettings(false),
+      })
+    ),
     isOpen &&
       createElement(
         "div",
@@ -97,6 +122,21 @@ export default function HeaderMenu({
             padding: "4px 0",
           },
         },
+        // Display Settings
+        createElement(
+          "div",
+          {
+            style: menuItemStyle,
+            onClick: () => {
+              setIsOpen(false);
+              setShowDisplaySettings(true);
+            },
+            onMouseEnter: (e: any) => (e.currentTarget.style.background = "var(--orca-color-bg-2)"),
+            onMouseLeave: (e: any) => (e.currentTarget.style.background = "transparent"),
+          },
+          createElement("i", { className: "ti ti-adjustments" }),
+          "显示设置"
+        ),
         // Settings
         createElement(
           "div",

@@ -5,10 +5,14 @@
  * Replaces the technical card-based display with inline status flow.
  *
  * States:
- * - loading: Shows animated icon + friendly loading text
- * - success: Shows success icon + result summary + optional expand button
- * - failed: Shows error icon + error message + optional retry button
+ * - loading: Shows animated icon + friendly loading text + elapsed time
+ * - success: Shows success icon + result summary + execution time + optional expand button
+ * - failed: Shows error icon + error message + retry button
  * - cancelled: Shows cancelled icon + reason
+ * 
+ * Enhanced features (Requirements 10.1, 10.2):
+ * - Displays execution time for loading and completed states
+ * - Shows retry button when tool fails
  */
 
 import {
@@ -29,9 +33,11 @@ const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
+  useEffect: (effect: () => void | (() => void), deps?: any[]) => void;
+  useRef: <T>(initial: T) => { current: T };
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback } = React;
+const { createElement, useState, useCallback, useEffect, useRef } = React;
 
 export type ToolExecutionStatus = "loading" | "success" | "failed" | "cancelled";
 
@@ -43,6 +49,8 @@ export interface ToolStatusIndicatorProps {
   args?: string;       // Tool arguments JSON string
   retryable?: boolean; // Whether retry is allowed
   onRetry?: () => void; // Retry callback
+  startTime?: number;  // Execution start time (timestamp)
+  endTime?: number;    // Execution end time (timestamp)
 }
 
 export default function ToolStatusIndicator({
@@ -51,38 +59,77 @@ export default function ToolStatusIndicator({
   result,
   error,
   args,
-  retryable = false,
+  retryable = true, // Default to true for failed state
   onRetry,
+  startTime,
+  endTime,
 }: ToolStatusIndicatorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [elapsedTime, setElapsedTime] = useState(0);
   const config = getToolDisplayConfig(toolName);
+  const internalStartTime = useRef(startTime || Date.now());
+
+  // Track elapsed time for loading state
+  useEffect(() => {
+    if (status === "loading") {
+      // Update elapsed time every second
+      const timer = setInterval(() => {
+        setElapsedTime(Math.round((Date.now() - internalStartTime.current) / 1000));
+      }, 1000);
+      return () => clearInterval(timer);
+    } else if (status === "success" || status === "failed" || status === "cancelled") {
+      // Calculate final elapsed time
+      if (endTime && startTime) {
+        setElapsedTime(Math.round((endTime - startTime) / 1000));
+      } else if (internalStartTime.current) {
+        setElapsedTime(Math.round((Date.now() - internalStartTime.current) / 1000));
+      }
+    }
+  }, [status, startTime, endTime]);
 
   const handleToggleExpand = useCallback(() => {
     setIsExpanded((prev) => !prev);
   }, []);
 
+  // Format elapsed time for display
+  const formatElapsedTime = (seconds: number): string => {
+    if (seconds < 60) {
+      return `${seconds}秒`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}分${remainingSeconds}秒`;
+  };
+
+  // 显示名称格式：中文名称 (函数名)
+  const displayLabel = `${config.displayName} (${toolName})`;
+
   // Determine icon and text based on status
   let icon: string;
   let text: string;
   let animationClass: string | undefined;
+  let timeDisplay: string = "";
 
   switch (status) {
     case "loading":
       icon = config.icon;
-      text = `${config.displayName}: ${config.loadingText}`;
+      timeDisplay = elapsedTime > 0 ? ` (${formatElapsedTime(elapsedTime)})` : "";
+      text = `${displayLabel}: ${config.loadingText}${timeDisplay}`;
       animationClass = `tool-animation-${config.animation}`;
       break;
     case "success":
       icon = config.successIcon;
-      text = `${config.displayName}: ${result ? generateResultSummary(toolName, result) : config.successText}`;
+      timeDisplay = elapsedTime > 0 ? ` [${formatElapsedTime(elapsedTime)}]` : "";
+      text = `${displayLabel}: ${result ? generateResultSummary(toolName, result) : config.successText}${timeDisplay}`;
       break;
     case "failed":
       icon = "❌";
-      text = `${config.displayName}: ${error ? `失败 - ${error.slice(0, 50)}` : "执行失败"}`;
+      timeDisplay = elapsedTime > 0 ? ` [${formatElapsedTime(elapsedTime)}]` : "";
+      text = `${displayLabel}: ${error ? `失败 - ${error.slice(0, 50)}` : "执行失败"}${timeDisplay}`;
       break;
     case "cancelled":
       icon = "⏸️";
-      text = `${config.displayName}: 已取消`;
+      text = `${displayLabel}: 已取消`;
       break;
     default:
       icon = "🔧";
@@ -91,6 +138,9 @@ export default function ToolStatusIndicator({
 
   // Determine if we should show expand button
   const showExpandButton = status === "success" && (result || args);
+  
+  // Show retry button for failed state (Requirements 10.2)
+  const showRetryButton = status === "failed" && retryable;
 
   return createElement(
     "div",
@@ -130,17 +180,20 @@ export default function ToolStatusIndicator({
             style: { fontSize: "12px" },
           })
         ),
-      // Retry button (for failed state)
-      status === "failed" &&
-        retryable &&
-        onRetry &&
+      // Retry button (for failed state - Requirements 10.2)
+      showRetryButton &&
         createElement(
           "button",
           {
             style: toolStatusRetryButtonStyle,
             onClick: onRetry,
             title: "重试",
+            disabled: !onRetry,
           },
+          createElement("i", {
+            className: "ti ti-refresh",
+            style: { fontSize: "12px", marginRight: "4px" },
+          }),
           "重试"
         )
     ),
