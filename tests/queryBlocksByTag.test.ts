@@ -24,7 +24,7 @@ test("queryBlocksByTag calls backend query and converts values", async () => {
     },
   };
 
-  const { queryBlocksByTag } = await import("../src/services/search-service");
+  const { queryBlocksByTag } = await import("../src/services/notes/search-service");
   const results = await queryBlocksByTag("task", {
     properties: [{ name: "priority", op: ">=", value: "8", type: PropType.Number }],
     maxResults: 10,
@@ -68,7 +68,7 @@ test("queryBlocksByTag retries legacy query format when QueryDescription2 fails"
     },
   };
 
-  const { queryBlocksByTag } = await import("../src/services/search-service");
+  const { queryBlocksByTag } = await import("../src/services/notes/search-service");
   const results = await queryBlocksByTag("note", {
     properties: [{ name: "category", op: "is null" }],
     maxResults: 5,

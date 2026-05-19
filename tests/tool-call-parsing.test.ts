@@ -3,7 +3,7 @@ import {
   hasXmlToolCalls,
   stripXmlToolCalls,
   parseXmlToolCalls,
-} from "../src/services/chat-stream-handler";
+} from "../src/services/ai/chat-stream-handler";
 
 test("hasXmlToolCalls detects plain <tool_call> tags", () => {
   const input = "hello <tool_call>{\"name\":\"searchNotes\",\"arguments\":{\"query\":\"test\"}}</tool_call> world";

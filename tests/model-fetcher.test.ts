@@ -1,5 +1,5 @@
 import { test, assertEqual } from "./test-harness";
-import { fetchModelsFromApi } from "../src/services/model-fetcher";
+import { fetchModelsFromApi } from "../src/services/ai/model-fetcher";
 
 function mockFetchOnce(handler: () => Promise<Response>) {
   const originalFetch = globalThis.fetch;
