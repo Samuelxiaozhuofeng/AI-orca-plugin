@@ -1340,7 +1340,7 @@ export function updatePortraitCategory(userId: string, categoryId: string, conte
 /**
  * Parse content string into PortraitInfoItem array
  */
-function parseContentToItems(content: string): PortraitInfoItem[] {
+export function parseContentToItems(content: string): PortraitInfoItem[] {
   const lines = content.split('\n').filter(line => line.trim());
   return lines.map(line => {
     const colonIndex = line.indexOf('：') !== -1 ? line.indexOf('：') : line.indexOf(':');

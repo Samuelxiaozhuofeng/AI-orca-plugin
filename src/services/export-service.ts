@@ -538,14 +538,23 @@ export async function saveMessagesToJournal(
     
     // 添加标签 "Ai会话保存"
     try {
-      await orca.commands.invokeGroup(async () => {
+      if (typeof orca.commands?.invokeGroup === "function") {
+        await orca.commands.invokeGroup(async () => {
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,
+            blockId,
+            "Ai会话保存"
+          );
+        }, { topGroup: true, undoable: true });
+      } else {
         await orca.commands.invokeEditorCommand(
           "core.editor.insertTag",
           null,
           blockId,
           "Ai会话保存"
         );
-      }, { topGroup: true, undoable: true });
+      }
     } catch (tagErr) {
       console.warn("[export-service] saveMessagesToJournal: Failed to add tag:", tagErr);
     }
@@ -682,14 +691,23 @@ export async function saveSessionToJournal(session: SavedSession): Promise<{ suc
     
     // 添加标签 "Ai会话保存"
     try {
-      await orca.commands.invokeGroup(async () => {
+      if (typeof orca.commands?.invokeGroup === "function") {
+        await orca.commands.invokeGroup(async () => {
+          await orca.commands.invokeEditorCommand(
+            "core.editor.insertTag",
+            null,
+            blockId,
+            "Ai会话保存"
+          );
+        }, { topGroup: true, undoable: true });
+      } else {
         await orca.commands.invokeEditorCommand(
           "core.editor.insertTag",
           null,
           blockId,
           "Ai会话保存"
         );
-      }, { topGroup: true, undoable: true });
+      }
     } catch (tagErr) {
       console.warn("[export-service] saveSessionToJournal: Failed to add tag:", tagErr);
     }

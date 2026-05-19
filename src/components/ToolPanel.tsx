@@ -16,10 +16,9 @@ import {
   setToolStatus,
   setCategoryStatus,
   closeToolPanel,
-  toggleImageSearch,
   toggleWebSearch,
+  toggleImageSearch,
   toggleWikipedia,
-  toggleCurrency,
   TOOL_CATEGORIES,
   TOOL_DISPLAY_NAMES,
   type ToolStatus,
@@ -102,12 +101,12 @@ export default function ToolPanel() {
         background: "var(--orca-color-bg-1)",
         border: "1px solid var(--orca-color-border)",
         borderRadius: 8,
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        maxHeight: 320,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
+        maxHeight: 360,
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        zIndex: 100,
+        zIndex: 9999,
       },
     },
     // 标题栏
@@ -186,12 +185,6 @@ export default function ToolPanel() {
       },
       createElement(
         "div",
-        { style: { fontSize: 11, color: "var(--orca-color-text-3)" } },
-        "外部工具"
-      ),
-      // 第一行：Web search + Image search
-      createElement(
-        "div",
         { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
         createElement(
           "div",
@@ -199,7 +192,7 @@ export default function ToolPanel() {
           createElement(
             "span",
             { style: { fontSize: 12, color: "var(--orca-color-text-1)" } },
-            "🌐 联网"
+            "🌐 联网搜索"
           ),
           createElement(
             "button",
@@ -219,38 +212,7 @@ export default function ToolPanel() {
                 cursor: "pointer",
               },
             },
-            snap.webSearchEnabled ? "On" : "Off"
-          )
-        ),
-        createElement(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: 6 } },
-          createElement(
-            "span",
-            { style: { fontSize: 12, color: snap.webSearchEnabled ? "var(--orca-color-text-1)" : "var(--orca-color-text-3)" } },
-            "🖼️ 图片"
-          ),
-          createElement(
-            "button",
-            {
-              onClick: toggleImageSearch,
-              disabled: !snap.webSearchEnabled,
-              style: {
-                background: snap.imageSearchEnabled && snap.webSearchEnabled
-                  ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.12))"
-                  : "transparent",
-                border: snap.imageSearchEnabled && snap.webSearchEnabled
-                  ? "1px solid var(--orca-color-primary)"
-                  : "1px solid var(--orca-color-border)",
-                color: snap.imageSearchEnabled && snap.webSearchEnabled ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
-                borderRadius: 999,
-                fontSize: 11,
-                padding: "2px 8px",
-                cursor: snap.webSearchEnabled ? "pointer" : "not-allowed",
-                opacity: snap.webSearchEnabled ? 1 : 0.5,
-              },
-            },
-            snap.imageSearchEnabled ? "On" : "Off"
+            snap.webSearchEnabled ? "开" : "关"
           )
         ),
         createElement(
@@ -259,7 +221,36 @@ export default function ToolPanel() {
           createElement(
             "span",
             { style: { fontSize: 12, color: "var(--orca-color-text-1)" } },
-            "📚 百科"
+            "🖼️ 图片搜索"
+          ),
+          createElement(
+            "button",
+            {
+              onClick: toggleImageSearch,
+              style: {
+                background: snap.imageSearchEnabled
+                  ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.12))"
+                  : "transparent",
+                border: snap.imageSearchEnabled
+                  ? "1px solid var(--orca-color-primary)"
+                  : "1px solid var(--orca-color-border)",
+                color: snap.imageSearchEnabled ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
+                borderRadius: 999,
+                fontSize: 11,
+                padding: "2px 8px",
+                cursor: "pointer",
+              },
+            },
+            snap.imageSearchEnabled ? "开" : "关"
+          )
+        ),
+        createElement(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 6 } },
+          createElement(
+            "span",
+            { style: { fontSize: 12, color: "var(--orca-color-text-1)" } },
+            "📚 维基百科"
           ),
           createElement(
             "button",
@@ -279,36 +270,7 @@ export default function ToolPanel() {
                 cursor: "pointer",
               },
             },
-            snap.wikipediaEnabled ? "On" : "Off"
-          )
-        ),
-        createElement(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: 6 } },
-          createElement(
-            "span",
-            { style: { fontSize: 12, color: "var(--orca-color-text-1)" } },
-            "💱 汇率"
-          ),
-          createElement(
-            "button",
-            {
-              onClick: toggleCurrency,
-              style: {
-                background: snap.currencyEnabled
-                  ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.12))"
-                  : "transparent",
-                border: snap.currencyEnabled
-                  ? "1px solid var(--orca-color-primary)"
-                  : "1px solid var(--orca-color-border)",
-                color: snap.currencyEnabled ? "var(--orca-color-primary)" : "var(--orca-color-text-2)",
-                borderRadius: 999,
-                fontSize: 11,
-                padding: "2px 8px",
-                cursor: "pointer",
-              },
-            },
-            snap.currencyEnabled ? "On" : "Off"
+            snap.wikipediaEnabled ? "开" : "关"
           )
         )
       )

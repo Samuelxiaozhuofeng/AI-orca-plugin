@@ -365,34 +365,6 @@ export function clearRecentCommands(): void {
   }
 }
 
-/**
- * 纯函数版本：添加命令到最近使用列表
- * 用于测试和纯函数场景
- * 
- * @param commands - 当前命令列表
- * @param command - 要添加的命令
- * @param maxItems - 最大项数
- * @returns 更新后的命令列表
- * 
- * **Feature: chat-ui-enhancement, Property 6: Recent commands ordering**
- * **Validates: Requirements 7.2**
- */
-export function addRecentCommandPure(
-  commands: string[],
-  command: string,
-  maxItems: number = MAX_RECENT_COMMANDS
-): string[] {
-  // Remove if already exists
-  const filtered = commands.filter((cmd) => cmd !== command);
-  
-  // Add to front
-  filtered.unshift(command);
-  
-  // Limit to max items
-  return filtered.slice(0, maxItems);
-}
-
-
 // ============================================================================
 // Context Chips Token Utilities
 // 上下文芯片 Token 工具函数

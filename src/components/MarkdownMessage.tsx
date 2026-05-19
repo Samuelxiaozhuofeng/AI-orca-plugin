@@ -1,8 +1,7 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
-import { journalExportDataCache } from "../services/ai-tools";
-import { openImagePreview, createImagePreviewItem } from "../services/image-preview-service";
+import { journalExportDataCache } from "../services/ai/ai-tools";
+import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
 import LocalGraph from "./LocalGraph";
-import MindMapRenderer from "./MindMapRenderer";
 import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { withTooltip } from "../utils/orca-tooltip";
 import {
@@ -177,7 +176,7 @@ function JournalExportBlock({ content }: { content: string }) {
         setLoading(true);
         (async () => {
           try {
-            const { getJournalsByDateRange } = await import("../services/search-service");
+            const { getJournalsByDateRange } = await import("../services/notes/search-service");
             const results = await getJournalsByDateRange(
               parsed.type,
               parsed.value,
@@ -1560,13 +1559,6 @@ function renderBlockNode(
 
     case "localgraph": {
       return createElement(LocalGraph, {
-        key,
-        blockId: node.blockId,
-      });
-    }
-
-    case "mindmap": {
-      return createElement(MindMapRenderer, {
         key,
         blockId: node.blockId,
       });

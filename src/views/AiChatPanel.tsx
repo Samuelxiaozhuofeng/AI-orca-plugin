@@ -1,13 +1,13 @@
 import type { PanelProps } from "../orca.d.ts";
 
-import { buildContextForSend } from "../services/context-builder";
+import { buildContextForSend } from "../services/notes/context-builder";
 import { contextStore, type ContextRef } from "../store/context-store";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
 import { getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
-import { generateSuggestedReplies } from "../services/suggestion-service";
+import { generateSuggestedReplies } from "../services/ai/suggestion-service";
 import { estimateTokens, formatTokenCount } from "../utils/token-utils";
 import { isSameDay, formatDateSeparator, getTimeGreeting } from "../utils/chat-ui-utils";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -31,6 +31,7 @@ import GlobalImagePreview from "../components/GlobalImagePreview";
 import TodoistModals from "./TodoistModals";
 import TodoistSettingsModal from "./TodoistSettingsModal";
 import SkillManagerModal from "./SkillManagerModal";
+import McpServerSettingsModal from "./McpServerSettingsModal";
 import { todoistModalStore } from "../store/todoist-store";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
@@ -41,9 +42,10 @@ import {
   updateAiChatSettings,
   validateCurrentConfig,
   modelSupportsTools,
-  DEFAULT_SYSTEM_PROMPT,
   type AiChatSettings,
 } from "../settings/ai-chat-settings";
+import { buildDynamicSystemPrompt, getCurrentRepoId } from "../services/ai/dynamic-prompt";
+import { getDiscoveredTools } from "../store/mcp-store";
 import {
   loadSessions,
   loadFullSession,
@@ -61,16 +63,17 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { TOOLS, FLASHCARD_TOOL, executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, detectToolCategories, getToolsByCategories } from "../services/ai-tools";
-import { TODOIST_TOOLS, executeTodoistTool, isTodoistTool } from "../services/todoist-tools";
-import { startPythonServer, stopPythonServer, getPythonServerStatus, browserAIChat, browserAIStatus as checkBrowserAIStatus } from "../services/python-runtime";
-import { getToolStatus, isToolDisabled, shouldAskForTool, isAgenticRAGEnabled, getAgenticRAGConfig } from "../store/tool-store";
-import { listSkills, getSkill, type Skill } from "../services/skills-manager";
+import { FLASHCARD_TOOL, executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName } from "../services/ai/ai-tools";
+import { getToolStatus, isToolDisabled, shouldAskForTool, isAgenticRAGEnabled, getAgenticRAGConfig, isWebSearchEnabled } from "../store/tool-store";
+import { listSkills, getSkill } from "../services/ai/skills-manager";
+import type { Skill, SkillRef } from "../types/skills";
+import { getAutoTriggerSkill } from "../services/ai/skill-recommender";
 import { nowId, safeText } from "../utils/text-utils";
-import { buildConversationMessages } from "../services/message-builder";
-import { streamChatWithRetry, type ToolCallInfo } from "../services/chat-stream-handler";
-import type { OpenAIChatMessage } from "../services/openai-client";
-import { executeAgenticRAG, formatRAGSteps, getToolDisplayName } from "../services/agentic-rag-service";
+import { buildConversationMessages } from "../services/ai/message-builder";
+import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
+import type { OpenAIChatMessage } from "../services/ai/openai-client";
+import { sanitizeContent } from "../services/ai/openai-client";
+import { executeAgenticRAG, getToolDisplayName } from "../services/ai/agentic-rag-service";
 import { normalizeWebSearchResults, type WebSearchSource } from "../utils/source-attribution";
 import {
   panelContainerStyle,
@@ -94,7 +97,7 @@ import {
   createInitialResponses,
   updateModelResponse,
   getModelDisplayInfo,
-} from "../services/multi-model-service";
+} from "../services/ai/multi-model-service";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -116,6 +119,41 @@ const { Button } = orca.components;
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 获取模型的上下文长度限制
+ * @param settings AI 设置
+ * @param modelId 模型 ID
+ * @param providerId 可选的提供商 ID
+ * @returns 上下文长度（tokens），如果未配置则返回 undefined 使用默认值
+ */
+function getModelContextLength(
+  settings: AiChatSettings,
+  modelId: string,
+  providerId?: string
+): number | undefined {
+  // 如果指定了 providerId，直接查找该 provider
+  if (providerId) {
+    const provider = settings.providers.find(p => p.id === providerId);
+    if (provider) {
+      const model = provider.models.find(m => m.id === modelId);
+      if (model?.contextLength) {
+        return model.contextLength;
+      }
+    }
+  }
+
+  // 查找所有包含该模型的提供商
+  for (const provider of settings.providers) {
+    const model = provider.models.find(m => m.id === modelId);
+    if (model?.contextLength) {
+      return model.contextLength;
+    }
+  }
+
+  // 未配置，返回 undefined 使用默认值
+  return undefined;
+}
 
 type ScrollAnimationState = {
   rafId: number | null;
@@ -212,6 +250,9 @@ function EditableTitle({ title, onSave }: EditableTitleProps) {
     const trimmed = editValue.trim();
     if (trimmed && trimmed !== title) {
       onSave(trimmed);
+    } else if (!trimmed) {
+      // 标题为空时恢复原标题
+      setEditValue(title);
     }
     setIsEditing(false);
   }, [editValue, title, onSave]);
@@ -233,15 +274,17 @@ function EditableTitle({ title, onSave }: EditableTitleProps) {
       onChange: (e: any) => setEditValue(e.target.value),
       onBlur: handleSave,
       onKeyDown: handleKeyDown,
+      maxLength: 100,
+      placeholder: "输入标题",
       style: {
         ...headerTitleStyle,
         border: "1px solid var(--orca-color-primary)",
-        borderRadius: 4,
+        borderRadius: "var(--orca-radius-sm)",
         padding: "2px 8px",
         background: "var(--orca-color-bg-1)",
         color: "var(--orca-color-text-1)",
         outline: "none",
-        minWidth: 100,
+        minWidth: 120,
         maxWidth: 200,
       },
     });
@@ -349,14 +392,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Todoist settings modal state
   const [showTodoistSettings, setShowTodoistSettings] = useState(false);
 
-  // Python server state
-  const [pythonServerStatus, setPythonServerStatus] = useState<"running" | "stopped" | "starting">("stopped");
-
-  // Browser AI mode state (use ChatGPT via browser instead of API)
-  const [browserAIMode, setBrowserAIMode] = useState(false);
-  const [browserAIStatus, setBrowserAIStatus] = useState<"connected" | "disconnected" | "checking">("disconnected");
-  // 跟踪浏览器 AI 会话是否已发送首次消息（包含记忆和上下文），后续消息不再重复注入
-  const browserAIFirstMessageSentRef = useRef(false);
+  // MCP server settings modal state
+  const [showMcpSettings, setShowMcpSettings] = useState(false);
 
   // Message selection mode state (for batch save)
   const [selectionMode, setSelectionMode] = useState(false);
@@ -452,7 +489,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     return new Promise((resolve) => {
       const messageId = nowId();
       const createdAt = Date.now();
-      const stepSummary = [skill.metadata.description || skill.instruction.slice(0, 200)];
+      const stepSummary = [skill.description || skill.instruction.slice(0, 200)];
       skillConfirmResolversRef.current.set(messageId, resolve);
       setMessages((prev) => [
         ...prev,
@@ -464,7 +501,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           localOnly: true,
           skillConfirm: {
             skillId: skill.id,
-            skillName: skill.metadata.name,
+            skillName: skill.name,
             steps: stepSummary,
             status: "pending",
           },
@@ -702,9 +739,17 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const handleClearAllSessions = useCallback(async () => {
     await clearAllSessions();
-    setSessions([]);
-    handleNewSession();
-  }, [handleNewSession]);
+    const data = await loadSessions();
+    setSessions(data.sessions);
+    // 如果当前会话被清理了，切换到剩余会话或创建新会话
+    if (!data.sessions.find(s => s.id === currentSession.id)) {
+      if (data.activeSessionId) {
+        handleSelectSession(data.activeSessionId);
+      } else {
+        handleNewSession();
+      }
+    }
+  }, [handleNewSession, currentSession.id, handleSelectSession]);
 
   // Toggle session pinned status
   const handleTogglePin = useCallback(async (sessionId: string) => {
@@ -788,74 +833,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   useEffect(() => () => { cancelAutoScroll(); }, [cancelAutoScroll]);
 
   // Check Python server status on mount
-  useEffect(() => {
-    getPythonServerStatus().then((status) => {
-      setPythonServerStatus(status.running ? "running" : "stopped");
-    });
-  }, []);
-
-  // Handle Python server start
-  const handleStartPythonServer = useCallback(async () => {
-    if (pythonServerStatus === "starting") return;
-    
-    if (pythonServerStatus === "running") {
-      orca.notify("info", "Python 服务器已在运行");
-      return;
-    }
-    
-    setPythonServerStatus("starting");
-    const result = await startPythonServer();
-    
-    if (result.success) {
-      setPythonServerStatus("running");
-      orca.notify("success", result.message);
-    } else {
-      setPythonServerStatus("stopped");
-      orca.notify("error", result.message);
-    }
-  }, [pythonServerStatus]);
-
-  // Handle Python server stop
-  const handleStopPythonServer = useCallback(async () => {
-    if (pythonServerStatus !== "running") return;
-    
-    const result = await stopPythonServer();
-    
-    if (result.success) {
-      setPythonServerStatus("stopped");
-      orca.notify("success", result.message);
-    } else {
-      orca.notify("error", result.message);
-    }
-  }, [pythonServerStatus]);
-
-  // Handle Browser AI mode toggle
-  const handleToggleBrowserAI = useCallback(async () => {
-    if (browserAIMode) {
-      // 关闭浏览器 AI 模式
-      setBrowserAIMode(false);
-      setBrowserAIStatus("disconnected");
-      browserAIFirstMessageSentRef.current = false; // 重置首次消息标记
-      orca.notify("info", "已关闭浏览器 AI 模式");
-    } else {
-      // 开启浏览器 AI 模式，先检查连接状态
-      setBrowserAIStatus("checking");
-      browserAIFirstMessageSentRef.current = false; // 重置首次消息标记
-      const status = await checkBrowserAIStatus();
-      
-      if (status.ok && status.connected) {
-        setBrowserAIMode(true);
-        setBrowserAIStatus("connected");
-        orca.notify("success", `已连接到 ${status.tab || "ChatGPT"}`);
-      } else {
-        setBrowserAIStatus("disconnected");
-        orca.notify("warn", status.error || "无法连接浏览器 AI，请确保：\n1. Python 服务器已启动\n2. Edge 以调试模式运行\n3. ChatGPT 页面已打开");
-        // 仍然开启模式，让用户可以尝试
-        setBrowserAIMode(true);
-      }
-    }
-  }, [browserAIMode]);
-
   // ─────────────────────────────────────────────────────────────────────────
   // Scroll to Bottom Button Detection
   // **Feature: chat-ui-enhancement**
@@ -1022,8 +999,52 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    const settings = getAiChatSettings(pluginName);
 	    // 工具调用最大轮数：可在设置中配置；若缺失则默认 5（向后兼容）
 	    const MAX_TOOL_ROUNDS = settings.maxToolRounds || 5;
+
+	    // 加载已启用的技能，注入系统提示词让 AI 自动识别并调用
+	    const enabledSkills: Array<{ name: string; description: string; instruction: string }> = [];
+	    try {
+	      const allSkillRefs = await listSkills();
+	      for (const ref of allSkillRefs) {
+	        const skill = await getSkill(ref.id, ref.scope === "global");
+	        if (skill && skill.enabled) {
+	          enabledSkills.push({
+	            name: skill.name || skill.id,
+	            description: skill.description || "",
+	            instruction: skill.instruction,
+	          });
+	        }
+	      }
+	    } catch (err) {
+	      console.warn("[handleSend] Failed to load skills:", err);
+	    }
+
+	    // 自动触发检测：高置信度匹配时自动激活技能
+	    let autoActivatedSkill: { name: string; instruction: string } | undefined;
+	    if (!content.startsWith("#") && !content.startsWith("/")) {
+	      try {
+	        const matched = await getAutoTriggerSkill(content, 0.5);
+	        if (matched) {
+	          autoActivatedSkill = {
+	            name: matched.name,
+	            instruction: matched.instruction,
+	          };
+	          console.log(`[handleSend] Auto-activated skill: ${matched.name}`);
+	        }
+	      } catch (err) {
+	        console.warn("[handleSend] Auto-trigger check failed:", err);
+	      }
+	    }
+
 	    // 系统提示词模板变量：支持 {maxToolRounds}，按当前 MAX_TOOL_ROUNDS 注入
-	    let systemPrompt = DEFAULT_SYSTEM_PROMPT.split("{maxToolRounds}").join(String(MAX_TOOL_ROUNDS));
+	    let systemPrompt = buildDynamicSystemPrompt({
+      hasMcpTools: getDiscoveredTools().length > 0,
+      hasTodoistTools: enableTodoistTools,
+      hasWebSearch: isWebSearchEnabled(),
+      hasDraggedContext: contextStore.selected.length > 0,
+      skills: enabledSkills,
+      autoActivatedSkill,
+      repoId: getCurrentRepoId(),
+    });
 
 	    // 检测用户指令并追加格式要求
 	    let processedContent = content;
@@ -1036,29 +1057,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      
 	      // 尝试加载 Skill
 	      try {
-	        const { listSkills, getSkill } = await import("../services/skills-manager");
+	        const { listSkills, getSkill } = await import("../services/ai/skills-manager");
 	        const allSkills = await listSkills();
 	        
-	        // 查找匹配的 Skill（名称或 ID）
-	        const skillRef = allSkills.find(s => {
-	          // 这里 skillRef 只有 id 和 isGlobal，需要加载完整 Skill 来获取 name
-	          return s.id === skillName;
-	        });
-	        
-	        // 如果没找到精确匹配，尝试通过 name 匹配
-	        let foundSkill = null;
-	        if (skillRef) {
-	          foundSkill = await getSkill(skillRef.id, skillRef.isGlobal);
-	        } else {
-	          // 遍历所有 Skill 查找 name 匹配
-	          for (const ref of allSkills) {
-	            const skill = await getSkill(ref.id, ref.isGlobal);
-	            if (skill && skill.metadata.name === skillName) {
-	              foundSkill = skill;
-	              break;
-	            }
-	          }
-	        }
+		// 查找匹配的 Skill（优先按名称匹配，其次按 ID）
+		const skillRef = allSkills.find(s => s.name === skillName) || allSkills.find(s => s.id === skillName);
+
+		let foundSkill = null;
+		if (skillRef) {
+		  foundSkill = await getSkill(skillRef.id, skillRef.scope === "global");
+		}
 	        
 	        if (foundSkill) {
 	          // 使用现有的 requestSkillConfirm 机制显示确认对话框
@@ -1086,7 +1094,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      // 检查是否是内置 UI 命令（如 /table, /brief, /localgraph 等）
 	      const builtinCommands = [
 	        "table", "timeline", "compare", "list", "steps", "brief", "detail", "summary", "eli5", "formal", "diagram",
-	        "localgraph", "mindmap", "card", "skill",
+	        "localgraph", "card", "skill",
 	        "todoist", "todoist-all", "todoist-add", "todoist-done", "todoist-ai"
 	      ];
 	      const isBuiltinCommand = builtinCommands.includes(commandName);
@@ -1232,7 +1240,7 @@ graph TD
 \`\`\`
 要求：
 1. 使用 mermaid 代码块
-2. 根据内容选择合适的图表类型（flowchart、sequence、mindmap 等）
+2. 根据内容选择合适的图表类型（flowchart、sequence 等）
 3. 节点文字简洁明了
 4. 连线标注清晰`;
 	    }
@@ -1321,83 +1329,6 @@ graph TD
 	          id: nowId(),
 	          role: "assistant",
 	          content: graphContent,
-	          createdAt: Date.now(),
-	        };
-	        setMessages((prev) => [...prev, assistantMsg]);
-	        queueMicrotask(scrollToBottom);
-	      })();
-	      
-	      return; // 直接返回，不走 AI
-	    }
-
-	    // /mindmap - 思维导图（显示块及子块的树形结构）
-	    if (content.includes("/mindmap")) {
-	      const mindmapQuery = processedContent.replace(/\/mindmap/g, "").trim();
-	      const cleanedQuery = mindmapQuery.replace(/^(显示|查看|的)?\s*/g, "").replace(/\s*(的)?(思维)?(导图)?$/g, "").trim();
-	      
-	      // 添加用户消息
-	      const userMsg: Message = { 
-	        id: nowId(), 
-	        role: "user", 
-	        content, 
-	        createdAt: Date.now(),
-	      };
-	      setMessages((prev) => [...prev, userMsg]);
-	      
-	      // 直接获取 blockId 并渲染思维导图
-	      (async () => {
-	        let blockId: number | null = null;
-	        let pageName: string | null = null;
-	        
-	        if (cleanedQuery) {
-	          // 检查是否是 blockId 格式：纯数字、blockid 123、blockid:123
-	          const blockIdMatch = cleanedQuery.match(/^(?:blockid[:\s]*)?(\d+)$/i);
-	          if (blockIdMatch) {
-	            blockId = parseInt(blockIdMatch[1], 10);
-	          } else {
-	            // 否则当作页面名称，需要查找对应的 blockId
-	            pageName = cleanedQuery;
-            try {
-              const block = await orca.invokeBackend("get-block-by-alias", cleanedQuery);
-              if (block && block.id) {
-                blockId = block.id;
-              }
-            } catch (err) {
-            }
-          }
-	        } else {
-	          // 使用当前打开的页面
-	          try {
-	            const activePanel = orca.state.activePanel;
-	            if (activePanel && activePanel !== uiStore.aiChatPanelId) {
-	              const vp = orca.nav.findViewPanel(activePanel, orca.state.panels);
-	              if (vp?.view === "block" && vp.viewArgs?.blockId) {
-	                blockId = vp.viewArgs.blockId;
-	              }
-	            }
-	          } catch {}
-	        }
-	        
-	        if (!blockId) {
-	          const errorMsg = pageName 
-	            ? `找不到页面「${pageName}」，请检查名称是否正确`
-	            : "请先选择一个页面，或指定页面名称，例如：/mindmap 阿拉丁";
-	          const assistantMsg: Message = {
-	            id: nowId(),
-	            role: "assistant",
-	            content: errorMsg,
-	            createdAt: Date.now(),
-	          };
-	          setMessages((prev) => [...prev, assistantMsg]);
-	          return;
-	        }
-	        
-	        // 直接输出 mindmap 代码块格式，让 MarkdownMessage 渲染思维导图
-	        const mindmapContent = "```mindmap\n" + blockId + "\n```";
-	        const assistantMsg: Message = {
-	          id: nowId(),
-	          role: "assistant",
-	          content: mindmapContent,
 	          createdAt: Date.now(),
 	        };
 	        setMessages((prev) => [...prev, assistantMsg]);
@@ -1622,7 +1553,21 @@ graph TD
     } else {
         setMessages((prev) => [...prev, userMsg]);
     }
-    
+
+    // 自动激活技能时显示系统通知
+    if (autoActivatedSkill) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nowId(),
+          role: "assistant" as const,
+          content: `📋 已激活技能: **${autoActivatedSkill.name}**`,
+          createdAt: Date.now(),
+          localOnly: true,
+        },
+      ]);
+    }
+
     // 用户发送消息时，重置为自动滚动状态并滚动到底部
     isNearBottomRef.current = true;
     queueMicrotask(scrollToBottom);
@@ -1792,33 +1737,22 @@ graph TD
       // 根据是否有拖入的块来选择工具列表
       // 有拖入块时禁用搜索类工具，强制 AI 使用已提供的上下文
       const hasHighPriorityContext = highPriorityContexts.length > 0;
-      
-      // 💡 智能工具加载：根据用户输入检测需要的工具类别
-      const detectedCategories = detectToolCategories(processedContent);
-      const needsTools = detectedCategories.size > 0;
-      
-      // 如果没有检测到需要工具，跳过工具加载
-      let baseTools = hasHighPriorityContext 
-        ? getToolsForDraggedContext() 
-        : (needsTools ? getToolsByCategories(detectedCategories) : []);
-      
-      // 动态加载 Skill 工具（只有检测到需要时）
-      if (needsTools && detectedCategories.has("skill")) {
-        try {
-          const skillTools = await getSkillToolsAsync();
-          if (skillTools.length > 0) {
-            baseTools = [...baseTools, ...skillTools];
-          }
-        } catch (err) {
-          console.warn("[AiChatPanel] Failed to load skill tools:", err);
+
+      let baseTools = hasHighPriorityContext
+        ? getToolsForDraggedContext()
+        : getTools(false, enableTodoistTools);
+
+      // 合并技能工具：将已启用的技能注册为 function calling 工具
+      try {
+        const skillTools = await getSkillToolsAsync();
+        if (skillTools.length > 0) {
+          baseTools = [...baseTools, ...skillTools];
+          console.log(`[AiChatPanel] 已注册 ${skillTools.length} 个技能工具`);
         }
+      } catch (err) {
+        console.warn("[AiChatPanel] 加载技能工具失败:", err);
       }
-      
-      // 如果启用了 Todoist AI 模式，注入 Todoist 工具
-      if (enableTodoistTools) {
-        baseTools = [...baseTools, ...TODOIST_TOOLS];
-      }
-      
+
       const filteredTools = baseTools.filter(tool => !isToolDisabled(tool.function.name));
       
       // 检查模型是否支持原生 function calling
@@ -1827,7 +1761,7 @@ graph TD
       // 调试日志：显示加载的工具数量
       if (filteredTools.length > 0) {
         if (supportsTools) {
-          console.log(`[AiChatPanel] 智能工具加载: ${filteredTools.length} 个工具 (类别: ${[...detectedCategories].join(", ")})`);
+          console.log(`[AiChatPanel] Tool-as-Skill 架构: ${filteredTools.length} 个工具`);
         } else {
           console.log(`[AiChatPanel] 模型 ${model} 不支持 tools 能力，跳过工具加载`);
         }
@@ -1872,21 +1806,23 @@ graph TD
               modelId: model,
             });
             
-            let result = "";
-            for await (const chunk of streamChatWithRetry(
-              {
-              apiUrl: apiConfig.apiUrl,
-              apiKey: apiConfig.apiKey,
-              model,
-              protocol: apiConfig.protocol,
-              anthropicApiPath: apiConfig.anthropicApiPath,
-              temperature: options?.temperature ?? 0.3,
-                maxTokens: options?.maxTokens ?? 1000,
-                signal: aborter.signal,
-              },
-              ragApiMessages,
-              ragApiMessages,
-            )) {
+          let result = "";
+          const ragContextLength = getModelContextLength(settings, model);
+          for await (const chunk of streamChatWithRetry(
+            {
+            apiUrl: apiConfig.apiUrl,
+            apiKey: apiConfig.apiKey,
+            model,
+            protocol: apiConfig.protocol,
+            anthropicApiPath: apiConfig.anthropicApiPath,
+            temperature: options?.temperature ?? 0.3,
+              maxTokens: options?.maxTokens ?? 1000,
+              signal: aborter.signal,
+              maxContextTokens: ragContextLength,
+            },
+            ragApiMessages,
+            ragApiMessages,
+          )) {
               if (chunk.type === "content") {
                 result += chunk.content;
               }
@@ -1912,8 +1848,7 @@ graph TD
           
           // 更新消息为最终答案，保留 reasoning 作为思考过程记录
           setStreamingMessageId(null);
-          
-          // 生成检索过程摘要作为 reasoning
+      // 生成检索过程摘要作为 reasoning
           const retrieveSteps = ragResult.steps.filter(s => s.type === "retrieve");
           const correctSteps = ragResult.steps.filter(s => s.type === "correct");
           const ragSummary = [
@@ -1968,10 +1903,8 @@ graph TD
       }
       // ─────────────────────────────────────────────────────────────────────────
 
-      // 浏览器 AI 模式标记：用于在工具调用完成后发送到浏览器 ChatGPT
-      // 不再在这里直接返回，而是让 API 先执行工具调用
-      // browserAIMode 时：收到 tool_calls 就执行工具，收到 content 就中止并发给浏览器
-      let browserAIAborted = false;
+      // 获取模型的上下文长度限制
+      const modelContextLength = getModelContextLength(settings, model);
 
       for await (const chunk of streamChatWithRetry(
         {
@@ -1985,14 +1918,12 @@ graph TD
           signal: aborter.signal,
           tools: toolsToUse,
           timeoutMs: settings.streamTimeout,
+          maxContextTokens: modelContextLength,
         },
         apiMessages,
         apiMessagesFallback,
       )) {
         if (chunk.type === "reasoning") {
-          // 浏览器 AI 模式：跳过 reasoning，等待 tool_calls 或 content
-          if (browserAIMode) continue;
-          
           // 第一次收到 reasoning 时，创建独立的 reasoning 消息
           if (!reasoningMessageId) {
             reasoningMessageId = nowId();
@@ -2013,28 +1944,21 @@ graph TD
             updateMessage(reasoningMessageId, { reasoning: currentReasoning });
           }
         } else if (chunk.type === "content") {
-          // 浏览器 AI 模式：收到 content 说明没有工具调用，立即中止并发给浏览器
-          if (browserAIMode && !browserAIAborted) {
-            browserAIAborted = true;
-            aborter.abort(); // 中止 API 流
-            break;
-          }
-          
           // 第一次收到 content 时，创建 assistant 消息（如果还没有 reasoning 消息，或者 reasoning 已完成）
           if (!reasoningMessageId) {
             // 没有 reasoning，直接创建 assistant 消息
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
             setStreamingMessageId(assistantId);
-            setMessages((prev) => [...prev, { 
-              id: assistantId, 
-              role: "assistant", 
-              content: chunk.content, 
+            setMessages((prev) => [...prev, {
+              id: assistantId,
+              role: "assistant",
+              content: sanitizeContent(chunk.content),
               createdAt: assistantCreatedAt,
               model,
               searchResults: getSearchResultsForMessage(),
             }]);
-            currentContent = chunk.content;
+            currentContent = sanitizeContent(chunk.content);
             reasoningMessageId = assistantId; // 复用这个 ID 作为 assistant ID
           } else if (currentContent === "") {
             // reasoning 完成，创建新的 assistant 消息
@@ -2042,87 +1966,40 @@ graph TD
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
             setStreamingMessageId(assistantId);
-            setMessages((prev) => [...prev, { 
-              id: assistantId, 
-              role: "assistant", 
-              content: chunk.content, 
+            setMessages((prev) => [...prev, {
+              id: assistantId,
+              role: "assistant",
+              content: sanitizeContent(chunk.content),
               createdAt: assistantCreatedAt,
               model,
               searchResults: getSearchResultsForMessage(),
             }]);
-            currentContent = chunk.content;
+            currentContent = sanitizeContent(chunk.content);
             reasoningMessageId = assistantId; // 更新为 assistant ID
           } else {
             // 继续追加 content
-            currentContent += chunk.content;
+            currentContent = sanitizeContent(currentContent + chunk.content);
             updateMessage(reasoningMessageId, { content: currentContent });
           }
         } else if (chunk.type === "tool_calls") {
           toolCalls = chunk.toolCalls;
+        } else if (chunk.type === "done" && chunk.result) {
+          // 使用 DSML 清洗后的最终内容，确保 invoke 标签不进入历史
+          if (chunk.result.content !== undefined) {
+            currentContent = sanitizeContent(chunk.result.content);
+            if (reasoningMessageId) {
+              updateMessage(reasoningMessageId, { content: currentContent });
+            }
+          }
+          if (chunk.result.toolCalls?.length) {
+            toolCalls = chunk.result.toolCalls;
+          }
         }
       }
 
       setStreamingMessageId(null);
-      
-      // 浏览器 AI 模式：如果没有工具调用（被中止或正常结束），直接发给浏览器 ChatGPT
-      if (browserAIMode && toolCalls.length === 0) {
-        // 构建提示词
-        let browserPromptParts: string[] = [];
-        
-        if (!browserAIFirstMessageSentRef.current) {
-          browserPromptParts.push("你是一个智能助手，请回答用户的问题。");
-          if (memoryText) browserPromptParts.push(`\n【用户记忆】\n${memoryText}`);
-          if (contextText) browserPromptParts.push(`\n【相关上下文】\n${contextText}`);
-          browserPromptParts.push(`\n【用户问题】\n${content}`);
-          browserAIFirstMessageSentRef.current = true;
-        } else {
-          browserPromptParts.push(content);
-        }
-        
-        const browserMessage = browserPromptParts.join("\n");
-        
-        // 添加浏览器 AI 回复占位消息
-        const browserAssistantId = nowId();
-        setMessages(prev => [...prev, {
-          id: browserAssistantId,
-          role: "assistant",
-          content: "🌐 正在通过浏览器 ChatGPT 生成回复...",
-          createdAt: Date.now(),
-          model: "ChatGPT (Browser)",
-        }]);
-        setStreamingMessageId(browserAssistantId);
-        
-        try {
-          const browserResult = await browserAIChat(browserMessage, 120);
-          if (browserResult.ok && browserResult.response) {
-            updateMessage(browserAssistantId, { content: browserResult.response });
-          } else {
-            updateMessage(browserAssistantId, { 
-              content: `❌ ${browserResult.error || "浏览器 AI 请求失败"}\n\n${browserResult.partial ? `部分回复：${browserResult.partial}` : ""}`,
-            });
-          }
-        } catch (browserErr: any) {
-          updateMessage(browserAssistantId, { content: `❌ 浏览器 AI 错误: ${browserErr.message}` });
-        }
-        
-        setStreamingMessageId(null);
-        setSending(false);
-        if (abortRef.current === aborter) abortRef.current = null;
-        autoCacheSession(currentSession);
-        return;
-      }
 
       const hasAssistantMessage = Boolean(reasoningMessageId);
-      if (toolCalls.length > 0 && hasAssistantMessage && currentContent) {
-        currentContent = "";
-        updateMessage(reasoningMessageId!, { content: "" });
-      }
-
-      // 浏览器 AI 模式：如果有工具调用，清空初始内容（后续会发给浏览器 ChatGPT）
-      if (browserAIMode && toolCalls.length > 0 && hasAssistantMessage) {
-        currentContent = "";
-        updateMessage(reasoningMessageId!, { content: "" });
-      }
 
       // 如果只有 reasoning 没有 content，需要创建 assistant 消息
       const assistantId = hasAssistantMessage ? reasoningMessageId! : nowId();
@@ -2153,9 +2030,10 @@ graph TD
 	      conversation.push({
 	        id: assistantId,
 	        role: "assistant",
-	        content: currentContent,
+	        content: sanitizeContent(currentContent),
 	        createdAt: assistantCreatedAt,
 	        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+	        ...(reasoningMessageId ? { reasoning: currentReasoning } : {}),
           searchResults: getSearchResultsForMessage(),
 	      });
 
@@ -2186,15 +2064,8 @@ graph TD
         if (newToolCalls.length < currentToolCalls.length) {
         }
 
-        // Execute tools
-        const toolResultMessages: Message[] = [];
-        for (const toolCall of newToolCalls) {
-          const toolName = toolCall.function.name;
-          let args: any = {};
-          let parseError: string | null = null;
-
-          // Helper function to attempt JSON repair for common AI model errors
-          const tryRepairJson = (jsonStr: string): string | null => {
+        // ── JSON 修复辅助函数 ──────────────────────────────────────────────
+        const tryRepairJson = (jsonStr: string): string | null => {
             let repaired = jsonStr.trim();
             
             // Fix 0a: Handle concatenated JSON objects (e.g., {"a":1}{"b":2} -> {"a":1})
@@ -2250,7 +2121,20 @@ graph TD
             
             // Fix 5: Fix common typos in key names (blockld -> blockId)
             repaired = repaired.replace(/"blockld"/gi, '"blockId"');
-            
+
+            // Fix 6: Remove trailing commas before } or ] (e.g., {"a": 1,} -> {"a": 1})
+            repaired = repaired.replace(/,\s*([}\]])/g, '$1');
+
+            // Fix 7: Replace "key": } with "key": null} (AI outputs bare closing brace as value)
+            repaired = repaired.replace(/":\s*\}/g, '": null}');
+
+            // Fix 8: Replace "key": ] with "key": [] (AI outputs wrong bracket type)
+            repaired = repaired.replace(/":\s*\]/g, '": []');
+
+            // Fix 9: Replace invalid value "key": ] or "key": } when they appear mid-object
+            // e.g., "blockIds": }, -> "blockIds": null,
+            repaired = repaired.replace(/":\s*\},/g, '": null,');
+
             try {
               JSON.parse(repaired);
               return repaired;
@@ -2259,10 +2143,16 @@ graph TD
             }
           };
 
+        // ── 单工具执行辅助函数 ──────────────────────────────────────────
+        const TOOL_TIMEOUT_MS = 60000;
+        const executeSingleToolCall = async (toolCall: ToolCallInfo): Promise<Message> => {
+          const toolName = toolCall.function.name;
+          let args: any = {};
+          let parseError: string | null = null;
+
           try {
             args = JSON.parse(toolCall.function.arguments);
           } catch (error: any) {
-            // Try to repair the JSON before giving up
             const repaired = tryRepairJson(toolCall.function.arguments);
             if (repaired) {
               console.warn('[Tool Call] Repaired malformed JSON:', toolCall.function.arguments, '->', repaired);
@@ -2276,112 +2166,155 @@ graph TD
             }
           }
 
-          // Log tool call with parsed arguments for debugging
-          // If JSON parsing failed, return error to model
-          let result: string;
+          let result: string | undefined;
           if (parseError) {
-             result = `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`;
+            result = `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`;
           } else {
-             const TOOL_TIMEOUT_MS = 60000; // 60s timeout for tool execution
-             const isSkillCall = toolName.startsWith("skill_");
+            const isSkillCall = toolName.startsWith("skill_");
 
-             if (isSkillCall) {
-               // Skill 工具执行 - Level 2: 按需加载详细指令
-               const resolvedSkillId = await resolveSkillIdFromToolName(toolName);
-               if (!resolvedSkillId) {
-                 result = `Error: Skill not found for tool: ${toolName}`;
-               } else {
-                 try {
-                   const instructions = await getSkillInstructionsAsync(resolvedSkillId);
-                   if (!instructions) {
-                     result = `Error: Skill not found: ${resolvedSkillId}`;
-                   } else {
-                     // 返回 Skill 的详细指令供 AI 使用
-                     const userInput = args.input || "";
-                     result = `${instructions}
+            if (isSkillCall) {
+              try {
+                const resolvedSkillId = await resolveSkillIdFromToolName(toolName);
+                if (!resolvedSkillId) {
+                  result = `Error: Skill not found for tool: ${toolName}`;
+                } else {
+                  try {
+                    const skill = await getSkill(resolvedSkillId.id, (resolvedSkillId as any).isGlobal);
+                    if (!skill) {
+                      result = `Error: Skill not found: ${resolvedSkillId.id}`;
+                    } else {
+                      const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
+                      const userApproved = await createToolConfirmPromise(
+                        `skill: ${skill.name}`,
+                        { skillId: resolvedSkillId.id, input: args.input || "" }
+                      );
+                      if (!userApproved) {
+                        result = `用户拒绝执行 Skill。请尝试其他方式或直接回答用户的问题。`;
+                      } else {
+                        const instructions = await getSkillInstructionsAsync(resolvedSkillId);
+                        if (!instructions) {
+                          result = `Error: Skill not found: ${resolvedSkillId.id}`;
+                        } else {
+                          const userInput = args.input || "";
+                          result = `${instructions}
 
 ## 用户输入
 ${userInput}`;
-                   }
-                 } catch (err: any) {
-                   result = `Error: Failed to execute skill ${resolvedSkillId}: ${err?.message || "Unknown error"}`;
-                 }
-               }
-             } else {
-               // 检查工具是否需要询问用户
-               const needsConfirm = shouldAskForTool(toolName);
-               let userApproved = true;
-               
-               if (needsConfirm) {
-                 // 使用确认对话框询问用户
-                 const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
-                 userApproved = await createToolConfirmPromise(toolName, args);
-               }
-               
-               if (!userApproved) {
-                 result = `用户拒绝执行此工具。请尝试其他方式或直接回答用户的问题。`;
-               } else {
-                 try {
-                   const timeoutPromise = new Promise<string>((_, reject) => {
-                     setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
-                   });
-                   
-                   // 检查是否是 Todoist 工具
-                   const toolExecutor = isTodoistTool(toolName) 
-                     ? executeTodoistTool(toolName, args)
-                     : executeTool(toolName, args);
-                   
-                   result = await Promise.race([
-                     toolExecutor,
-                     timeoutPromise
-                   ]);
-                 } catch (err: any) {
-                   result = `Error: ${err.message || "Tool execution failed"}`;
-                 }
-               }
-             }
+                        }
+                      }
+                    }
+                  } catch (err: any) {
+                    result = `Error: Failed to execute skill ${resolvedSkillId.id}: ${err?.message || "Unknown error"}`;
+                  }
+                }
+              } catch (err: any) {
+                result = `Error: Failed to resolve skill for tool ${toolName}: ${err?.message || "Unknown error"}`;
+              }
+            } else {
+              const needsConfirm = shouldAskForTool(toolName);
+              let userApproved = true;
+
+              if (needsConfirm) {
+                try {
+                  const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
+                  userApproved = await createToolConfirmPromise(toolName, args);
+                } catch (confirmErr: any) {
+                  result = `Error: Tool confirmation failed: ${confirmErr?.message || "Unknown error"}`;
+                }
+              }
+
+              if (result === undefined && !userApproved) {
+                result = `用户拒绝执行此工具。请尝试其他方式或直接回答用户的问题。`;
+              } else if (result === undefined) {
+                try {
+                  const timeoutPromise = new Promise<string>((_, reject) => {
+                    setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+                  });
+                  result = await Promise.race([
+                    executeTool(toolName, args),
+                    timeoutPromise
+                  ]);
+                } catch (err: any) {
+                  result = `Error: ${err.message || "Tool execution failed"}`;
+                }
+              }
+            }
           }
 
-          toolResultMessages.push({
+          // 强制截断过长的工具结果，防止原始数据污染对话
+          const maxChars = Math.max(settings.maxToolResultChars || 8000, 500);
+          let finalContent = result || "Error: Tool execution returned empty result";
+          if (finalContent.length > maxChars) {
+            finalContent = finalContent.slice(0, maxChars) +
+              `\n\n...[已截断，原长度 ${finalContent.length} 字符]`;
+          }
+
+          return {
             id: nowId(),
             role: "tool",
-            content: result,
+            content: finalContent,
             tool_call_id: toolCall.id,
             name: toolName,
             createdAt: Date.now(),
-          });
-          
-          // 检查是否是直接渲染的工具结果（如日记导出），跳过 AI 后续处理
-          if (result.includes("```journal-export")) {
+          };
+        };
+
+        // ── 分组：需确认 vs 无需确认 ────────────────────────────────────
+        const confirmTools: ToolCallInfo[] = [];
+        const parallelTools: ToolCallInfo[] = [];
+        for (const tc of newToolCalls) {
+          if (tc.function.name.startsWith("skill_") || shouldAskForTool(tc.function.name)) {
+            confirmTools.push(tc);
+          } else {
+            parallelTools.push(tc);
+          }
+        }
+
+        // ── 并行执行无需确认的工具 ──────────────────────────────────────
+        const toolResultMessages: Message[] = [];
+        if (parallelTools.length > 0) {
+          const parallelResults = await Promise.all(
+            parallelTools.map(tc => executeSingleToolCall(tc))
+          );
+          toolResultMessages.push(...parallelResults);
+        }
+
+        // 检查并行结果中是否有直接渲染的（如日记导出）
+        const hasDirectRender = toolResultMessages.some(m => m.content.includes("```journal-export"));
+        if (hasDirectRender) {
+          allToolResultMessages.push(...toolResultMessages);
+          conversation.push(...toolResultMessages);
+          setMessages((prev) => [...prev, ...toolResultMessages]);
+          queueMicrotask(scrollToBottom);
+          currentToolCalls = [];
+          break;
+        }
+
+        // ── 顺序执行需确认的工具 ────────────────────────────────────────
+        for (const tc of confirmTools) {
+          const msg = await executeSingleToolCall(tc);
+          toolResultMessages.push(msg);
+          if (msg.content.includes("```journal-export")) {
             allToolResultMessages.push(...toolResultMessages);
             conversation.push(...toolResultMessages);
             setMessages((prev) => [...prev, ...toolResultMessages]);
             queueMicrotask(scrollToBottom);
-            // 直接结束工具循环，不再调用 AI
             currentToolCalls = [];
             break;
           }
         }
-        
-        // 如果已经处理了直接渲染的结果，跳过后续 AI 调用
-        captureSearchResults(toolResultMessages);
-        if (currentToolCalls.length === 0 && toolResultMessages.some(m => m.content.includes("```journal-export"))) {
+
+        // 如果直接渲染触发了，跳出
+        if (currentToolCalls.length === 0) {
           break;
         }
 
+        captureSearchResults(toolResultMessages);
         allToolResultMessages.push(...toolResultMessages);
         conversation.push(...toolResultMessages);
 
         setMessages((prev) => [...prev, ...toolResultMessages]);
         queueMicrotask(scrollToBottom);
-
-        // ─────────────────────────────────────────────────────────────────────
-        // 浏览器 AI 模式：工具执行完成后，直接跳出循环，不再调用 API 生成回复
-        // ─────────────────────────────────────────────────────────────────────
-        if (browserAIMode) {
-          // 直接跳出工具循环，后续会发送到浏览器 ChatGPT
-          break;
-        }
 
         // Build messages for next response including all prior tool results
         const { standard, fallback } = await buildConversationMessages({
@@ -2404,6 +2337,7 @@ ${userInput}`;
 
         // 获取模型特定的 API 配置
         const toolApiConfig = getModelApiConfig(settings, model);
+        const toolContextLength = getModelContextLength(settings, model);
 
         try {
           for await (const chunk of streamChatWithRetry(
@@ -2417,6 +2351,7 @@ ${userInput}`;
               signal: aborter.signal,
               tools: enableTools ? filteredTools : undefined, // Last round: disable tools to force an answer
               timeoutMs: settings.streamTimeout,
+              maxContextTokens: toolContextLength,
             },
             standard,
             fallback
@@ -2448,15 +2383,15 @@ ${userInput}`;
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
                 setStreamingMessageId(nextAssistantId);
-                setMessages((prev) => [...prev, { 
-                  id: nextAssistantId, 
-                  role: "assistant", 
-                  content: chunk.content, 
+                setMessages((prev) => [...prev, {
+                  id: nextAssistantId,
+                  role: "assistant",
+                  content: sanitizeContent(chunk.content),
                   createdAt: nextAssistantCreatedAt,
                   model,
                   searchResults: getSearchResultsForMessage(),
                 }]);
-                nextContent = chunk.content;
+                nextContent = sanitizeContent(chunk.content);
                 nextReasoningMessageId = nextAssistantId;
               } else if (nextContent === "") {
                 // reasoning 完成，创建新的 assistant 消息
@@ -2464,23 +2399,33 @@ ${userInput}`;
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
                 setStreamingMessageId(nextAssistantId);
-                setMessages((prev) => [...prev, { 
-                  id: nextAssistantId, 
-                  role: "assistant", 
-                  content: chunk.content, 
+                setMessages((prev) => [...prev, {
+                  id: nextAssistantId,
+                  role: "assistant",
+                  content: sanitizeContent(chunk.content),
                   createdAt: nextAssistantCreatedAt,
                   model,
                   searchResults: getSearchResultsForMessage(),
                 }]);
-                nextContent = chunk.content;
+                nextContent = sanitizeContent(chunk.content);
                 nextReasoningMessageId = nextAssistantId;
               } else {
                 // 继续追加 content
-                nextContent += chunk.content;
+                nextContent = sanitizeContent(nextContent + chunk.content);
                 updateMessage(nextReasoningMessageId, { content: nextContent });
               }
             } else if (chunk.type === "tool_calls" && enableTools) {
               nextToolCalls = chunk.toolCalls;
+            } else if (chunk.type === "done" && chunk.result) {
+              if (chunk.result.content !== undefined) {
+                nextContent = sanitizeContent(chunk.result.content);
+                if (nextReasoningMessageId) {
+                  updateMessage(nextReasoningMessageId, { content: nextContent });
+                }
+              }
+              if (chunk.result.toolCalls?.length) {
+                nextToolCalls = chunk.result.toolCalls;
+              }
             }
           }
         } catch (streamErr: any) {
@@ -2530,9 +2475,10 @@ ${userInput}`;
         conversation.push({
           id: nextAssistantId,
           role: "assistant",
-          content: nextContent,
+          content: sanitizeContent(nextContent),
           createdAt: nextAssistantCreatedAt,
           tool_calls: nextToolCalls.length > 0 ? nextToolCalls : undefined,
+          ...(nextReasoningMessageId ? { reasoning: nextReasoning } : {}),
           searchResults: getSearchResultsForMessage(),
         });
 
@@ -2560,91 +2506,6 @@ ${userInput}`;
           break;
         }
       }
-      
-      // ─────────────────────────────────────────────────────────────────────────
-      // 浏览器 AI 模式：工具调用完成后，发送到浏览器 ChatGPT
-      // ─────────────────────────────────────────────────────────────────────────
-      if (browserAIMode) {
-        // 删除 API 生成的最终回复消息，用浏览器 AI 替代
-        setMessages(prev => {
-          // 找到最后一个 assistant 消息（API 生成的回复）
-          const lastAssistantIdx = prev.findLastIndex(m => m.role === "assistant");
-          if (lastAssistantIdx >= 0) {
-            // 保留工具结果消息，只删除最后的 assistant 回复
-            const lastMsg = prev[lastAssistantIdx];
-            // 如果是工具结果消息，不删除
-            if (lastMsg.tool_call_id) {
-              return prev;
-            }
-            return prev.slice(0, lastAssistantIdx);
-          }
-          return prev;
-        });
-        
-        // 构建发送给 ChatGPT 的消息
-        let browserPromptParts: string[] = [];
-        
-        if (!browserAIFirstMessageSentRef.current) {
-          // 首次消息：注入系统提示、记忆、上下文
-          browserPromptParts.push("你是一个智能助手，请根据以下信息回答用户的问题。");
-          
-          if (memoryText) {
-            browserPromptParts.push(`\n【用户记忆】\n${memoryText}`);
-          }
-          
-          if (contextText) {
-            browserPromptParts.push(`\n【相关上下文】\n${contextText}`);
-          }
-          
-          browserAIFirstMessageSentRef.current = true;
-        }
-        
-        // 添加工具结果（如果有）
-        if (allToolResultMessages.length > 0) {
-          const toolResultsSummary = allToolResultMessages
-            .map(m => `【${m.name || "工具"}结果】\n${m.content}`)
-            .join("\n\n");
-          browserPromptParts.push(`\n【工具调用结果】\n${toolResultsSummary}`);
-        }
-        
-        // 添加用户问题
-        browserPromptParts.push(`\n【用户问题】\n${content}`);
-        
-        const browserMessage = browserPromptParts.join("\n");
-        
-        // 添加浏览器 AI 回复占位消息
-        const browserAssistantId = nowId();
-        setMessages(prev => [...prev, {
-          id: browserAssistantId,
-          role: "assistant",
-          content: "🌐 正在通过浏览器 ChatGPT 生成回复...",
-          createdAt: Date.now(),
-          model: "ChatGPT (Browser)",
-        }]);
-        setStreamingMessageId(browserAssistantId);
-        
-        try {
-          const browserResult = await browserAIChat(browserMessage, 120);
-          
-          if (browserResult.ok && browserResult.response) {
-            updateMessage(browserAssistantId, { 
-              content: browserResult.response,
-            });
-          } else {
-            const errorMsg = browserResult.error || "浏览器 AI 请求失败";
-            updateMessage(browserAssistantId, { 
-              content: `❌ ${errorMsg}\n\n${browserResult.partial ? `部分回复：${browserResult.partial}` : "请确保：\n1. Edge 以调试模式启动\n2. ChatGPT 页面已打开并登录\n3. Python 服务器正在运行"}`,
-            });
-          }
-        } catch (browserErr: any) {
-          updateMessage(browserAssistantId, { 
-            content: `❌ 浏览器 AI 错误: ${browserErr.message}`,
-          });
-        }
-        
-        setStreamingMessageId(null);
-      }
-      // ─────────────────────────────────────────────────────────────────────────
       
       // Clear error state on successful completion
       // **Feature: chat-ui-enhancement**
@@ -2731,7 +2592,6 @@ ${userInput}`;
     if (abortRef.current) abortRef.current.abort();
     setMessages([]);
     setLastError(null);
-    browserAIFirstMessageSentRef.current = false; // 重置浏览器 AI 首次消息标记
   }
 
   function stop() {
@@ -2910,7 +2770,7 @@ ${userInput}`;
     });
 
     // 计算系统开销 token（系统提示 + 记忆 + 上下文）
-    const systemPromptTokens = estimateTokens(DEFAULT_SYSTEM_PROMPT || "");
+    const systemPromptTokens = estimateTokens(buildDynamicSystemPrompt());
     const memoryTokens = estimateTokens(memoryStore.getFullMemoryText() || "");
     // 上下文 token 在 ChatInput 中已经显示，这里只计算基础开销
     const baseOverheadTokens = systemPromptTokens + memoryTokens;
@@ -3543,12 +3403,7 @@ ${userInput}`;
         onOpenWebSearchSettings: () => setShowWebSearchSettings(true),
         onOpenVisionModelSettings: () => setShowVisionModelSettings(true),
         onOpenTodoistSettings: () => setShowTodoistSettings(true),
-        onStartPythonServer: handleStartPythonServer,
-        onStopPythonServer: handleStopPythonServer,
-        pythonServerStatus,
-        browserAIMode,
-        onToggleBrowserAI: handleToggleBrowserAI,
-        browserAIStatus,
+        onOpenMcpSettings: () => setShowMcpSettings(true),
         onExportMarkdown: () => {
           if (messages.length === 0) {
             orca.notify("warn", "没有可导出的消息");
@@ -3653,6 +3508,11 @@ ${userInput}`;
     createElement(TodoistSettingsModal, {
       visible: showTodoistSettings,
       onClose: () => setShowTodoistSettings(false),
+    }),
+    // MCP Server Settings Modal
+    createElement(McpServerSettingsModal, {
+      isOpen: showMcpSettings,
+      onClose: () => setShowMcpSettings(false),
     }),
     // Global Image Preview Modal
     createElement(GlobalImagePreview),

@@ -305,8 +305,6 @@ await window.AiChatPluginAPI.sendMessage('你好', {
 | `plugin-fs-write-binary` | 写入二进制文件 | `{ pluginName, path, base64 }` |
 | `plugin-fs-mkdirs` | 创建目录 | `{ pluginName, path }` |
 | `plugin-fs-exists` | 判断存在 | `{ pluginName, path }` |
-| `python-exec` | 后端执行 Python | `{ code, packages, input, files }` |
-
 ## 常见问题
 
 ### Q: 为什么返回 success: false？

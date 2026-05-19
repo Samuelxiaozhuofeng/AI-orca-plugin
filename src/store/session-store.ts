@@ -38,13 +38,6 @@ export function updateSessionStore(
 }
 
 /**
- * Mark session as saved (not dirty)
- */
-export function markSessionSaved(): void {
-  sessionStore.isDirty = false;
-}
-
-/**
  * Clear session store
  */
 export function clearSessionStore(): void {

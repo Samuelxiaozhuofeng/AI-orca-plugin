@@ -38,7 +38,7 @@ const panelStyle: React.CSSProperties = {
   background: "var(--orca-color-bg-1)",
   backdropFilter: "blur(10px)",
   border: "1px solid var(--orca-color-border)",
-  borderRadius: 12,
+  borderRadius: "var(--orca-radius-lg)",
   boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
   zIndex: 1000,
   overflow: "hidden",
@@ -90,7 +90,7 @@ const emptyStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-const sessionItemStyle = (isActive: boolean, isPinned: boolean): React.CSSProperties => ({
+const sessionItemStyle = (isActive: boolean, isPinned: boolean, isHovered: boolean): React.CSSProperties => ({
   padding: "6px 8px",
   marginBottom: 2,
   borderRadius: 6,
@@ -101,12 +101,14 @@ const sessionItemStyle = (isActive: boolean, isPinned: boolean): React.CSSProper
   alignItems: "center",
   gap: 6,
   transition: "all 0.15s ease",
+  transform: isHovered ? "translateY(-1px)" : "translateY(0)",
+  boxShadow: isHovered ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
 });
 
 const sessionIconStyle = (isPinned: boolean): React.CSSProperties => ({
   width: 22,
   height: 22,
-  borderRadius: 4,
+  borderRadius: "var(--orca-radius-sm)",
   background: isPinned ? "var(--orca-color-bg-3)" : "var(--orca-color-bg-3)",
   border: isPinned ? "1px solid var(--orca-color-border)" : "none",
   color: isPinned ? "var(--orca-color-text-1)" : "var(--orca-color-text-2)",
@@ -176,7 +178,7 @@ const renameInputStyle: React.CSSProperties = {
   padding: "4px 8px",
   fontSize: 13,
   border: "1px solid var(--orca-color-primary, #007bff)",
-  borderRadius: 4,
+  borderRadius: "var(--orca-radius-sm)",
   background: "var(--orca-color-bg-1)",
   color: "var(--orca-color-text-1)",
   outline: "none",
@@ -302,17 +304,50 @@ export default function ChatHistoryMenu({
   }, [onNewSession]);
 
   // 分组逻辑：
-  // - 默认视图：置顶 + 最近（收藏的混在最近里，不单独显示）
-  // - 收藏视图：只显示收藏的对话
-  const pinnedSessions = showFavoritesOnly 
-    ? sessions.filter((s) => s.pinned && s.favorited)
-    : sessions.filter((s) => s.pinned);
-  
-  const normalSessions = showFavoritesOnly
+  // - 置顶始终在最前
+  // - 收藏独立分组（⭐ 收藏）
+  // - 非收藏按时间段分组：今天 / 昨天 / 本周 / 更早
+  const now = Date.now();
+  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const yesterdayStart = todayStart - 86400000;
+  const weekStart = todayStart - 6 * 86400000;
+
+  const pinnedSessions = sessions.filter((s) => s.pinned);
+
+  // 非置顶收藏
+  const favoritedSessions = showFavoritesOnly
+    ? [] // 收藏视图下不单独显示，合并到下面分组
+    : sessions.filter((s) => s.favorited && !s.pinned);
+
+  // 非置顶非收藏，按时间分组
+  const nonFavoritedSessions = showFavoritesOnly
     ? sessions.filter((s) => s.favorited && !s.pinned)
-    : sessions.filter((s) => !s.pinned);
-  
-  const totalFiltered = pinnedSessions.length + normalSessions.length;
+    : sessions.filter((s) => !s.pinned && !s.favorited);
+
+  const groupByTime = (list: SavedSession[]) => {
+    const today: SavedSession[] = [];
+    const yesterday: SavedSession[] = [];
+    const thisWeek: SavedSession[] = [];
+    const older: SavedSession[] = [];
+    for (const s of list) {
+      const t = s.updatedAt || s.createdAt;
+      if (t >= todayStart) today.push(s);
+      else if (t >= yesterdayStart) yesterday.push(s);
+      else if (t >= weekStart) thisWeek.push(s);
+      else older.push(s);
+    }
+    return { today, yesterday, thisWeek, older };
+  };
+
+  const timeGroups = groupByTime(nonFavoritedSessions);
+  const allTimeGroups = [
+    { label: "今天", sessions: timeGroups.today },
+    { label: "昨天", sessions: timeGroups.yesterday },
+    { label: "本周", sessions: timeGroups.thisWeek },
+    { label: "更早", sessions: timeGroups.older },
+  ].filter((g) => g.sessions.length > 0);
+
+  const totalFiltered = pinnedSessions.length + favoritedSessions.length + nonFavoritedSessions.length;
 
   // 渲染单个会话项
   function renderSessionItem(session: SavedSession, isPinned: boolean) {
@@ -324,7 +359,7 @@ export default function ChatHistoryMenu({
       "div",
       {
         key: session.id,
-        style: sessionItemStyle(isActive, isPinned),
+        style: sessionItemStyle(isActive, isPinned, isHovered),
         onClick: () => handleSelect(session.id),
         onMouseEnter: () => setHoveredId(session.id),
         onMouseLeave: () => setHoveredId(null),
@@ -346,6 +381,8 @@ export default function ChatHistoryMenu({
               onBlur: handleFinishRename,
               onKeyDown: handleRenameKeyDown,
               onClick: (e: any) => e.stopPropagation(),
+              maxLength: 100,
+              placeholder: "输入标题",
               style: renameInputStyle,
             })
           : createElement(
@@ -425,16 +462,16 @@ export default function ChatHistoryMenu({
                   onClick: (e: any) => handleToggleFavorite(e, session.id),
                   onMouseOver: (e: any) => {
                     e.currentTarget.style.opacity = "1";
-                    e.currentTarget.style.color = session.favorited ? "#fbbf24" : "var(--orca-color-primary)";
+                    e.currentTarget.style.color = session.favorited ? "var(--orca-color-warning)" : "var(--orca-color-primary)";
                   },
                   onMouseOut: (e: any) => {
                     e.currentTarget.style.opacity = session.favorited ? "0.6" : "0.6";
-                    e.currentTarget.style.color = session.favorited ? "#fbbf24" : "var(--orca-color-text-3)";
+                    e.currentTarget.style.color = session.favorited ? "var(--orca-color-warning)" : "var(--orca-color-text-3)";
                   },
                 },
                 createElement("i", {
                   className: session.favorited ? "ti ti-star-filled" : "ti ti-star",
-                  style: { fontSize: 12, color: session.favorited ? "#fbbf24" : undefined },
+                  style: { fontSize: 12, color: session.favorited ? "var(--orca-color-warning)" : undefined },
                 })
               )
             ),
@@ -502,7 +539,7 @@ export default function ChatHistoryMenu({
                   onClick: () => setShowFavoritesOnly(!showFavoritesOnly),
                   style: {
                     ...newButtonStyle,
-                    background: showFavoritesOnly ? "#fbbf24" : "var(--orca-color-bg-3)",
+                    background: showFavoritesOnly ? "var(--orca-color-warning)" : "var(--orca-color-bg-3)",
                     color: showFavoritesOnly ? "#000" : "var(--orca-color-text-2)",
                     fontWeight: showFavoritesOnly ? 600 : 400,
                   },
@@ -539,6 +576,7 @@ export default function ChatHistoryMenu({
             : createElement(
                 Fragment,
                 null,
+                // ── 置顶 ────────────────────────────────────────────────
                 pinnedSessions.length > 0 &&
                   createElement(
                     "div",
@@ -557,28 +595,50 @@ export default function ChatHistoryMenu({
                     ),
                     ...pinnedSessions.map((session) => renderSessionItem(session, true))
                   ),
-                normalSessions.length > 0 &&
+
+                // ── 收藏（默认视图显示）─────────────────────────────────
+                !showFavoritesOnly && favoritedSessions.length > 0 &&
                   createElement(
                     "div",
-                    null,
-                    pinnedSessions.length > 0 &&
-                      createElement(
-                        "div",
-                        {
-                          style: {
-                            fontSize: 11,
-                            color: "var(--orca-color-text-3)",
-                            padding: "4px 8px",
-                            fontWeight: 500,
-                          },
+                    { style: { marginBottom: 8 } },
+                    createElement(
+                      "div",
+                      {
+                        style: {
+                          fontSize: 11,
+                          color: "var(--orca-color-warning)",
+                          padding: "4px 8px",
+                          fontWeight: 500,
                         },
-                        showFavoritesOnly ? "⭐ 收藏" : "最近"
-                      ),
-                    ...normalSessions.map((session) => renderSessionItem(session, false))
+                      },
+                      "⭐ 收藏"
+                    ),
+                    ...favoritedSessions.map((session) => renderSessionItem(session, false))
+                  ),
+
+                // ── 时间分组（非收藏）───────────────────────────────────
+                allTimeGroups.map((group) =>
+                  createElement(
+                    "div",
+                    { key: group.label, style: { marginBottom: 8 } },
+                    createElement(
+                      "div",
+                      {
+                        style: {
+                          fontSize: 11,
+                          color: "var(--orca-color-text-3)",
+                          padding: "4px 8px",
+                          fontWeight: 500,
+                        },
+                      },
+                      group.label
+                    ),
+                    ...group.sessions.map((session) => renderSessionItem(session, false))
                   )
+                ),
               )
         ),
-        sessions.length > 0 &&
+        nonFavoritedSessions.length > 0 &&
           createElement(
             "div",
             { style: footerStyle },
@@ -589,7 +649,7 @@ export default function ChatHistoryMenu({
                 style: clearButtonStyle,
                 onMouseOver: (e: any) => {
                   e.currentTarget.style.background = "var(--orca-color-danger, #dc3545)";
-                  e.currentTarget.style.color = "#fff";
+                  e.currentTarget.style.color = "var(--orca-color-text-inverse)";
                   e.currentTarget.style.borderColor = "var(--orca-color-danger, #dc3545)";
                 },
                 onMouseOut: (e: any) => {
@@ -598,7 +658,7 @@ export default function ChatHistoryMenu({
                   e.currentTarget.style.borderColor = "var(--orca-color-border)";
                 },
               },
-              "清空所有历史"
+              `清空非收藏对话 (${nonFavoritedSessions.length})`
             )
           )
       )

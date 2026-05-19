@@ -13,7 +13,7 @@
  */
 
 import type { ImageRef } from "../services/session-service";
-import { imageToBase64 } from "../services/image-service";
+import { imageToBase64 } from "../services/external/image-service";
 
 /**
  * 图片链接匹配结果

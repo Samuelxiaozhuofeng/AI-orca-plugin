@@ -14,7 +14,7 @@ import {
   createProvider,
   addModelToProvider,
 } from "../../settings/ai-chat-settings";
-import { fetchModelsFromApi } from "../../services/model-fetcher";
+import { fetchModelsFromApi } from "../../services/ai/model-fetcher";
 import {
   menuContainerStyle,
   modelListPanelStyle,

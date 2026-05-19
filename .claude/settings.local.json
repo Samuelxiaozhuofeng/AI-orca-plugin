@@ -9,7 +9,29 @@
       "Bash(openspec list:*)",
       "Bash(openspec show:*)",
       "Bash(cat:*)",
-      "Bash(npm run test)"
+      "Bash(npm run test)",
+      "Bash(npx tsc *)",
+      "Bash(grep -A5 '\"outDir\"\\\\|\"rootDir\"' tsconfig.json)",
+      "Bash(cat tsconfig.json)",
+      "Bash(xxd)",
+      "Bash(node _fix_temp.mjs)",
+      "Bash(gh repo *)",
+      "Bash(curl -sL \"https://api.github.com/repos/NanmiCoder/cc-haha\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Name:', d.get\\('name'\\)\\); print\\('Description:', d.get\\('description'\\)\\); print\\('Default branch:', d.get\\('default_branch'\\)\\); print\\('Language:', d.get\\('language'\\)\\); print\\('Topics:', d.get\\('topics'\\)\\)\")",
+      "Bash(curl -sL \"https://api.github.com/repos/ultraworkers/claw-code\")",
+      "WebSearch",
+      "Bash(cd D:\\\\\\\\orca-plugins\\\\\\\\B\\\\\\\\AI-orca-plugin)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm install *)",
+      "Bash(node update-imports.mjs)",
+      "Bash(node fix-remaining.mjs)",
+      "Bash(rm -f src/services/external/image-proxy.ts src/translations/zhCN.ts)",
+      "Bash(rmdir src/translations)",
+      "Bash(gh api *)",
+      "Bash(npx vite *)",
+      "Bash(node *)",
+      "Bash(npx tsx --eval ' *)"
     ]
   }
 }

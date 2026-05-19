@@ -158,9 +158,3 @@ export async function loadFromStorage(): Promise<void> {
   }
 }
 
-/**
- * Reset store to default state (useful for testing)
- */
-export function resetStore(): void {
-  chatModeStore.mode = DEFAULT_MODE;
-}

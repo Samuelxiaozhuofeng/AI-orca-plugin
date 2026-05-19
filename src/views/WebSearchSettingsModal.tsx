@@ -3,7 +3,7 @@
  */
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { getAiChatSettings, updateAiChatSettings, type SearchProvider, type WebSearchConfig, type SearchProviderInstance } from "../settings/ai-chat-settings";
-import { isInstanceConfigured, getProviderDisplayName, testSearchInstance, type ConnectivityTestResult } from "../services/web-search-service";
+import { isInstanceConfigured, getProviderDisplayName, testSearchInstance, type ConnectivityTestResult } from "../services/external/web-search-service";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {

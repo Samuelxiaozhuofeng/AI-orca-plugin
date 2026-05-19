@@ -11,7 +11,6 @@
 - `src/utils/query-filter-parser.ts`：属性过滤器解析
 - `src/views/AiChatPanel.tsx`：调用工具的 UI 组件
 - `src/services/skill-service.ts`：技能层注册与执行
-- `src/services/python-runtime.ts`：Python 步骤运行时（后端优先，Pyodide 兜底）
 - `src/components/SkillConfirmDialog.tsx`：技能执行确认
 
 ## 技能层（Skills）
@@ -30,8 +29,7 @@ Skills/
 
 - 技能以 `skill_` 前缀暴露为模型可调用的工具。
 - 执行技能前必须向用户确认。
-- 技能步骤按顺序执行，可调用现有工具或 Python 步骤。
-- Python 步骤优先调用后端执行；不可用时使用 CDN 版 Pyodide（micropip）。
+- 技能步骤按顺序执行，可调用现有工具。
 - 若宿主不提供 `plugin-fs-*`，则改用 `orca.plugins.setData/getData` 持久化，仅保存 `skills.md`，`Script/` 与 `Data/` 都不会落库。
 - ??????????????????????????????
 

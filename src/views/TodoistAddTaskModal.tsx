@@ -11,7 +11,7 @@ import {
   type CreateTaskParams,
   type TodoistProject,
   type TodoistLabel,
-} from "../services/todoist-service";
+} from "../services/external/todoist-service";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 
 const { createElement, useState, useCallback, useEffect, useRef } = window.React as any;

@@ -1,46 +1,3 @@
-// 系统提示词（硬编码，支持模板变量如 {maxToolRounds}）
-export const DEFAULT_SYSTEM_PROMPT = `你是笔记库智能助手。
-
-## 回复原则
-- 结论先行，再展开
-- 一段一事，不混杂
-- 短句优先，不废话
-- 用户理性有判断力，不需要被哄
-
-## 工具使用
-- 工具返回"✅ Search complete"后立即展示结果，不再调用其他工具
-- 搜索结果已含完整内容，禁止对其调用 getPage
-- 一次成功即停止，避免重复查询
-- 属性查询：queryByTagProperty 按标签+属性过滤
-- 无结果时尝试替代方案（最多 {maxToolRounds} 轮）：标签变体 → 搜索降级 → 条件放宽
-- 总结今天用 getTodayJournal，总结近期用 getJournals
-
-## 写入操作
-- 仅在用户明确要求「创建/添加/写入」时才写入
-- 缺少必要信息时先询问，不猜测
-- createBlock 成功后立即停止，禁止重复创建
-
-## 真实性（红线）
-- 只引用工具实际返回的内容，绝对禁止编造
-- 无结果就说"没有找到"，不脑补
-- 明确区分"笔记库内容"和"AI 一般知识"
-
-## 引用格式（红线）
-- **句中提及**：[标题](orca-block:id) — 作为句子一部分
-- **句末来源**：直接写 orca-block:数字 — 渲染为彩色圆点
-- ❌ 绝对禁止：[1]、[2]、^1、^2 等脚注格式
-- ⚠️ **blockid 必须从工具返回中复制**，绝对禁止编造数字
-
-## 特殊格式
-- 时间线事件用 \`\`\`timeline 代码块
-- 图片用 ![描述](url)，url 必须从工具返回中复制
-- **imageSearch 返回后必须插入图片**：用 ![描述](url) 格式，否则用户看不到图
-
-## 限制
-- 不支持修改/删除笔记，仅支持创建
-- 最大返回 50 条结果
-`;
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 类型定义
 // ═══════════════════════════════════════════════════════════════════════════
@@ -222,7 +179,7 @@ const DEFAULT_PROVIDERS: AiProvider[] = [
   },
 ];
 
-export const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
+const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
   providers: DEFAULT_PROVIDERS,
   selectedProviderId: "openai",
   selectedModelId: "gpt-4o-mini",
@@ -233,7 +190,7 @@ export const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
   currency: "USD",
   // Token 优化默认值
   maxHistoryMessages: 0,           // 0=不限制（改用动态压缩）
-  maxToolResultChars: 0,           // 0=不限制
+  maxToolResultChars: 8000,        // 工具结果最大字符数（0=不限制）
   maxContextChars: 60000,          // 恢复原来的 60000
   // 流式超时设置
   streamTimeout: 30000,            // 默认 30 秒，本地模型可设置 120000（2分钟）或更长
@@ -651,34 +608,6 @@ export function getCurrentApiConfig(settings: AiChatSettings): {
   };
 }
 
-/** 获取当前模型的完整配置（包括模型级别的设置，回退到全局默认值） */
-export function getModelConfig(settings: AiChatSettings, modelId?: string): {
-  temperature: number;
-  maxTokens: number;
-  maxToolRounds: number;
-  currency: CurrencyType;
-  inputPrice: number;
-  outputPrice: number;
-} {
-  const targetModelId = modelId || settings.selectedModelId;
-  
-  // 查找模型
-  let model: ProviderModel | undefined;
-  for (const provider of settings.providers) {
-    model = provider.models.find(m => m.id === targetModelId);
-    if (model) break;
-  }
-  
-  return {
-    temperature: model?.temperature ?? settings.temperature,
-    maxTokens: model?.maxTokens ?? settings.maxTokens,
-    maxToolRounds: model?.maxToolRounds ?? settings.maxToolRounds,
-    currency: model?.currency ?? settings.currency,
-    inputPrice: model?.inputPrice ?? 0,
-    outputPrice: model?.outputPrice ?? 0,
-  };
-}
-
 /** 验证当前配置是否完整 */
 export function validateCurrentConfig(settings: AiChatSettings): string | null {
   const provider = getSelectedProvider(settings);
@@ -800,76 +729,7 @@ export function getModelApiConfig(
   return { apiUrl: current.apiUrl, apiKey: current.apiKey, protocol: current.protocol, anthropicApiPath: current.anthropicApiPath };
 }
 
-/** @deprecated 使用 validateCurrentConfig */
-export function validateModelApiConfig(
-  settings: AiChatSettings,
-  modelName: string,
-): string | null {
-  const config = getModelApiConfig(settings, modelName);
-  if (!config.apiUrl) return "Missing API URL";
-  if (!config.apiKey) return "Missing API Key";
-  if (!modelName.trim()) return "Missing model name";
-  return null;
-}
-
-/** 构建模型选项列表（用于下拉菜单） */
-export type AiModelOption = {
-  value: string;
-  label: string;
-  group?: string;
-  providerId?: string;
-  apiUrl?: string;
-  apiKey?: string;
-  inputPrice?: number;
-  outputPrice?: number;
-  capabilities?: ModelCapability[];
-};
-
-export function buildAiModelOptions(settings: AiChatSettings): AiModelOption[] {
-  const options: AiModelOption[] = [];
-  
-  for (const provider of settings.providers) {
-    if (!provider.enabled) continue;
-    
-    for (const model of provider.models) {
-      options.push({
-        value: model.id,
-        label: model.label || model.id,
-        group: provider.name,
-        providerId: provider.id,
-        apiUrl: provider.apiUrl,
-        apiKey: provider.apiKey,
-        inputPrice: model.inputPrice,
-        outputPrice: model.outputPrice,
-        capabilities: model.capabilities,
-      });
-    }
-  }
-  
-  return options;
-}
-
 /** @deprecated */
 export function resolveAiModel(settings: AiChatSettings): string {
   return settings.selectedModelId;
 }
-
-/** @deprecated */
-export function validateAiChatSettings(settings: AiChatSettings): string | null {
-  return validateCurrentConfig(settings);
-}
-
-/** @deprecated */
-export function validateAiChatSettingsWithModel(
-  settings: AiChatSettings,
-  modelOverride: string,
-): string | null {
-  const config = getModelApiConfig(settings, modelOverride);
-  if (!config.apiUrl) return "Missing API URL";
-  if (!config.apiKey) return "Missing API Key";
-  if (!modelOverride.trim()) return "Missing model";
-  return null;
-}
-
-// 兼容旧版类型
-export type AiModelPreset = ProviderModel;

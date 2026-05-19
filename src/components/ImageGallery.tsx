@@ -3,7 +3,7 @@
  * 显示AI回复中的图片，支持点击放大、来源链接等功能
  */
 
-import { openImagePreview } from "../services/image-preview-service";
+import { openImagePreview } from "../services/external/image-preview-service";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {

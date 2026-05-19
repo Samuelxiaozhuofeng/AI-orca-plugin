@@ -69,7 +69,7 @@ const retryButtonStyle: React.CSSProperties = {
   borderRadius: "8px",
   border: "none",
   background: "var(--orca-color-danger, #dc3545)",
-  color: "#fff",
+  color: "var(--orca-color-text-inverse)",
   fontSize: "13px",
   fontWeight: 500,
   cursor: "pointer",

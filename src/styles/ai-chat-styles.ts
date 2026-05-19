@@ -96,8 +96,8 @@ export const messageBubbleStyle = (role: string): React.CSSProperties => ({
   // User messages: subtle shadow with primary color tint
   // Assistant messages: soft layered shadow for depth
   boxShadow: role === "user"
-    ? "0 2px 12px rgba(0, 123, 255, 0.2)"
-    : "0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03)",
+    ? "var(--orca-shadow-primary-glow)"
+    : "var(--orca-shadow-sm)",
   position: "relative",
 });
 
@@ -145,7 +145,7 @@ export const loadingBubbleStyle: React.CSSProperties = {
 export const codeBlockContainerStyle: React.CSSProperties = {
   marginTop: "12px",
   marginBottom: "12px",
-  borderRadius: "8px",
+  borderRadius: "var(--orca-radius-md)",
   border: "1px solid var(--orca-color-border)",
   overflow: "hidden",
   background: "var(--orca-color-bg-3)",
@@ -179,7 +179,7 @@ export const inlineCodeStyle: React.CSSProperties = {
   fontFamily: 'var(--orca-fontfamily-code)',
   background: "var(--orca-color-bg-3)",
   padding: "2px 6px",
-  borderRadius: "4px",
+  borderRadius: "var(--orca-radius-sm)",
   fontSize: "0.9em",
   border: "1px solid var(--orca-color-border)",
   color: "var(--orca-color-text-1)",
@@ -202,7 +202,7 @@ export const blockQuoteStyle: React.CSSProperties = {
   marginBottom: "12px",
   background: "var(--orca-color-bg-2)",
   padding: "12px 16px",
-  borderRadius: "8px",
+  borderRadius: "var(--orca-radius-md)",
   color: "var(--orca-color-text-2)",
   userSelect: "text", // 允许选择/复制 Markdown 内容
 };
@@ -280,9 +280,6 @@ export const listItemStyle: React.CSSProperties = {
   userSelect: "text", // Allow selection/copy of Markdown content
 };
 
-// Compatibility alias: list item content remains selectable for copy-paste.
-export const listItemStyle2: React.CSSProperties = listItemStyle;
-
 export const paragraphStyle: React.CSSProperties = {
   marginTop: "8px",
   marginBottom: "8px",
@@ -301,7 +298,7 @@ export const imageContainerStyle: React.CSSProperties = {
 export const imageStyle: React.CSSProperties = {
   maxWidth: "100%",
   maxHeight: "400px",
-  borderRadius: "8px",
+  borderRadius: "var(--orca-radius-md)",
   cursor: "pointer",
   objectFit: "contain",
   boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
@@ -320,7 +317,7 @@ export const actionBarStyle: React.CSSProperties = {
   gap: "4px",
   background: "var(--orca-color-bg-1)",
   border: "1px solid var(--orca-color-border)",
-  borderRadius: "4px",
+  borderRadius: "var(--orca-radius-sm)",
   padding: "2px",
   boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
   opacity: 0,
@@ -344,7 +341,7 @@ export const actionButtonStyle: React.CSSProperties = {
 export const toolCardStyle: React.CSSProperties = {
   marginTop: "8px",
   border: "1px solid var(--orca-color-border)",
-  borderRadius: "8px",
+  borderRadius: "var(--orca-radius-md)",
   overflow: "hidden",
   background: "var(--orca-color-bg-2)",
   fontSize: "0.9em",
@@ -418,18 +415,17 @@ export const suggestionGridStyle: React.CSSProperties = {
 export const suggestionCardStyle: React.CSSProperties = {
   padding: "16px",
   background: "var(--orca-color-bg-2)",
-  border: "1px solid var(--orca-color-border)",
   borderRadius: "12px",
   cursor: "pointer",
-  transition: "all 0.2s ease",
   display: "flex",
   flexDirection: "column",
   gap: "8px",
 };
 
 export const suggestionIconStyle: React.CSSProperties = {
-  fontSize: "20px",
+  fontSize: "22px",
   marginBottom: "4px",
+  color: "var(--orca-color-primary)",
 };
 
 export const suggestionTitleStyle: React.CSSProperties = {
@@ -456,10 +452,10 @@ type ToolStatus = "loading" | "success" | "failed" | "cancelled";
 export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => {
   // 状态颜色配置
   const statusColors = {
-    loading: { bg: "rgba(59, 130, 246, 0.08)", border: "rgba(59, 130, 246, 0.2)", text: "#3b82f6" },
-    success: { bg: "rgba(34, 197, 94, 0.08)", border: "rgba(34, 197, 94, 0.2)", text: "#22c55e" },
-    failed: { bg: "rgba(239, 68, 68, 0.08)", border: "rgba(239, 68, 68, 0.2)", text: "#ef4444" },
-    cancelled: { bg: "rgba(107, 114, 128, 0.08)", border: "rgba(107, 114, 128, 0.2)", text: "#6b7280" },
+    loading: { bg: "color-mix(in srgb, var(--orca-color-primary) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-primary) 20%, transparent)", text: "var(--orca-color-primary)" },
+    success: { bg: "color-mix(in srgb, var(--orca-color-success, #22c55e) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-success, #22c55e) 20%, transparent)", text: "var(--orca-color-success, #22c55e)" },
+    failed: { bg: "color-mix(in srgb, var(--orca-color-danger, #dc3545) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-danger, #dc3545) 20%, transparent)", text: "var(--orca-color-danger, #dc3545)" },
+    cancelled: { bg: "color-mix(in srgb, var(--orca-color-text-3) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-text-3) 20%, transparent)", text: "var(--orca-color-text-3)" },
   };
   const colors = statusColors[status];
   
@@ -518,7 +514,7 @@ export const toolStatusExpandButtonStyle: React.CSSProperties = {
   height: "20px",
   padding: 0,
   border: "none",
-  borderRadius: "4px",
+  borderRadius: "var(--orca-radius-sm)",
   background: "transparent",
   color: "var(--orca-color-text-3)",
   cursor: "pointer",
@@ -563,7 +559,7 @@ export const toolStatusRetryButtonStyle: React.CSSProperties = {
   padding: "4px 8px",
   fontSize: "12px",
   border: "1px solid var(--orca-color-border)",
-  borderRadius: "4px",
+  borderRadius: "var(--orca-radius-sm)",
   background: "var(--orca-color-bg-2)",
   color: "var(--orca-color-text-1)",
   cursor: "pointer",
@@ -582,3 +578,44 @@ export const messageTimeStyle = (role: string): React.CSSProperties => ({
   textAlign: role === "user" ? "right" : "left",
   userSelect: "none",
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Design Token Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Border radius tokens (matches CSS variables --orca-radius-*) */
+export const Radius = {
+  sm: "var(--orca-radius-sm)",     // 4px
+  md: "var(--orca-radius-md)",     // 8px
+  lg: "var(--orca-radius-lg)",     // 12px
+  xl: "var(--orca-radius-xl)",     // 16px
+  "2xl": "var(--orca-radius-2xl)", // 18px
+  full: "var(--orca-radius-full)", // 9999px
+} as const;
+
+/** Box shadow tokens (matches CSS variables --orca-shadow-*) */
+export const Shadow = {
+  xs: "var(--orca-shadow-xs)",
+  sm: "var(--orca-shadow-sm)",
+  md: "var(--orca-shadow-md)",
+  lg: "var(--orca-shadow-lg)",
+  xl: "var(--orca-shadow-xl)",
+  primaryGlow: "var(--orca-shadow-primary-glow)",
+} as const;
+
+/** Spacing tokens (matches CSS variables --orca-space-*) */
+export const Space = {
+  1: "var(--orca-space-1)",  // 4px
+  2: "var(--orca-space-2)",  // 8px
+  3: "var(--orca-space-3)",  // 12px
+  4: "var(--orca-space-4)",  // 16px
+  5: "var(--orca-space-5)",  // 20px
+  6: "var(--orca-space-6)",  // 24px
+} as const;
+
+/** Transition tokens (matches CSS variables --orca-transition-*) */
+export const Transition = {
+  fast: "var(--orca-transition-fast)",     // 0.15s ease
+  normal: "var(--orca-transition-normal)",  // 0.2s ease
+  slow: "var(--orca-transition-slow)",      // 0.3s ease
+} as const;

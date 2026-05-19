@@ -12,7 +12,7 @@ import {
   saveVisionModelConfig,
   getVisionCapableModels,
   type VisionModelConfig,
-} from "../services/vision-model-service";
+} from "../services/ai/vision-model-service";
 import { getAiChatSettings } from "../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 

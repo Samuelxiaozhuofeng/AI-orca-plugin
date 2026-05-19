@@ -1343,54 +1343,46 @@ export interface Orca {
     clearData(name: string): Promise<void>
 
     /**
-     * Reads a file from the plugin's data directory.
+     * Reads a file from the plugin's data directory in the current repository.
      *
      * @param name - The name of the plugin
      * @param filePath - The path to the file relative to the plugin's data directory
      * @param type - The expected return type, either "string" or "buffer" (defaults to "string")
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves to the file content as a string or ArrayBuffer, or null if not found
      *
      * @example
      * ```ts
-     * // Read as string from repo-local storage
+     * // Read as string
      * const config = await orca.plugins.readFile("my-plugin", "config.json")
      *
-     * // Read as binary from global plugin storage
-     * const imgData = await orca.plugins.readFile("my-plugin", "icon.png", "buffer", true)
+     * // Read as binary
+     * const imgData = await orca.plugins.readFile("my-plugin", "icon.png", "buffer")
      * ```
      */
     readFile(
       name: string,
       filePath: string,
       type?: "string" | "buffer",
-      pluginAsRoot?: boolean,
     ): Promise<string | ArrayBuffer | null>
 
     /**
-     * Writes a file to the plugin's data directory.
+     * Writes a file to the plugin's data directory in the current repository.
      * Automatically creates parent directories if they don't exist.
      *
      * @param name - The name of the plugin
      * @param filePath - The path to the file relative to the plugin's data directory
      * @param data - The data to write, either a string or an ArrayBuffer
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves when the file is written
      *
      * @example
      * ```ts
-     * // Write to repo-local storage
      * await orca.plugins.writeFile("my-plugin", "notes.txt", "Hello Orca!")
-     *
-     * // Write to global plugin storage
-     * await orca.plugins.writeFile("my-plugin", "global-config.json", data, true)
      * ```
      */
     writeFile(
       name: string,
       filePath: string,
       data: string | ArrayBuffer,
-      pluginAsRoot?: boolean,
     ): Promise<void>
 
     /**
@@ -1398,7 +1390,6 @@ export interface Orca {
      *
      * @param name - The name of the plugin
      * @param filePath - The path to the file relative to the plugin's data directory
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves when the file is removed
      *
      * @example
@@ -1406,14 +1397,13 @@ export interface Orca {
      * await orca.plugins.removeFile("my-plugin", "temp-log.txt")
      * ```
      */
-    removeFile(name: string, filePath: string, pluginAsRoot?: boolean): Promise<void>
+    removeFile(name: string, filePath: string): Promise<void>
 
     /**
      * Removes a folder from the plugin's data directory.
      *
      * @param name - The name of the plugin
      * @param folderPath - The path to the folder relative to the plugin's data directory
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves when the folder is removed
      *
      * @example
@@ -1421,13 +1411,12 @@ export interface Orca {
      * await orca.plugins.removeFolder("my-plugin", "temp-folder")
      * ```
      */
-    removeFolder(name: string, folderPath: string, pluginAsRoot?: boolean): Promise<void>
+    removeFolder(name: string, folderPath: string): Promise<void>
 
     /**
      * Lists all files in the plugin's data directory recursively.
      *
      * @param name - The name of the plugin
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves to an array of relative file paths
      *
      * @example
@@ -1436,14 +1425,13 @@ export interface Orca {
      * console.log("Plugin files:", files)
      * ```
      */
-    listFiles(name: string, pluginAsRoot?: boolean): Promise<string[]>
+    listFiles(name: string): Promise<string[]>
 
     /**
      * Checks if a file exists in the plugin's data directory.
      *
      * @param name - The name of the plugin
      * @param filePath - The path to the file relative to the plugin's data directory
-     * @param pluginAsRoot - Whether to use the plugin's directory as the root (defaults to false, which uses the repo's plugin data directory)
      * @returns A Promise that resolves to true if the file exists, false otherwise
      *
      * @example
@@ -1451,7 +1439,7 @@ export interface Orca {
      * const exists = await orca.plugins.existsFile("my-plugin", "data.json")
      * ```
      */
-    existsFile(name: string, filePath: string, pluginAsRoot?: boolean): Promise<boolean>
+    existsFile(name: string, filePath: string): Promise<boolean>
   }
 
   /**

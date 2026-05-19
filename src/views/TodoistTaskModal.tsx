@@ -17,7 +17,7 @@ import {
   setTodoistToken,
   validateToken,
   getProjects,
-} from "../services/todoist-service";
+} from "../services/external/todoist-service";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { withTooltip } from "../utils/orca-tooltip";
 import { todoistModalStore, type TodoistViewMode } from "../store/todoist-store";
@@ -623,8 +623,8 @@ function TokenSetup({ onTokenSaved }: { onTokenSaved: () => void }) {
     setIsValidating(true);
     setError("");
     try {
-      const isValid = await validateToken(token.trim());
-      if (!isValid) { setError("Token 无效，请检查后重试"); setIsValidating(false); return; }
+      const result = await validateToken(token.trim());
+      if (!result.valid) { setError(result.error || "Token 无效，请检查后重试"); setIsValidating(false); return; }
       const pluginName = getAiChatPluginName();
       await setTodoistToken(pluginName, token.trim());
       onTokenSaved();

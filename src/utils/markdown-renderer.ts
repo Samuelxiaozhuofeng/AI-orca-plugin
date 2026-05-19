@@ -49,7 +49,6 @@ export type MarkdownNode =
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
   | { type: "localgraph"; blockId: number }
-  | { type: "mindmap"; blockId: number }
   | { type: "gallery"; images: GalleryImage[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
@@ -490,22 +489,6 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
       }
     }
     
-    // Check if it's a mindmap code block
-    if (codeBlockLang.toLowerCase() === "mindmap") {
-      const blockIdStr = codeBlockLines.join("\n").trim();
-      const blockId = parseInt(blockIdStr, 10);
-      if (blockId > 0) {
-        nodes.push({
-          type: "mindmap",
-          blockId,
-        });
-        inCodeBlock = false;
-        codeBlockLang = "";
-        codeBlockLines = [];
-        return;
-      }
-    }
-    
     // Intercept graph/mermaid/dot code blocks - AI sometimes returns these despite instructions
     // Try to extract blockId from the content and convert to localgraph
     const graphLangs = ["graph", "mermaid", "flowchart", "dot", "graphviz", "diagram"];
@@ -576,7 +559,8 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
 
     if (rawLine.trim() === "") {
       flushParagraph();
-      flushList();
+      // 不 flushList()，空白行不应该中断列表
+      // 列表会在遇到非列表行、其他块元素或输入结束时正确 flush
       continue;
     }
 
@@ -879,6 +863,22 @@ function parseInlineMarkdown(text: string, depth = 0, insideLink = false): Markd
     // Block ID reference: "blockid:123" format (only outside of links)
     // This is the preferred format for AI to return block references
     if (!insideLink) {
+      // ((数字)) 双括号格式 - 标准块引用格式
+      const doubleBracketMatch = text.slice(i).match(/^\(\((\d+)\)\)/);
+      if (doubleBracketMatch) {
+        const blockId = parseInt(doubleBracketMatch[1], 10);
+        if (blockId > 0) {
+          flushBuffer();
+          nodes.push({
+            type: "link",
+            url: `orca-block:${blockId}`,
+            children: [{ type: "text", content: `${blockId}` }],
+          });
+          i += doubleBracketMatch[0].length;
+          continue;
+        }
+      }
+
       // Handle orca-block:123 format (direct block reference)
       const orcaBlockMatch = text.slice(i).match(/^orca-block:(\d+)/i);
       if (orcaBlockMatch) {

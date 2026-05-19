@@ -9,7 +9,12 @@ import { proxy } from "valtio";
  * 工具状态类型
  * - auto: 自动批准，AI 可以直接调用
  * - ask: 询问用户，每次调用前需要用户确认
- * - disabled: 禁用，AI 无法调用此工具
+ * - disabled: 禁用，不加载到工具列表中
+ * 
+ * 使用场景：
+ * - auto: 搜索、读取等安全操作
+ * - ask: 写入操作、联网搜索等需要用户确认的操作
+ * - disabled: 临时禁用某些工具，但保留配置
  */
 export type ToolStatus = "auto" | "ask" | "disabled";
 
@@ -31,57 +36,65 @@ export interface ToolCategory {
 }
 
 /**
- * 工具分类定义
+ * 工具分类定义（通过 MCP 外部工具动态注册）
  */
-export const TOOL_CATEGORIES: ToolCategory[] = [
-  {
-    name: "search",
-    label: "搜索",
-    tools: ["searchNotes", "queryByTagProperty", "query_blocks", "searchBlocksByReference"],
-  },
-  {
-    name: "read",
-    label: "读取",
-    tools: ["getPage", "getBlocksText", "getBlockMeta", "getBlockLinks"],
-  },
-  {
-    name: "journal",
-    label: "日记",
-    tools: ["getTodayJournal", "getJournalByDate", "getJournals"],
-  },
-  {
-    name: "write",
-    label: "写入",
-    tools: ["createBlock", "createPage", "insertTag", "updateTagProperties"],
-  },
-  {
-    name: "other",
-    label: "其他",
-    tools: ["getSavedAiConversations"],
-  },
-];
+export const TOOL_CATEGORIES: ToolCategory[] = [];
 
 /**
- * 工具显示名称映射
+ * 工具显示名称映射（内建工具已移除，MCP 工具自动注册）
  */
-export const TOOL_DISPLAY_NAMES: Record<string, string> = {
-  searchNotes: "全文搜索",
-  queryByTagProperty: "标签属性查询",
-  query_blocks: "高级查询",
-  searchBlocksByReference: "反链搜索",
-  getPage: "读取页面",
-  getBlocksText: "读取块内容",
-  getBlockMeta: "获取元数据",
-  getBlockLinks: "获取链接",
-  getTodayJournal: "今日日记",
-  getJournalByDate: "指定日期日记",
-  getJournals: "日记范围查询",
-  createBlock: "创建块",
-  createPage: "创建页面",
-  insertTag: "添加标签",
-  updateTagProperties: "更新标签属性",
-  getSavedAiConversations: "已保存对话",
-};
+export const TOOL_DISPLAY_NAMES: Record<string, string> = {};
+
+// ─── MCP 工具自动注册 ────────────────────────────────────────────────────────
+
+const MCP_CATEGORY_PREFIX = "mcp:";
+
+function ensureMcpCategory(serverId: string, serverLabel: string): ToolCategory {
+  const categoryName = `${MCP_CATEGORY_PREFIX}${serverId}`;
+  let cat = TOOL_CATEGORIES.find((c) => c.name === categoryName);
+  if (!cat) {
+    cat = { name: categoryName, label: serverLabel, tools: [] };
+    TOOL_CATEGORIES.push(cat);
+  }
+  return cat;
+}
+
+/** 注册一组 MCP 工具到工具管理 */
+export function registerMcpTools(
+  serverId: string,
+  serverLabel: string,
+  tools: Array<{ openaiName: string; displayName: string }>
+): void {
+  // 先注销该服务器的旧工具
+  unregisterMcpServerTools(serverId);
+
+  if (tools.length === 0) return;
+
+  const cat = ensureMcpCategory(serverId, serverLabel);
+  for (const tool of tools) {
+    TOOL_DISPLAY_NAMES[tool.openaiName] = tool.displayName;
+    cat.tools.push(tool.openaiName);
+  }
+}
+
+/** 注销某个服务器的所有 MCP 工具 */
+export function unregisterMcpServerTools(serverId: string): void {
+  const prefix = `mcp__`;
+  // 清理 DISPLAY_NAMES
+  for (const name of Object.keys(TOOL_DISPLAY_NAMES)) {
+    if (name.startsWith(prefix)) {
+      const rest = name.slice(prefix.length);
+      const sep = rest.indexOf("__");
+      if (sep !== -1 && rest.slice(0, sep) === serverId) {
+        delete TOOL_DISPLAY_NAMES[name];
+      }
+    }
+  }
+  // 清理 CATEGORIES
+  const categoryName = `${MCP_CATEGORY_PREFIX}${serverId}`;
+  const idx = TOOL_CATEGORIES.findIndex((c) => c.name === categoryName);
+  if (idx !== -1) TOOL_CATEGORIES.splice(idx, 1);
+}
 
 /**
  * 默认工具状态
@@ -108,18 +121,14 @@ interface ToolStore {
   showPanel: boolean;
   /** 联网搜索开关 */
   webSearchEnabled: boolean;
-  /** 图像搜索开关 */
+  /** 图片搜索开关 */
   imageSearchEnabled: boolean;
+  /** 维基百科搜索开关 */
+  wikipediaEnabled: boolean;
   /** Agentic RAG 开关（深度检索模式） */
   agenticRAGEnabled: boolean;
   /** Agentic RAG 配置 */
   agenticRAGConfig: AgenticRAGConfig;
-  /** 脚本分析开关（数据分析能力） */
-  scriptAnalysisEnabled: boolean;
-  /** Wikipedia 搜索开关 */
-  wikipediaEnabled: boolean;
-  /** 汇率查询开关 */
-  currencyEnabled: boolean;
 }
 
 export const toolStore = proxy<ToolStore>({
@@ -127,14 +136,12 @@ export const toolStore = proxy<ToolStore>({
   showPanel: false,
   webSearchEnabled: false,
   imageSearchEnabled: true,
+  wikipediaEnabled: true,
   agenticRAGEnabled: false,
   agenticRAGConfig: {
     maxIterations: 5,
     enableReflection: true,
   },
-  scriptAnalysisEnabled: false,
-  wikipediaEnabled: true,
-  currencyEnabled: true,
 });
 
 /**
@@ -188,14 +195,6 @@ export function toggleWebSearch(): void {
 }
 
 /**
- * 设置联网搜索状态
- */
-export function setWebSearchEnabled(enabled: boolean): void {
-  toolStore.webSearchEnabled = enabled;
-  saveToolSettings();
-}
-
-/**
  * 获取联网搜索状态
  */
 export function isWebSearchEnabled(): boolean {
@@ -203,7 +202,7 @@ export function isWebSearchEnabled(): boolean {
 }
 
 /**
- * 切换图像搜索开关
+ * 切换图片搜索开关
  */
 export function toggleImageSearch(): void {
   toolStore.imageSearchEnabled = !toolStore.imageSearchEnabled;
@@ -211,18 +210,25 @@ export function toggleImageSearch(): void {
 }
 
 /**
- * 设置图像搜索状态
+ * 获取图片搜索状态
  */
-export function setImageSearchEnabled(enabled: boolean): void {
-  toolStore.imageSearchEnabled = enabled;
+export function isImageSearchEnabled(): boolean {
+  return toolStore.imageSearchEnabled;
+}
+
+/**
+ * 切换维基百科搜索开关
+ */
+export function toggleWikipedia(): void {
+  toolStore.wikipediaEnabled = !toolStore.wikipediaEnabled;
   saveToolSettings();
 }
 
 /**
- * 获取图像搜索状态
+ * 获取维基百科搜索状态
  */
-export function isImageSearchEnabled(): boolean {
-  return toolStore.imageSearchEnabled;
+export function isWikipediaEnabled(): boolean {
+  return toolStore.wikipediaEnabled;
 }
 
 /**
@@ -234,14 +240,6 @@ export function toggleAgenticRAG(): void {
 }
 
 /**
- * 设置 Agentic RAG 状态
- */
-export function setAgenticRAGEnabled(enabled: boolean): void {
-  toolStore.agenticRAGEnabled = enabled;
-  saveToolSettings();
-}
-
-/**
  * 获取 Agentic RAG 状态
  */
 export function isAgenticRAGEnabled(): boolean {
@@ -249,87 +247,10 @@ export function isAgenticRAGEnabled(): boolean {
 }
 
 /**
- * 更新 Agentic RAG 配置
- */
-export function updateAgenticRAGConfig(config: Partial<AgenticRAGConfig>): void {
-  toolStore.agenticRAGConfig = { ...toolStore.agenticRAGConfig, ...config };
-  saveToolSettings();
-}
-
-/**
  * 获取 Agentic RAG 配置
  */
 export function getAgenticRAGConfig(): AgenticRAGConfig {
   return toolStore.agenticRAGConfig;
-}
-
-/**
- * 切换脚本分析开关
- */
-export function toggleScriptAnalysis(): void {
-  toolStore.scriptAnalysisEnabled = !toolStore.scriptAnalysisEnabled;
-  saveToolSettings();
-}
-
-/**
- * 设置脚本分析状态
- */
-export function setScriptAnalysisEnabled(enabled: boolean): void {
-  toolStore.scriptAnalysisEnabled = enabled;
-  saveToolSettings();
-}
-
-/**
- * 获取脚本分析状态
- */
-export function isScriptAnalysisEnabled(): boolean {
-  return toolStore.scriptAnalysisEnabled;
-}
-
-/**
- * 切换 Wikipedia 开关
- */
-export function toggleWikipedia(): void {
-  toolStore.wikipediaEnabled = !toolStore.wikipediaEnabled;
-  saveToolSettings();
-}
-
-/**
- * 设置 Wikipedia 状态
- */
-export function setWikipediaEnabled(enabled: boolean): void {
-  toolStore.wikipediaEnabled = enabled;
-  saveToolSettings();
-}
-
-/**
- * 获取 Wikipedia 状态
- */
-export function isWikipediaEnabled(): boolean {
-  return toolStore.wikipediaEnabled;
-}
-
-/**
- * 切换汇率查询开关
- */
-export function toggleCurrency(): void {
-  toolStore.currencyEnabled = !toolStore.currencyEnabled;
-  saveToolSettings();
-}
-
-/**
- * 设置汇率查询状态
- */
-export function setCurrencyEnabled(enabled: boolean): void {
-  toolStore.currencyEnabled = enabled;
-  saveToolSettings();
-}
-
-/**
- * 获取汇率查询状态
- */
-export function isCurrencyEnabled(): boolean {
-  return toolStore.currencyEnabled;
 }
 
 /**
@@ -341,11 +262,9 @@ async function saveToolSettings(): Promise<void> {
       toolStatus: toolStore.toolStatus,
       webSearchEnabled: toolStore.webSearchEnabled,
       imageSearchEnabled: toolStore.imageSearchEnabled,
+      wikipediaEnabled: toolStore.wikipediaEnabled,
       agenticRAGEnabled: toolStore.agenticRAGEnabled,
       agenticRAGConfig: toolStore.agenticRAGConfig,
-      scriptAnalysisEnabled: toolStore.scriptAnalysisEnabled,
-      wikipediaEnabled: toolStore.wikipediaEnabled,
-      currencyEnabled: toolStore.currencyEnabled,
     };
     
     // 同时使用 Orca 插件存储和 localStorage（双重保障）
@@ -385,10 +304,8 @@ export async function loadToolSettings(): Promise<void> {
           toolStore.toolStatus = parsed.toolStatus;
           toolStore.webSearchEnabled = parsed.webSearchEnabled ?? false;
           toolStore.imageSearchEnabled = parsed.imageSearchEnabled ?? true;
-          toolStore.agenticRAGEnabled = parsed.agenticRAGEnabled ?? false;
-          toolStore.scriptAnalysisEnabled = parsed.scriptAnalysisEnabled ?? false;
           toolStore.wikipediaEnabled = parsed.wikipediaEnabled ?? true;
-          toolStore.currencyEnabled = parsed.currencyEnabled ?? true;
+          toolStore.agenticRAGEnabled = parsed.agenticRAGEnabled ?? false;
           if (parsed.agenticRAGConfig) {
             toolStore.agenticRAGConfig = {
               ...toolStore.agenticRAGConfig,

@@ -24,11 +24,11 @@ import { textareaStyle, sendButtonStyle } from "./chat-input";
 import { MultiModelToggleButton } from "../components/MultiModelSelector";
 import { multiModelStore } from "../store/multi-model-store";
 import ToolPanel from "../components/ToolPanel";
-import { loadToolSettings, toolStore, toggleWebSearch, toggleAgenticRAG, toggleScriptAnalysis } from "../store/tool-store";
+import { loadToolSettings, toolStore, toggleWebSearch, toggleAgenticRAG } from "../store/tool-store";
 import { getAllCommandsInfo } from "../services/commands-loader";
-import { listSkills } from "../services/skills-manager";
-import type { SkillRef } from "../services/skills-manager";
-import { recommendSkills, type SkillRecommendation, getSkillSummary } from "../services/skill-recommender";
+import { listSkills } from "../services/ai/skills-manager";
+import type { SkillRef } from "../types/skills";
+import { recommendSkills, type SkillRecommendation, getSkillSummary } from "../services/ai/skill-recommender";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -74,7 +74,6 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
   // Visualization 可视化类
   { command: "/card", description: "生成闪卡，交互式复习并保存", icon: "ti ti-cards", category: "visualization" },
   { command: "/localgraph", description: "显示页面的链接关系图谱", icon: "ti ti-share", category: "visualization" },
-  { command: "/mindmap", description: "显示块及子块的思维导图", icon: "ti ti-binary-tree", category: "visualization" },
   { command: "/diagram", description: "生成流程图或示意图", icon: "ti ti-chart-dots", category: "visualization" },
   // Skill 技能
   { command: "/skill", description: "让 AI 生成技能草稿（可附加需求）", icon: "ti ti-wand", category: "skill" },
@@ -128,7 +127,6 @@ const inputContainerStyle: React.CSSProperties = {
 
 const TOOLBAR_HIDE_BREAKPOINTS = {
   token: 520,
-  script: 480,
   rag: 440,
   web: 400,
   multi: 360,
@@ -287,17 +285,15 @@ export default function ChatInput({
 
   const overflowFlags = useMemo(() => {
     const width = toolbarWidth || 9999;
-    const hideScript = width < TOOLBAR_HIDE_BREAKPOINTS.script;
     const hideRag = width < TOOLBAR_HIDE_BREAKPOINTS.rag;
     const hideWeb = width < TOOLBAR_HIDE_BREAKPOINTS.web;
     const hideMulti = width < TOOLBAR_HIDE_BREAKPOINTS.multi;
     const hideInjection = width < TOOLBAR_HIDE_BREAKPOINTS.injection;
     const hideMode = width < TOOLBAR_HIDE_BREAKPOINTS.mode;
     const hideClear = width < TOOLBAR_HIDE_BREAKPOINTS.clear;
-    const hasOverflow = hideScript || hideRag || hideWeb || hideMulti || hideInjection || hideMode || hideClear;
+    const hasOverflow = hideRag || hideWeb || hideMulti || hideInjection || hideMode || hideClear;
 
     return {
-      hideScript,
       hideRag,
       hideWeb,
       hideMulti,
@@ -309,7 +305,7 @@ export default function ChatInput({
   }, [toolbarWidth]);
 
   const showModeSection = overflowFlags.hideMulti || overflowFlags.hideInjection || overflowFlags.hideMode;
-  const showToolSection = overflowFlags.hideWeb || overflowFlags.hideRag || overflowFlags.hideScript;
+  const showToolSection = overflowFlags.hideWeb || overflowFlags.hideRag;
   const showTokenIndicator = tokenEstimate.inputTokens > 0;
 
   // 检测是否显示斜杠命令菜单 - 使用模糊匹配
@@ -342,9 +338,9 @@ export default function ChatInput({
     const query = text.slice(1).toLowerCase(); // 移除开头的 #
     if (query.includes(" ")) return []; // 如果有空格，不显示菜单
     
-    // 使用模糊匹配过滤 Skills
-    return availableSkills.filter(skill => 
-      fuzzyMatch(query, skill.id)
+    // 使用模糊匹配过滤 Skills (按名称匹配)
+    return availableSkills.filter(skill =>
+      fuzzyMatch(query, skill.name)
     );
   }, [text, availableSkills]);
 
@@ -1088,9 +1084,10 @@ export default function ChatInput({
             key: skill.id,
             "data-skill-index": index,
             onClick: () => {
-              setText(`#${skill.id} `);
+              const triggerName = skill.name || skill.id;
+              setText(`#${triggerName} `);
               if (textareaRef.current) {
-                textareaRef.current.value = `#${skill.id} `;
+                textareaRef.current.value = `#${triggerName} `;
                 textareaRef.current.focus();
               }
               setSkillMenuOpen(false);
@@ -1108,17 +1105,17 @@ export default function ChatInput({
               className: "ti ti-wand", 
               style: { fontSize: "14px", color: "var(--orca-color-success, #10b981)", width: "18px", textAlign: "center" } 
             }),
-            createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-success, #10b981)" } }, `#${skill.id}`),
-            skill.isGlobal && createElement("span", { 
-              style: { 
-                fontSize: "10px", 
+            createElement("span", { style: { fontWeight: 600, color: "var(--orca-color-success, #10b981)" } }, `#${skill.name || skill.id}`),
+            skill.scope !== "local" && createElement("span", {
+              style: {
+                fontSize: "10px",
                 color: "var(--orca-color-text-4)",
                 padding: "2px 6px",
                 background: "var(--orca-color-bg-3)",
                 borderRadius: "4px",
                 marginLeft: "auto"
-              } 
-            }, "\u5168\u5c40")
+              }
+            }, skill.scope === "global" ? "\u5168\u5c40" : "\u5c40\u90e8")
           )
         )
       ),
@@ -1166,23 +1163,16 @@ export default function ChatInput({
                 border: "1px solid rgba(16, 185, 129, 0.3)",
                 borderRadius: "6px",
                 cursor: "pointer",
-                background: "var(--orca-color-bg-1)",
                 color: "var(--orca-color-success, #10b981)",
                 display: "flex",
                 alignItems: "center",
                 gap: "4px",
-                transition: "all 0.15s ease",
               },
-              onMouseEnter: (e: any) => {
-                e.target.style.background = "rgba(16, 185, 129, 0.1)";
-              },
-              onMouseLeave: (e: any) => {
-                e.target.style.background = "var(--orca-color-bg-1)";
-              },
+              className: "skill-rec-btn",
               title: `${getSkillSummary(rec.skill)}\n${rec.matchReason}`,
             },
             createElement("i", { className: "ti ti-wand", style: { fontSize: "12px" } }),
-            rec.skill.metadata.name || rec.skill.id
+            rec.skill.name || rec.skill.id
           )
         ),
         createElement(
@@ -1677,27 +1667,6 @@ export default function ChatInput({
               createElement("i", { className: "ti ti-brain" })
             )
           ),
-          !overflowFlags.hideScript && withTooltip(
-            tooltipText(
-              toolSnap.scriptAnalysisEnabled
-                ? "\u5173\u95ed\u6570\u636e\u5206\u6790\\n\u5f53\u524d\uff1aAI \u53ef\u4ee5\u6267\u884c\u811a\u672c\u5206\u6790\u7b14\u8bb0\u6570\u636e"
-                : "\u5f00\u542f\u6570\u636e\u5206\u6790\\n\u5f00\u542f\u540e\uff1aAI \u53ef\u4ee5\u7edf\u8ba1\u8bcd\u9891\u3001\u641c\u7d22\u6b21\u6570\u7b49\uff0c\u8fd4\u56de\u771f\u5b9e\u6570\u636e"
-            ),
-            createElement(
-              Button,
-              {
-                variant: "plain",
-                onClick: toggleScriptAnalysis,
-                style: {
-                  padding: "4px",
-                  color: toolSnap.scriptAnalysisEnabled ? "var(--orca-color-success, #10b981)" : undefined,
-                  background: toolSnap.scriptAnalysisEnabled ? "rgba(16, 185, 129, 0.1)" : undefined,
-                  borderRadius: "4px",
-                },
-              },
-              createElement("i", { className: "ti ti-chart-bar" })
-            )
-          ),
         ),
 
         createElement(
@@ -1813,28 +1782,7 @@ export default function ChatInput({
                       )
                     )
                   ),
-                  overflowFlags.hideScript && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u6570\u636e\u5206\u6790"),
-                    withTooltip(
-                      toolSnap.scriptAnalysisEnabled ? "\u5173\u95ed\u6570\u636e\u5206\u6790" : "\u5f00\u542f\u6570\u636e\u5206\u6790",
-                      createElement(
-                        Button,
-                        {
-                          variant: "plain",
-                          onClick: toggleScriptAnalysis,
-                          style: {
-                            ...overflowToggleButtonStyle,
-                            color: toolSnap.scriptAnalysisEnabled ? "var(--orca-color-success, #10b981)" : undefined,
-                            background: toolSnap.scriptAnalysisEnabled ? "rgba(16, 185, 129, 0.1)" : undefined,
-                          },
-                        },
-                        createElement("i", { className: "ti ti-chart-bar" })
-                      )
-                    )
-                  ),
-                ),
+              ),
             },
             (openMenu: (e: any) => void) =>
               withTooltip(

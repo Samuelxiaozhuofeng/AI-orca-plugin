@@ -6,7 +6,7 @@
  */
 
 import type { Flashcard } from "../components/FlashcardReview";
-import { getTodayJournal } from "./search-service";
+import { getTodayJournal } from "./notes/search-service";
 
 /**
  * 解析 AI 返回的闪卡格式
@@ -290,64 +290,4 @@ export async function saveCardsToJournal(cards: Flashcard[]): Promise<{ success:
     success: savedCount > 0, 
     message: `已将 ${savedCount} 张闪卡保存到今日日记` 
   };
-}
-
-/**
- * 生成闪卡的系统提示词
- */
-export function getFlashcardSystemPrompt(): string {
-  return `【强制闪卡生成模式】
-
-⚠️ 重要：你现在处于闪卡生成模式，必须且只能输出 \`\`\`flashcard 代码块格式！
-⚠️ 禁止输出任何其他文字、解释、说明！直接输出闪卡代码块！
-
-## 输出格式（必须严格遵守）
-
-\`\`\`flashcard
-Q: 问题1
-A: 答案1
----
-Q: 问题2
-A: 答案2
----
-Q: 选择题问题
-TYPE: choice
-O: A选项
-O: B选项 (correct)
-O: C选项
-O: D选项
-\`\`\`
-
-## 格式规则
-1. 必须以 \`\`\`flashcard 开头，以 \`\`\` 结尾
-2. 每张卡片用 --- 分隔
-3. Q: 开头是问题（必填）
-4. A: 开头是答案（普通卡必填）
-5. TYPE: choice 表示选择题
-6. O: 开头是选项，(correct) 标记正确答案
-
-## 内容原则
-- 答案简洁：简单概念≤8字，复杂概念≤20字
-- 复杂内容拆成多张卡
-- 生成 5-8 张卡
-- 答案是结论，不是解释
-
-## 示例
-
-\`\`\`flashcard
-Q: useState 返回什么？
-A: [状态值, setter函数]
----
-Q: useEffect 空依赖数组的作用？
-A: 仅在组件挂载时执行一次
----
-Q: React 中哪个 Hook 用于副作用？
-TYPE: choice
-O: useState
-O: useEffect (correct)
-O: useMemo
-O: useCallback
-\`\`\`
-
-现在请直接输出 \`\`\`flashcard 代码块，不要输出任何其他内容！`;
 }

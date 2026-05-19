@@ -20,11 +20,12 @@
  * ```
  */
 
-import { getAiChatSettings, getModelApiConfig, validateCurrentConfig, DEFAULT_SYSTEM_PROMPT } from "../settings/ai-chat-settings";
+import { getAiChatSettings, getModelApiConfig, validateCurrentConfig } from "../settings/ai-chat-settings";
+import { buildDynamicSystemPrompt } from "./ai/dynamic-prompt";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
-import { buildConversationMessages } from "./message-builder";
-import { streamChatWithRetry, type StreamChunk, type ToolCallInfo } from "./chat-stream-handler";
-import { TOOLS, executeTool } from "./ai-tools";
+import { buildConversationMessages } from "./ai/message-builder";
+import { streamChatWithRetry, type StreamChunk, type ToolCallInfo } from "./ai/chat-stream-handler";
+import { TOOLS, executeTool, getTools } from "./ai/ai-tools";
 import type { Message } from "./session-service";
 import { nowId } from "../utils/text-utils";
 
@@ -53,6 +54,8 @@ export interface PluginApiOptions {
   timeoutMs?: number;
   /** 最大工具调用轮数，默认 5 */
   maxToolRounds?: number;
+  /** 启用 Todoist AI 工具模式 */
+  todoistEnabled?: boolean;
   /** AbortSignal 用于取消请求 */
   signal?: AbortSignal;
 }
@@ -173,17 +176,20 @@ export const AiChatPluginAPI = {
 
     const {
       model = settings.selectedModelId,
-      systemPrompt = DEFAULT_SYSTEM_PROMPT,
+      systemPrompt = buildDynamicSystemPrompt(),
       enableTools = true,
-      tools = TOOLS,
       temperature = settings.temperature,
       maxTokens = settings.maxTokens,
       history = [],
       contextText = "",
       timeoutMs = 60000,
       maxToolRounds = settings.maxToolRounds || 5,
+      todoistEnabled = false,
       signal,
     } = options;
+
+    // 动态获取工具列表（包含外部 MCP 工具）
+    const tools = options.tools ?? getTools(false, todoistEnabled);
 
     // 获取 API 配置
     const apiConfig = getModelApiConfig(settings, model);
@@ -346,7 +352,7 @@ export const AiChatPluginAPI = {
         result: {
           success: true,
           content: currentContent,
-          reasoning: currentReasoning || undefined,
+          reasoning: currentReasoning != null ? currentReasoning : undefined,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           toolResults: toolResults.length > 0 ? toolResults : undefined,
           conversation,
@@ -390,7 +396,7 @@ export const AiChatPluginAPI = {
    * @returns 工具定义列表
    */
   getAvailableTools() {
-    return TOOLS.map(tool => ({
+    return getTools().map(tool => ({
       name: tool.function.name,
       description: tool.function.description,
       parameters: tool.function.parameters,

@@ -3,10 +3,11 @@ import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-c
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
 import { loadMemoryStore } from "./store/memory-store";
 import { AiChatPluginAPI } from "./services/plugin-api";
-import { ensureBuiltInSkills } from "./services/skills-manager";
-import { initToolPrompts } from "./services/tool-prompt-loader";
+
 import { initCommands } from "./services/commands-loader";
-import { loadVisionModelConfig } from "./services/vision-model-service";
+import { loadVisionModelConfig } from "./services/ai/vision-model-service";
+import { initMcpServers } from "./services/external/mcp-server-manager";
+import { loadMcpSettings, ensureDefaultMcpServer } from "./store/mcp-store";
 
 let pluginName: string;
 let hideableObserver: MutationObserver | null = null;
@@ -139,14 +140,15 @@ export async function load(_name: string) {
   // 加载视觉模型配置
   await loadVisionModelConfig(pluginName);
 
-  // 初始化内置 Skills（必须在 registerAiChatUI 之后）
-  await ensureBuiltInSkills();
-
-  // 初始化 Tool-Prompt 目录（确保工具说明文件存在）
-  await initToolPrompts();
+  // 内置 Skills 已从代码常量加载，无需文件初始化
 
   // 初始化 Commands 目录（确保默认命令模板存在）
   await initCommands();
+
+  // 初始化 MCP 服务器连接（非阻塞，允许失败）
+  await loadMcpSettings();
+  ensureDefaultMcpServer();
+  initMcpServers().catch((err) => console.warn("[MCP] 初始化出错:", err));
 
   // 挂载 Plugin API 到全局，供外部插件调用
   (window as any).AiChatPluginAPI = AiChatPluginAPI;

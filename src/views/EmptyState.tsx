@@ -21,25 +21,25 @@ interface EmptyStateProps {
 
 const SUGGESTIONS = [
   {
-    icon: "📝",
+    icon: "ti ti-notes",
     title: "总结当前笔记",
     desc: "快速获取当前页面的核心内容摘要",
     prompt: "请总结当前笔记的主要内容。",
   },
   {
-    icon: "🔍",
+    icon: "ti ti-search",
     title: "搜索我的笔记",
     desc: "查找包含特定关键词的笔记块",
     prompt: "请帮我搜索关于[关键词]的笔记。",
   },
   {
-    icon: "✨",
+    icon: "ti ti-wand",
     title: "润色这段文字",
     desc: "优化选中文字的表达和流畅度",
     prompt: "请帮我润色这段文字：[粘贴文字]",
   },
   {
-    icon: "💡",
+    icon: "ti ti-bulb",
     title: "AI 能做什么？",
     desc: "了解 AI 助手的功能和使用技巧",
     prompt: "请介绍一下你可以帮我做哪些事情？有哪些可用的工具？",
@@ -92,26 +92,11 @@ export default function EmptyState({ onSuggestionClick }: EmptyStateProps) {
           "div",
           {
             key: index,
-            style: {
-              ...suggestionCardStyle,
-              // Smooth transition for hover animation (Requirements 3.2)
-              transition: "all 0.2s ease",
-            },
-            className: `suggestion-card-stagger-${index}`,
+            style: suggestionCardStyle,
+            className: `suggestion-card suggestion-card-stagger-${index}`,
             onClick: () => onSuggestionClick(item.prompt),
-            // Card hover animation: scale up slightly (Requirements 3.2)
-            onMouseEnter: (e: any) => {
-              e.currentTarget.style.transform = "scale(1.03)";
-              e.currentTarget.style.boxShadow = "0 6px 16px rgba(0,0,0,0.1)";
-              e.currentTarget.style.borderColor = "var(--orca-color-primary)";
-            },
-            onMouseLeave: (e: any) => {
-              e.currentTarget.style.transform = "scale(1)";
-              e.currentTarget.style.boxShadow = "none";
-              e.currentTarget.style.borderColor = "var(--orca-color-border)";
-            },
           },
-          createElement("div", { style: suggestionIconStyle }, item.icon),
+          createElement("i", { className: item.icon, style: suggestionIconStyle }),
           createElement("div", { style: suggestionTitleStyle }, item.title),
           createElement("div", { style: suggestionDescStyle }, item.desc)
         )

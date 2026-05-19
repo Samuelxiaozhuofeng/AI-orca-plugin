@@ -41,7 +41,7 @@ function buildCommandPath(commandName: string): string {
 async function readFile(path: string): Promise<string | null> {
   const pluginName = getPluginName();
   try {
-    const content = await orca.plugins.readFile(pluginName, path, "string", true);
+    const content = await orca.plugins.readFile(pluginName, path, "string");
     if (!content) return null;
     return typeof content === 'string'
       ? content
@@ -54,13 +54,13 @@ async function readFile(path: string): Promise<string | null> {
 /** 写入文件（全局存储） */
 async function writeFile(path: string, content: string): Promise<void> {
   const pluginName = getPluginName();
-  await orca.plugins.writeFile(pluginName, path, content, true);
+  await orca.plugins.writeFile(pluginName, path, content);
 }
 
 /** 列出所有文件（全局存储） */
 async function listFiles(): Promise<string[]> {
   const pluginName = getPluginName();
-  return orca.plugins.listFiles(pluginName, true);
+  return orca.plugins.listFiles(pluginName);
 }
 
 /** 检查文件是否存在 */
@@ -204,17 +204,6 @@ export async function getAllCommandsInfo(): Promise<Array<{ name: string; descri
   }
   
   return result;
-}
-
-/**
- * 清除指定命令的缓存
- */
-export function clearCommandCache(commandName?: string): void {
-  if (commandName) {
-    commandCache.delete(commandName);
-  } else {
-    commandCache.clear();
-  }
 }
 
 /**

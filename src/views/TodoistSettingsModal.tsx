@@ -8,7 +8,7 @@ import {
   setTodoistToken,
   validateToken,
   clearTokenCache,
-} from "../services/todoist-service";
+} from "../services/external/todoist-service";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 
 const { createElement, useState, useCallback, useEffect } = window.React as any;
@@ -178,9 +178,9 @@ export default function TodoistSettingsModal({
     setSuccess("");
 
     try {
-      const isValid = await validateToken(token.trim());
-      if (!isValid) {
-        setError("Token 无效，请检查后重试");
+      const result = await validateToken(token.trim());
+      if (!result.valid) {
+        setError(result.error || "Token 无效，请检查后重试");
         setIsValidating(false);
         return;
       }

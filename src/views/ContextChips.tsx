@@ -147,13 +147,11 @@ export default function ContextChips({
                 onClick: () => handleRemove(ref),
                 style: {
                   cursor: "pointer",
-                  opacity: 0.6,
                   marginLeft: 2,
                   display: "inline-flex",
                   alignItems: "center",
                 },
-                onMouseEnter: (e: any) => (e.currentTarget.style.opacity = "1"),
-                onMouseLeave: (e: any) => (e.currentTarget.style.opacity = "0.6"),
+                className: "context-chip-remove",
               },
               createElement("i", { className: "ti ti-x", style: { fontSize: 12 } })
             )

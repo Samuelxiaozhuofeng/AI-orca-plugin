@@ -199,15 +199,6 @@ export function setShowTimestamps(show: boolean): void {
   displaySettingsStore.showTimestamps = show;
 }
 
-/**
- * Reset to default settings
- */
-export function resetDisplaySettings(): void {
-  displaySettingsStore.fontSize = DEFAULT_SETTINGS.fontSize;
-  displaySettingsStore.compactMode = DEFAULT_SETTINGS.compactMode;
-  displaySettingsStore.showTimestamps = DEFAULT_SETTINGS.showTimestamps;
-}
-
 // ============================================================================
 // Utility Functions (Pure functions for testing)
 // ============================================================================
@@ -220,16 +211,6 @@ export function resetDisplaySettings(): void {
  */
 export function getMessageGap(compactMode: boolean): number {
   return compactMode ? spacingConfig.compact.messageGap : spacingConfig.comfortable.messageGap;
-}
-
-/**
- * Get the message padding based on compact mode
- * 
- * **Feature: chat-ui-enhancement, Property 10: Compact mode spacing reduction**
- * **Validates: Requirements 12.2**
- */
-export function getMessagePadding(compactMode: boolean): string {
-  return compactMode ? spacingConfig.compact.messagePadding : spacingConfig.comfortable.messagePadding;
 }
 
 /**
@@ -252,9 +233,3 @@ export function shouldRenderTimestamp(showTimestamps: boolean): boolean {
   return showTimestamps;
 }
 
-/**
- * Get font size in pixels
- */
-export function getFontSizeValue(fontSize: FontSize): string {
-  return fontSizeMap[fontSize];
-}

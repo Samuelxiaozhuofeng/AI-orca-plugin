@@ -20,11 +20,3 @@ export const todoistModalStore: TodoistModalState = proxy({
   viewMode: "today" as TodoistViewMode,
 });
 
-/**
- * 关闭所有 Todoist Modal
- */
-export function closeTodoistModals(): void {
-  todoistModalStore.showTaskList = false;
-  todoistModalStore.showAddTask = false;
-  todoistModalStore.addTaskContent = "";
-}

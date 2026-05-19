@@ -4,7 +4,7 @@
  * Requirements: 13.1
  */
 
-import type { ExtractedMemory } from "../services/memory-extraction";
+import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {
@@ -164,7 +164,7 @@ export default function ExtractMemoryButton({
 
     try {
       // Dynamic import to avoid circular dependencies
-      const { extractMemories } = await import("../services/memory-extraction");
+      const { extractMemories } = await import("../services/ai/memory-extraction");
       const result = await extractMemories(conversationContext, prompt);
 
       if (!result.success) {

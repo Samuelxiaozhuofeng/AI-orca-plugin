@@ -10,7 +10,7 @@
 
 import MessageItem from "../views/MessageItem";
 import type { Message } from "../services/session-service";
-import type { ExtractedMemory } from "../services/memory-extraction";
+import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { messageListStyle } from "../styles/ai-chat-styles";
 
 const React = window.React as unknown as {

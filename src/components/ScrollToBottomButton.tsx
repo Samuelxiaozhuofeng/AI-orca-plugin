@@ -44,7 +44,7 @@ const buttonStyle: React.CSSProperties = {
   alignItems: "center",
   gap: "6px",
   padding: "10px 18px",
-  borderRadius: "24px",
+  borderRadius: "var(--orca-radius-full)",
   border: "1px solid var(--orca-color-border, rgba(128, 128, 128, 0.2))",
   background: "var(--orca-color-bg-1, #fff)",
   boxShadow: "0 4px 20px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08)",
@@ -80,7 +80,7 @@ const badgeStyle: React.CSSProperties = {
   borderRadius: "10px",
   background: "var(--orca-color-primary, #007bff)",
   border: "none",
-  color: "#fff",
+  color: "var(--orca-color-text-inverse)",
   fontSize: "11px",
   fontWeight: 600,
 };

@@ -5,6 +5,49 @@
  */
 
 export const chatAnimations = `
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design Tokens
+   统一的设计变量，供所有组件引用
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  /* Border Radius Scale */
+  --orca-radius-sm: 4px;
+  --orca-radius-md: 8px;
+  --orca-radius-lg: 12px;
+  --orca-radius-xl: 16px;
+  --orca-radius-2xl: 18px;
+  --orca-radius-full: 9999px;
+
+  /* Elevation / Shadow Scale */
+  --orca-shadow-xs: 0 1px 2px rgba(0,0,0,0.04);
+  --orca-shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.03);
+  --orca-shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --orca-shadow-lg: 0 4px 20px rgba(0,0,0,0.12);
+  --orca-shadow-xl: 0 8px 30px rgba(0,0,0,0.15);
+  --orca-shadow-primary-glow: 0 2px 12px rgba(0, 123, 255, 0.2);
+
+  /* Spacing Scale (4px grid) */
+  --orca-space-1: 4px;
+  --orca-space-2: 8px;
+  --orca-space-3: 12px;
+  --orca-space-4: 16px;
+  --orca-space-5: 20px;
+  --orca-space-6: 24px;
+
+  /* Transition Tokens */
+  --orca-transition-fast: 0.15s ease;
+  --orca-transition-normal: 0.2s ease;
+  --orca-transition-slow: 0.3s ease;
+}
+
+@keyframes orca-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes orca-slide-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 @keyframes blink {
     0%, 50% { opacity: 1; }
     51%, 100% { opacity: 0; }
@@ -1469,21 +1512,22 @@ br + .md-block-dot {
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Panel Background Override
-   去除面板内多余的背景色和边框
+   去除 AI Chat 插件面板内多余的背景色和边框
+   使用 data-panel-title 限定范围，避免影响其他 Orca 面板
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* .orca-hideable 的直接子元素去掉背景色 */
-#main .orca-panel.active > .orca-hideable > div {
+#main .orca-panel.active[data-panel-title="AI Chat"] > .orca-hideable > div {
     background: transparent !important;
 }
 
 /* .orca-hideable 内第一个子元素去掉背景色 */
-#main .orca-panel.active > .orca-hideable > div > div:first-child {
+#main .orca-panel.active[data-panel-title="AI Chat"] > .orca-hideable > div > div:first-child {
     background: transparent !important;
 }
 
 /* .orca-hideable 内第四个子元素去掉边框和背景色 */
-#main .orca-panel.active > .orca-hideable > div > div:nth-child(4) {
+#main .orca-panel.active[data-panel-title="AI Chat"] > .orca-hideable > div > div:nth-child(4) {
     border-top: none !important;
     background: transparent !important;
 }
@@ -1492,6 +1536,48 @@ br + .md-block-dot {
 .message-bubble-user {
     background: var(--orca-color-bg-1) !important;
     box-shadow: none !important;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   CSS Class-based Hover States
+   替代内联 onMouseEnter/onMouseLeave 处理器
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Suggestion Card Hover (EmptyState) */
+.suggestion-card {
+    border: 1px solid var(--orca-color-border);
+    transition: all 0.2s ease;
+}
+.suggestion-card:hover {
+    transform: scale(1.03);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.1);
+    border-color: var(--orca-color-primary);
+}
+
+/* Header Menu Item Hover */
+.header-menu-item {
+    transition: background 0.1s ease;
+}
+.header-menu-item:hover {
+    background: var(--orca-color-bg-2);
+}
+
+/* Context Chip Remove Button Hover */
+.context-chip-remove {
+    transition: opacity 0.15s ease;
+    opacity: 0.6;
+}
+.context-chip-remove:hover {
+    opacity: 1;
+}
+
+/* Skill Recommendation Button Hover */
+.skill-rec-btn {
+    background: var(--orca-color-bg-1);
+    transition: all 0.15s ease;
+}
+.skill-rec-btn:hover {
+    background: rgba(16, 185, 129, 0.1);
 }
 
 `;
@@ -1530,21 +1616,6 @@ export function injectChatStyles(): () => void {
 }
 
 /**
- * 检查样式是否存在，如果不存在则自动注入
- */
-export function checkStylesExist(): boolean {
-  const domElement = document.getElementById("ai-chat-styles");
-  const exists = !!domElement;
-  
-  // 如果 DOM 中存在但变量丢失，恢复引用
-  if (domElement && !styleElement) {
-    styleElement = domElement as HTMLStyleElement;
-  }
-  
-  return exists;
-}
-
-/**
  * 确保样式存在（用于块渲染器）
  * 每次调用都会检查 DOM 中是否存在样式，如果不存在则重新注入
  */
@@ -1564,13 +1635,3 @@ export function ensureChatStyles(): void {
   }
 }
 
-/**
- * 强制移除样式（仅在插件卸载时调用）
- */
-export function removeChatStyles(): void {
-  if (styleElement) {
-    document.head.removeChild(styleElement);
-    styleElement = null;
-  }
-  refCount = 0;
-}

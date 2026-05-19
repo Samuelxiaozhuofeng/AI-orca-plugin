@@ -3,7 +3,7 @@
  * 全局图片预览模态框，提供统一的图片预览体验
  */
 
-import { subscribeToPreview, closeImagePreview, getCurrentPreviewImage, type ImagePreviewItem } from "../services/image-preview-service";
+import { subscribeToPreview, closeImagePreview, getCurrentPreviewImage, type ImagePreviewItem } from "../services/external/image-preview-service";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {
