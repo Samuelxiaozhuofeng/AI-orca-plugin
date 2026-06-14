@@ -2,7 +2,7 @@
 
 **智能笔记助手插件** - 为 Orca Note 提供强大的 AI 对话能力
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.1-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 🌟 核心特性
@@ -184,6 +184,11 @@ const result = await executeTool("searchNotes", { query: "test" });
 ```
 
 ## 📝 更新日志
+
+### v2.0.1 (2026-06-14)
+- 📦 补齐插件市场发布包元信息
+- 🧩 新增插件图标与 LICENSE
+- ✅ 清理发布包结构，适配 awesome-orcanote 收录要求
 
 ### v2.0.0 (2026-02-01)
 - ✨ 完整架构文档

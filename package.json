@@ -1,10 +1,18 @@
 {
-  "name": "orca-plugin-template",
-  "version": "0.0.0",
+  "name": "aiichat",
+  "version": "2.0.1",
+  "description": "AI chat assistant plugin for Orca Note with multi-model chat, note tools, skills, memory, and file understanding.",
+  "license": "MIT",
+  "homepage": "https://github.com/Samuelxiaozhuofeng/AI-orca-plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Samuelxiaozhuofeng/AI-orca-plugin.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && node scripts/post-build.mjs",
+    "package": "node scripts/package-release.mjs",
     "preview": "vite preview",
     "test": "node scripts/run-tests.mjs"
   },
