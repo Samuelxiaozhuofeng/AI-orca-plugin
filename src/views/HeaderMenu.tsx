@@ -178,7 +178,7 @@ export default function HeaderMenu({
             className: "header-menu-item",
           },
           createElement("i", { className: "ti ti-clock" }),
-          "流式设置"
+          "流式 / 工具设置"
         ),
         // Web Search Settings
         onOpenWebSearchSettings && createElement(

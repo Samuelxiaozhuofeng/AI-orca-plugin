@@ -411,6 +411,25 @@ export async function buildContextForSend(
         continue;
       }
 
+      if (ctx.kind === "block") {
+        const title =
+          ctx.title ??
+          safeTextFromBlockLike((orca.state.blocks as any)?.[ctx.blockId]) ??
+          `Block ${ctx.blockId}`;
+        sections.push(`## Block: ${title} (blockId: ${ctx.blockId})`);
+
+        const tree = await getBlockTree(ctx.blockId);
+        const resolveById = await buildResolverFromTree(tree, options);
+        const lines: string[] = [];
+        const state = { blocks: 0, depth: 0, hitLimit: false, assets: [] as BlockAssetInfo[] };
+        blockTreeToLines(tree, options, state, lines, resolveById);
+        if (state.hitLimit) lines.push(`- 鈥?maxBlocks=${options.maxBlocks} reached)`);
+        sections.push(lines.join("\n") || "(empty)");
+
+        allAssets.push(...state.assets);
+        continue;
+      }
+
       if (ctx.kind === "tag") {
         const tagName = normalizeTagName(ctx.tag);
         sections.push(`## Tag: #${tagName}`);

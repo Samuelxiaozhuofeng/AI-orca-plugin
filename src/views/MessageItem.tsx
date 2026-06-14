@@ -1583,7 +1583,7 @@ export default function MessageItem({
           },
         },
         ...message.contextRefs.map((ref, idx) => withTooltip(
-          ref.blockId ? "点击跳转到页面" : undefined,
+          ref.preview ? tooltipText(ref.preview) : ref.blockId ? "点击跳转到块" : undefined,
           createElement(
             "span",
             {
@@ -1612,7 +1612,7 @@ export default function MessageItem({
             } : undefined,
             },
             createElement("i", {
-              className: ref.kind === "page" ? "ti ti-file-text" : "ti ti-hash",
+              className: ref.kind === "tag" ? "ti ti-hash" : ref.kind === "block" ? "ti ti-box" : "ti ti-file-text",
               style: { fontSize: "12px" },
             }),
             ref.title

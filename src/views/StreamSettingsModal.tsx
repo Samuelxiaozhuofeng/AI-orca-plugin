@@ -13,6 +13,7 @@ const { Button } = orca.components;
 
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { getAiChatSettings, updateAiChatSettings } from "../settings/ai-chat-settings";
+import { normalizeToolRoundLimit } from "../services/ai/tool-round-limit";
 
 interface CompressionSettingsModalProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ interface CompressionSettingsModalProps {
 
 export default function StreamSettingsModal({ isOpen, onClose }: CompressionSettingsModalProps) {
   const [streamTimeout, setStreamTimeout] = useState(30);
+  const [maxToolRounds, setMaxToolRounds] = useState(0);
   const [saving, setSaving] = useState(false);
 
   // 加载当前设置
@@ -29,6 +31,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
       const pluginName = getAiChatPluginName();
       const settings = getAiChatSettings(pluginName);
       setStreamTimeout(Math.round(settings.streamTimeout / 1000));
+      setMaxToolRounds(Math.max(0, Math.floor(settings.maxToolRounds ?? 0)));
     }
   }, [isOpen]);
 
@@ -38,6 +41,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
       const pluginName = getAiChatPluginName();
       await updateAiChatSettings("app", pluginName, {
         streamTimeout: streamTimeout * 1000,
+        maxToolRounds: normalizeToolRoundLimit(maxToolRounds),
       });
       orca.notify("success", "设置已保存");
       onClose();
@@ -122,7 +126,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
       "div",
       { style: modalStyle, onClick: (e: any) => e.stopPropagation() },
       // Title
-      createElement("div", { style: titleStyle }, "流式设置"),
+      createElement("div", { style: titleStyle }, "流式 / 工具设置"),
       
       // Stream timeout setting
       createElement(
@@ -146,6 +150,29 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
           )
         )
       ),
+
+      createElement(
+        "div",
+        { style: rowStyle },
+        createElement(
+          "div",
+          { style: { maxWidth: 220 } },
+          createElement("div", { style: labelStyle }, "工具调用轮次"),
+          createElement("div", { style: descStyle }, "0 表示不设固定上限")
+        ),
+        createElement("input", {
+          type: "number",
+          min: 0,
+          max: 100,
+          step: 1,
+          style: { ...selectStyle, width: 96, cursor: "text" },
+          value: maxToolRounds,
+          onChange: (e: any) => {
+            const next = Number(e.target.value);
+            setMaxToolRounds(Number.isFinite(next) ? next : 0);
+          },
+        })
+      ),
       
       // Info
       createElement(
@@ -160,7 +187,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
             lineHeight: 1.5,
           },
         },
-        "流式超时用于本地模型/慢接口：超过该时间未收到数据将中止本次请求。"
+        "流式超时用于本地模型/慢接口。工具调用轮次是全局默认值，模型编辑面板中的工具轮数会覆盖这里；0 表示 Codex 式无固定上限，由重复调用、错误、取消或无新工具调用来停止。"
       ),
       
       // Footer

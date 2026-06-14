@@ -17,7 +17,16 @@ test("queryBlocksByTag calls backend query and converts values", async () => {
       }
 
       if (name === "get-block-tree") {
-        return [0, { block: { text: "Task A" }, children: [] }];
+        return [0, { block: { id: args[0], text: "Task A" }, children: [] }];
+      }
+
+      if (name === "get-block-by-alias") {
+        return {
+          id: 100,
+          properties: [
+            { name: "priority", type: PropType.Number },
+          ],
+        };
       }
 
       throw new Error(`Unexpected invokeBackend call: ${name}`);
@@ -47,6 +56,8 @@ test("queryBlocksByTag calls backend query and converts values", async () => {
 test("queryBlocksByTag retries legacy query format when QueryDescription2 fails", async () => {
   let queryCalls = 0;
   const capturedKinds: number[] = [];
+  const originalDebug = console.debug;
+  console.debug = () => {};
 
   (globalThis as any).orca = {
     state: { blocks: {} },
@@ -61,22 +72,35 @@ test("queryBlocksByTag retries legacy query format when QueryDescription2 fails"
       }
 
       if (name === "get-block-tree") {
-        return [0, { block: { text: "Legacy OK" }, children: [] }];
+        return [0, { block: { id: args[0], text: "Legacy OK" }, children: [] }];
+      }
+
+      if (name === "get-block-by-alias") {
+        return {
+          id: 101,
+          properties: [
+            { name: "category", type: PropType.Text },
+          ],
+        };
       }
 
       throw new Error(`Unexpected invokeBackend call: ${name}`);
     },
   };
 
-  const { queryBlocksByTag } = await import("../src/services/notes/search-service");
-  const results = await queryBlocksByTag("note", {
-    properties: [{ name: "category", op: "is null" }],
-    maxResults: 5,
-  });
+  try {
+    const { queryBlocksByTag } = await import("../src/services/notes/search-service");
+    const results = await queryBlocksByTag("note", {
+      properties: [{ name: "category", op: "is null" }],
+      maxResults: 5,
+    });
 
-  assertEqual(queryCalls, 2);
-  assertEqual(capturedKinds[0], 100);
-  assertEqual(capturedKinds[1], 1);
-  assertEqual(results.length, 1);
-  assertEqual(results[0].id, 2);
+    assertEqual(queryCalls, 2);
+    assertEqual(capturedKinds[0], 100);
+    assertEqual(capturedKinds[1], 1);
+    assertEqual(results.length, 1);
+    assertEqual(results[0].id, 2);
+  } finally {
+    console.debug = originalDebug;
+  }
 });

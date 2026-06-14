@@ -6,7 +6,8 @@
 import type { DbId } from "../orca.d.ts";
 import type { AiChatSettings, CurrencyType } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
-import { contextStore, addPageById, clearHighPriorityContexts } from "../store/context-store";
+import { buildContextForSend } from "../services/notes/context-builder";
+import { contextStore, contextKey, addBlockById, clearHighPriorityContexts } from "../store/context-store";
 import { estimateTokens, formatTokenCount, estimateCost, formatCost } from "../utils/token-utils";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
 import {
@@ -99,6 +100,33 @@ const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(obj: T) => T;
 };
 const { Button, ContextMenu } = orca.components || {};
+
+const BLOCK_ID_MARKER_RE = /(?:orca-block:|blockid:|block:|blockId["']?\s*[:=]\s*)(\d+)/gi;
+
+function collectBlockIdsFromDragPayload(payload: unknown, out: Set<number>, allowBareNumbers = false): void {
+  if (typeof payload === "number" && Number.isFinite(payload)) {
+    if (allowBareNumbers) out.add(payload);
+    return;
+  }
+  if (typeof payload === "string") {
+    const pattern = allowBareNumbers ? /(?:orca-block:|blockid:|block:|blockId["']?\s*[:=]\s*)?(\d+)/gi : BLOCK_ID_MARKER_RE;
+    for (const match of payload.matchAll(pattern)) {
+      const id = Number(match[1]);
+      if (Number.isFinite(id)) out.add(id);
+    }
+    return;
+  }
+  if (Array.isArray(payload)) {
+    payload.forEach((item) => collectBlockIdsFromDragPayload(item, out, allowBareNumbers));
+    return;
+  }
+  if (payload && typeof payload === "object") {
+    const data = payload as Record<string, unknown>;
+    ["blocks", "blockIds", "block_ids", "blockId", "block_id", "id", "ids"].forEach((key) => {
+      collectBlockIdsFromDragPayload(data[key], out, true);
+    });
+  }
+}
 
 type Props = {
   onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void | Promise<void>;
@@ -239,6 +267,35 @@ export default function ChatInput({
   const leftToolbarRef = useRef<HTMLDivElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
   const toolSnap = useSnapshot(toolStore);
+  const [contextContents, setContextContents] = useState<Map<string, string>>(() => new Map());
+  const contextSignature = contextSnap.selected.map((ctx) => contextKey(ctx)).join("|");
+
+  useEffect(() => {
+    let cancelled = false;
+    const contexts = [...contextSnap.selected];
+
+    if (contexts.length === 0) {
+      setContextContents(new Map());
+      return;
+    }
+
+    Promise.all(contexts.map(async (ctx) => {
+      const key = contextKey(ctx);
+      try {
+        const result = await buildContextForSend([ctx], {
+          maxChars: Math.min(settings.maxContextChars || 60_000, 12_000),
+          maxBlocks: 120,
+        });
+        return [key, result.text] as const;
+      } catch (err: any) {
+        return [key, `Context preview failed: ${String(err?.message ?? err ?? "unknown error")}`] as const;
+      }
+    })).then((entries) => {
+      if (!cancelled) setContextContents(new Map(entries));
+    });
+
+    return () => { cancelled = true; };
+  }, [contextSignature, settings.maxContextChars]);
 
   // 自动调整 textarea 高度
   const adjustTextareaHeight = useCallback(() => {
@@ -480,16 +537,18 @@ export default function ChatInput({
     return () => observer.disconnect();
   }, []);
 
-  const canSend = (text.trim().length > 0 || pendingFiles.length > 0) && !disabled && !isSending;
+  const hasContext = contextSnap.selected.length > 0;
+  const canSend = (text.trim().length > 0 || pendingFiles.length > 0 || hasContext) && !disabled && !isSending;
 
   const handleSend = useCallback(async () => {
     const val = textareaRef.current?.value || text;
     const trimmed = val.trim();
-    if ((!trimmed && pendingFiles.length === 0) || disabled || isSending) return;
+    if ((!trimmed && pendingFiles.length === 0 && !hasContext) || disabled || isSending) return;
 
     setIsSending(true);
     try {
-      await onSend(trimmed, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
+      const contentToSend = trimmed || (hasContext ? "请基于我提供的上下文回答。" : "");
+      await onSend(contentToSend, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
       setText("");
       setPendingFiles([]);
       setClearContextPending(false);
@@ -504,7 +563,7 @@ export default function ChatInput({
     } finally {
       setIsSending(false);
     }
-  }, [disabled, onSend, text, pendingFiles, clearContextPending, isSending]);
+  }, [disabled, onSend, text, pendingFiles, clearContextPending, isSending, hasContext]);
 
   // 处理清除上下文按钮点击
   const handleClearContextClick = useCallback(() => {
@@ -695,7 +754,7 @@ export default function ChatInput({
     
     // 1. 检查是否是 Orca 块拖拽
     // Orca 使用自定义类型 "orca/xxx"，数据格式为 {"blocks":[blockId]}
-    let blockIds: number[] = [];
+    const blockIdSet = new Set<number>();
     
     // 查找 orca/ 开头的数据类型
     for (const type of dataTransfer.types) {
@@ -704,25 +763,26 @@ export default function ChatInput({
         if (data) {
           try {
             const parsed = JSON.parse(data);
-            if (parsed.blocks && Array.isArray(parsed.blocks)) {
-              blockIds = parsed.blocks;
-              break;
-            }
-          } catch {}
+            collectBlockIdsFromDragPayload(parsed, blockIdSet, true);
+          } catch {
+            collectBlockIdsFromDragPayload(data, blockIdSet);
+          }
         }
       }
     }
     
     // 如果没找到 orca/ 类型，尝试其他格式
-    if (blockIds.length === 0) {
-      const textData = dataTransfer.getData("text/plain");
+    if (blockIdSet.size === 0) {
+      const textData = [
+        dataTransfer.getData("text/plain"),
+        dataTransfer.getData("text/uri-list"),
+        dataTransfer.getData("text/html"),
+      ].filter(Boolean).join("\n");
       if (textData) {
-        const blockIdMatch = textData.match(/(?:orca-block:|blockid:|block:)?(\d+)/i);
-        if (blockIdMatch) {
-          blockIds = [parseInt(blockIdMatch[1], 10)];
-        }
+        collectBlockIdsFromDragPayload(textData, blockIdSet);
       }
     }
+    const blockIds = Array.from(blockIdSet);
     
     // 处理找到的块 - 添加为上下文而不是插入文本
     if (blockIds.length > 0) {
@@ -734,7 +794,7 @@ export default function ChatInput({
         try {
           // 使用 addPageById 将块添加为高优先级上下文（priority=1）
           // 高优先级上下文会排在普通上下文之前，但仍低于记忆和用户印象
-          const added = addPageById(blockId, 1);
+          const added = addBlockById(blockId, 1);
           if (added) addedCount++;
         } catch (err) {
           console.warn("[ChatInput] Failed to add block as context:", blockId, err);
@@ -784,7 +844,7 @@ export default function ChatInput({
     { style: inputContainerStyle },
 
     // Context Chips 区域
-    createElement(ContextChips, { items: contextSnap.selected }),
+    createElement(ContextChips, { items: contextSnap.selected, contextContents }),
 
     // Context Picker 悬浮菜单
     createElement(ContextPicker, {

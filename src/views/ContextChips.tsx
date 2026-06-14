@@ -87,11 +87,11 @@ export default function ContextChips({
       ...items.map((ref, index) => {
         const key = contextKey(ref);
         const label = getDisplayLabel(ref);
-        const icon = ref.kind === "page" ? "ti ti-file-text" : "ti ti-tag";
+        const icon = ref.kind === "tag" ? "ti ti-tag" : ref.kind === "block" ? "ti ti-box" : "ti ti-file-text";
         const chip = enhancedChips[index];
 
         return withTooltip(
-          chip.preview ? tooltipText(chip.preview) : null,
+          chip.preview ? tooltipText(chip.preview) : "正在加载上下文预览...",
           createElement(
             "div",
             {

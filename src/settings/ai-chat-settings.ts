@@ -3,6 +3,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 模型能力类型 */
+import { normalizeToolRoundLimit } from "../services/ai/tool-round-limit";
+
 export type ModelCapability = "vision" | "web" | "reasoning" | "tools" | "rerank" | "embedding";
 
 /** 模型能力标签配置 */
@@ -25,7 +27,8 @@ export type ProviderModel = {
   // 模型级别的设置
   temperature?: number;    // 温度（0-2）
   maxTokens?: number;      // 最大输出 token
-  maxToolRounds?: number;  // 工具调用最大轮数
+  maxToolRounds?: number;  // 工具调用最大轮数（0=不限制）
+  maxToolRoundsOverride?: boolean; // true 表示该模型显式覆盖全局工具轮数
   currency?: CurrencyType; // 价格币种
   contextLength?: number;  // 模型上下文长度（tokens），用于本地模型防溢出
 };
@@ -126,7 +129,7 @@ export type AiChatSettings = {
   // 以下为全局默认值，模型可以覆盖
   temperature: number;
   maxTokens: number;
-  maxToolRounds: number;
+  maxToolRounds: number;            // 工具调用最大轮数（0=不限制）
   currency: CurrencyType;
   // Token 优化设置
   maxHistoryMessages: number;        // 最大历史消息数（0=不限制）
@@ -158,10 +161,10 @@ const DEFAULT_PROVIDERS: AiProvider[] = [
     enabled: true,
     isBuiltin: true,
     models: [
-      { id: "gpt-4o", label: "GPT-4o", inputPrice: 2.5, outputPrice: 10, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
-      { id: "gpt-4o-mini", label: "GPT-4o Mini", inputPrice: 0.15, outputPrice: 0.6, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
-      { id: "o1", label: "o1", inputPrice: 15, outputPrice: 60, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
-      { id: "o1-mini", label: "o1 Mini", inputPrice: 3, outputPrice: 12, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
+      { id: "gpt-4o", label: "GPT-4o", inputPrice: 2.5, outputPrice: 10, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, currency: "USD" },
+      { id: "gpt-4o-mini", label: "GPT-4o Mini", inputPrice: 0.15, outputPrice: 0.6, capabilities: ["vision", "tools"], temperature: 0.7, maxTokens: 4096, currency: "USD" },
+      { id: "o1", label: "o1", inputPrice: 15, outputPrice: 60, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, currency: "USD" },
+      { id: "o1-mini", label: "o1 Mini", inputPrice: 3, outputPrice: 12, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, currency: "USD" },
     ],
   },
   {
@@ -173,8 +176,8 @@ const DEFAULT_PROVIDERS: AiProvider[] = [
     enabled: true,
     isBuiltin: true,
     models: [
-      { id: "deepseek-chat", label: "DeepSeek Chat", inputPrice: 0.14, outputPrice: 0.28, capabilities: ["tools"], temperature: 0.7, maxTokens: 4096, maxToolRounds: 5, currency: "USD" },
-      { id: "deepseek-reasoner", label: "DeepSeek Reasoner", inputPrice: 0.55, outputPrice: 2.19, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, maxToolRounds: 3, currency: "USD" },
+      { id: "deepseek-chat", label: "DeepSeek Chat", inputPrice: 0.14, outputPrice: 0.28, capabilities: ["tools"], temperature: 0.7, maxTokens: 4096, currency: "USD" },
+      { id: "deepseek-reasoner", label: "DeepSeek Reasoner", inputPrice: 0.55, outputPrice: 2.19, capabilities: ["reasoning"], temperature: 1, maxTokens: 8192, currency: "USD" },
     ],
   },
 ];
@@ -186,7 +189,7 @@ const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
   // 全局默认值（模型未设置时使用）
   temperature: 0.7,
   maxTokens: 4096,
-  maxToolRounds: 5,
+  maxToolRounds: 0,
   currency: "USD",
   // Token 优化默认值
   maxHistoryMessages: 0,           // 0=不限制（改用动态压缩）
@@ -328,6 +331,14 @@ function normalizeProviderModels(
     const capabilities = Array.isArray(raw.capabilities)
       ? raw.capabilities.filter((cap) => isModelCapability(cap))
       : undefined;
+    const modelTemperature = toNumber(raw.temperature, Number.NaN);
+    const modelMaxTokens = toNumber(raw.maxTokens, Number.NaN);
+    const modelMaxToolRounds = toNumber(raw.maxToolRounds, Number.NaN);
+    const legacyToolRoundOverride =
+      raw.maxToolRoundsOverride !== true
+      && Number.isFinite(modelMaxToolRounds)
+      && modelMaxToolRounds > 0;
+    const maxToolRoundsOverride = raw.maxToolRoundsOverride === true || legacyToolRoundOverride;
 
     normalized.push({
       id,
@@ -335,9 +346,12 @@ function normalizeProviderModels(
       inputPrice: typeof raw.inputPrice === "number" ? raw.inputPrice : undefined,
       outputPrice: typeof raw.outputPrice === "number" ? raw.outputPrice : undefined,
       capabilities: capabilities && capabilities.length > 0 ? capabilities : undefined,
-      temperature: typeof raw.temperature === "number" ? raw.temperature : undefined,
-      maxTokens: typeof raw.maxTokens === "number" ? raw.maxTokens : undefined,
-      maxToolRounds: typeof raw.maxToolRounds === "number" ? raw.maxToolRounds : undefined,
+      temperature: Number.isFinite(modelTemperature) ? modelTemperature : undefined,
+      maxTokens: Number.isFinite(modelMaxTokens) ? modelMaxTokens : undefined,
+      maxToolRounds: maxToolRoundsOverride && Number.isFinite(modelMaxToolRounds)
+        ? normalizeToolRoundLimit(modelMaxToolRounds)
+        : undefined,
+      maxToolRoundsOverride,
       currency: isCurrency(raw.currency) ? raw.currency : undefined,
     });
   }
@@ -525,7 +539,7 @@ export function getAiChatSettings(pluginName: string): AiChatSettings {
 
   merged.temperature = Math.max(0, Math.min(2, merged.temperature));
   merged.maxTokens = Math.max(1, Math.floor(merged.maxTokens));
-  merged.maxToolRounds = Math.max(3, Math.min(10, Math.floor(merged.maxToolRounds)));
+  merged.maxToolRounds = normalizeToolRoundLimit(merged.maxToolRounds);
   // Token 优化设置范围限制
   merged.maxHistoryMessages = Math.max(0, Math.floor(merged.maxHistoryMessages));
   merged.maxToolResultChars = Math.max(0, Math.floor(merged.maxToolResultChars));
@@ -590,6 +604,44 @@ export function getSelectedModel(settings: AiChatSettings): ProviderModel | unde
   return provider?.models.find(m => m.id === settings.selectedModelId);
 }
 
+export function findModelConfig(settings: AiChatSettings, modelId?: string, providerId?: string): ProviderModel | undefined {
+  const targetModelId = modelId || settings.selectedModelId;
+  if (providerId) {
+    return settings.providers
+      .find(p => p.id === providerId)
+      ?.models.find(m => m.id === targetModelId);
+  }
+  const selectedProvider = getSelectedProvider(settings);
+  const selectedProviderModel = selectedProvider?.models.find(m => m.id === targetModelId);
+  if (selectedProviderModel) return selectedProviderModel;
+
+  for (const provider of settings.providers) {
+    const model = provider.models.find(m => m.id === targetModelId);
+    if (model) return model;
+  }
+
+  return undefined;
+}
+
+export function getModelRuntimeConfig(settings: AiChatSettings, modelId?: string, providerId?: string): {
+  temperature: number;
+  maxTokens: number;
+  maxToolRounds: number;
+} {
+  const model = findModelConfig(settings, modelId, providerId);
+  const temperature = model?.temperature ?? settings.temperature;
+  const maxTokens = model?.maxTokens ?? settings.maxTokens;
+  const maxToolRounds = model?.maxToolRoundsOverride === true && typeof model.maxToolRounds === "number"
+    ? model.maxToolRounds
+    : settings.maxToolRounds;
+
+  return {
+    temperature: Math.max(0, Math.min(2, temperature)),
+    maxTokens: Math.max(1, Math.floor(maxTokens)),
+    maxToolRounds: normalizeToolRoundLimit(maxToolRounds),
+  };
+}
+
 /** 获取当前 API 配置 */
 export function getCurrentApiConfig(settings: AiChatSettings): {
   apiUrl: string;
@@ -620,20 +672,15 @@ export function validateCurrentConfig(settings: AiChatSettings): string | null {
 
 /** 检查模型是否支持 function calling (tools) */
 export function modelSupportsTools(settings: AiChatSettings, modelId?: string): boolean {
-  const targetModelId = modelId || settings.selectedModelId;
-  
-  // 查找模型
-  for (const provider of settings.providers) {
-    const model = provider.models.find(m => m.id === targetModelId);
-    if (model) {
-      // 如果模型明确配置了 capabilities，检查是否包含 "tools"
-      if (model.capabilities && model.capabilities.length > 0) {
-        return model.capabilities.includes("tools");
-      }
-      // 没有配置 capabilities，默认支持
-      // 即使模型输出 XML 格式的 <tool_call>，适配层也能解析
-      return true;
+  const model = findModelConfig(settings, modelId);
+  if (model) {
+    // 如果模型明确配置了 capabilities，检查是否包含 "tools"
+    if (model.capabilities && model.capabilities.length > 0) {
+      return model.capabilities.includes("tools");
     }
+    // 没有配置 capabilities，默认支持
+    // 即使模型输出 XML 格式的 <tool_call>，适配层也能解析
+    return true;
   }
   
   // 未找到模型，默认支持（依赖适配层）

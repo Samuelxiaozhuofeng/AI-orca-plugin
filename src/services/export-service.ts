@@ -29,7 +29,7 @@ interface SavedMessage {
   // 模型
   model?: string;
   // 上下文引用
-  contextRefs?: Array<{ title: string; kind: string; blockId?: number }>;
+  contextRefs?: Array<{ title: string; kind: string; blockId?: number; preview?: string }>;
   // Web 搜索结果来源
   searchResults?: Array<{
     title: string;

@@ -19,7 +19,7 @@ export const panelContainerStyle: React.CSSProperties = {
 };
 
 export const headerStyle: React.CSSProperties = {
-  padding: 12,
+  padding: "12px 32px 12px 12px",
   display: "flex",
   alignItems: "center",
   gap: 8,

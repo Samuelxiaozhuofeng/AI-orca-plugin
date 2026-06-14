@@ -10,6 +10,9 @@
 /** 技能作用域 */
 export type SkillScope = "global" | "internal" | "local";
 
+/** 技能执行模式 */
+export type SkillMode = "auto" | "ask" | "disabled";
+
 /** 技能来源类型 */
 export type SkillSourceType = "file" | "block" | "builtin";
 
@@ -64,8 +67,10 @@ export interface Skill {
   scope: SkillScope;
   /** 来源类型 */
   sourceType: SkillSourceType;
-  /** 是否启用 */
-  enabled: boolean;
+  /** @deprecated 使用 mode 替代 */
+  enabled?: boolean;
+  /** 执行模式：auto=自动执行, ask=询问用户, disabled=禁用 */
+  mode: SkillMode;
   /** 标签 */
   tags?: string[];
   /** 块来源信息（仅 local scope 的块技能） */

@@ -115,7 +115,7 @@ async function buildSkillIndex(): Promise<SkillIndex[]> {
   
   for (const ref of skillRefs) {
     const skill = await getSkill(ref.id, ref.scope === "global");
-    if (!skill || !skill.enabled) continue;
+    if (!skill || skill.mode === "disabled") continue;
     
     // 提取关键词
     const keywords: string[] = [];

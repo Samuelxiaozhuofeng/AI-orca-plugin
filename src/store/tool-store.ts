@@ -4,6 +4,7 @@
  */
 
 import { proxy } from "valtio";
+import { normalizeToolRoundLimit } from "../services/ai/tool-round-limit";
 
 /**
  * 工具状态类型
@@ -139,7 +140,7 @@ export const toolStore = proxy<ToolStore>({
   wikipediaEnabled: true,
   agenticRAGEnabled: false,
   agenticRAGConfig: {
-    maxIterations: 5,
+    maxIterations: 0,
     enableReflection: true,
   },
 });
@@ -250,7 +251,10 @@ export function isAgenticRAGEnabled(): boolean {
  * 获取 Agentic RAG 配置
  */
 export function getAgenticRAGConfig(): AgenticRAGConfig {
-  return toolStore.agenticRAGConfig;
+  return {
+    ...toolStore.agenticRAGConfig,
+    maxIterations: normalizeToolRoundLimit(toolStore.agenticRAGConfig.maxIterations),
+  };
 }
 
 /**
@@ -311,6 +315,9 @@ export async function loadToolSettings(): Promise<void> {
               ...toolStore.agenticRAGConfig,
               ...parsed.agenticRAGConfig,
             };
+            toolStore.agenticRAGConfig.maxIterations = normalizeToolRoundLimit(
+              toolStore.agenticRAGConfig.maxIterations
+            );
           }
         } else {
           // 旧格式：直接是 toolStatus 对象

@@ -12,8 +12,14 @@ import type { OpenAITool } from "../ai/openai-client";
 import {
   createMCPClient,
   formatMCPToolResult,
+  normalizeMCPInputSchema,
   type MCPToolDefinition,
 } from "./mcp-client";
+import {
+  buildMcpOpenAIName as buildStableMcpOpenAIName,
+  isExternalMcpToolName,
+  isMcpToolNameForServer,
+} from "./mcp-tool-names";
 import {
   mcpStore,
   loadMcpSettings,
@@ -31,13 +37,46 @@ import {
 // ─── 工具名命名空间 ──────────────────────────────────────────────────────────
 
 const MCP_TOOL_PREFIX = "mcp__";
+const MAX_OPENAI_TOOL_NAME_LENGTH = 64;
 
 function sanitizeMcpIdentifier(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const sanitized = id
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return sanitized || "tool";
 }
 
-function buildMcpOpenAIName(serverId: string, originalName: string): string {
-  return `${MCP_TOOL_PREFIX}${sanitizeMcpIdentifier(serverId)}__${sanitizeMcpIdentifier(originalName)}`;
+function hashString(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function buildMcpOpenAIName(serverId: string, originalName: string, usedNames: Set<string>): string {
+  const safeServerId = sanitizeMcpIdentifier(serverId);
+  const safeToolName = sanitizeMcpIdentifier(originalName);
+  const hash = hashString(`${serverId}:${originalName}`).slice(0, 8);
+  const prefix = `${MCP_TOOL_PREFIX}${safeServerId}__`;
+  const suffix = `_${hash}`;
+  const budget = Math.max(8, MAX_OPENAI_TOOL_NAME_LENGTH - prefix.length - suffix.length);
+  const baseToolName = safeToolName.length > budget ? safeToolName.slice(0, budget) : safeToolName;
+  let candidate = `${prefix}${baseToolName}${suffix}`;
+
+  let counter = 2;
+  while (usedNames.has(candidate)) {
+    const counterSuffix = `${suffix}_${counter}`;
+    const counterBudget = Math.max(8, MAX_OPENAI_TOOL_NAME_LENGTH - prefix.length - counterSuffix.length);
+    candidate = `${prefix}${safeToolName.slice(0, counterBudget)}${counterSuffix}`;
+    counter++;
+  }
+
+  usedNames.add(candidate);
+  return candidate;
 }
 
 function parseMcpOpenAIName(openaiName: string): { serverId: string; originalName: string } | null {
@@ -60,25 +99,26 @@ const activeConnections = new Map<string, ReturnType<typeof createMCPClient>>();
 
 function convertMCPToolToOpenAI(
   serverId: string,
-  mcpTool: MCPToolDefinition
+  mcpTool: MCPToolDefinition,
+  usedNames: Set<string>,
 ): OpenAITool | null {
   if (!mcpTool.name) return null;
 
-  const openaiName = buildMcpOpenAIName(serverId, mcpTool.name);
-  const inputSchema = mcpTool.inputSchema ?? { type: "object" } as any;
+  const openaiName = buildStableMcpOpenAIName(serverId, mcpTool.name, usedNames);
+  const parameters = normalizeMCPInputSchema(mcpTool.inputSchema);
+  const displayName = mcpTool.title || mcpTool.name;
+  const descriptionParts = [
+    `[${serverId}] MCP tool: ${displayName}`,
+    mcpTool.description || "",
+    `Original MCP name: ${mcpTool.name}`,
+  ].filter(Boolean);
 
   const openaiTool: OpenAITool = {
     type: "function",
     function: {
       name: openaiName,
-      description: mcpTool.description
-        ? `[${serverId}] ${mcpTool.description}`
-        : `MCP 工具来自服务器 "${serverId}"`,
-      parameters: {
-        type: "object",
-        properties: inputSchema.properties ?? {},
-        required: inputSchema.required ?? [],
-      },
+      description: descriptionParts.join("\n"),
+      parameters,
     },
   };
 
@@ -109,11 +149,11 @@ export function getToolsForServer(serverId: string): Array<{
     enabled: boolean;
   }> = [];
   for (const t of getDiscoveredTools()) {
-    const parsed = parseMcpOpenAIName(t.function.name);
-    if (parsed?.serverId !== serverId) continue;
+    if (!isMcpToolNameForServer(t.function.name, serverId)) continue;
+    const registryEntry = toolRegistry.get(t.function.name);
     result.push({
       name: t.function.name,
-      originalName: parsed.originalName,
+      originalName: registryEntry?.originalName || t.function.name,
       description: t.function.description,
       enabled: !isMcpToolDisabled(t.function.name),
     });
@@ -123,7 +163,7 @@ export function getToolsForServer(serverId: string): Array<{
 
 /** 检查工具名是否为外部 MCP 工具 */
 export function isExternalMcpTool(toolName: string): boolean {
-  return toolName.startsWith(MCP_TOOL_PREFIX);
+  return isExternalMcpToolName(toolName);
 }
 
 /** 调用远程 MCP 工具 */
@@ -189,8 +229,9 @@ export async function connectToServer(serverId: string): Promise<void> {
 
     // 转换并注册所有工具
     const converted: OpenAITool[] = [];
+    const usedNames = new Set<string>();
     for (const mcpTool of tools) {
-      const openAITool = convertMCPToolToOpenAI(serverId, mcpTool);
+      const openAITool = convertMCPToolToOpenAI(serverId, mcpTool, usedNames);
       if (openAITool) converted.push(openAITool);
     }
 
@@ -201,9 +242,7 @@ export async function connectToServer(serverId: string): Promise<void> {
       serverId,
       server.name,
       converted.map((t) => {
-        // 从 openaiName 解析出原始工具名: mcp__serverId__toolName → toolName
-        const parts = t.function.name.split("__");
-        const toolName = parts.slice(2).join("__") || t.function.name;
+        const toolName = toolRegistry.get(t.function.name)?.originalName || t.function.name;
         return {
           openaiName: t.function.name,
           displayName: toolName,
@@ -256,6 +295,7 @@ export async function disconnectFromServer(serverId: string): Promise<void> {
 
 let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 const HEALTH_CHECK_MS = 60_000;
+let initMcpServersPromise: Promise<void> | null = null;
 
 function startHealthCheck(): void {
   if (healthCheckTimer) return;
@@ -283,7 +323,7 @@ function stopHealthCheck(): void {
 // ─── 初始化 ────────────────────────────────────────────────────────────────────
 
 /** 初始化所有已配置的 MCP 服务器 */
-export async function initMcpServers(): Promise<void> {
+async function initMcpServersInternal(): Promise<void> {
   await loadMcpSettings();
 
   if (mcpStore.servers.length === 0) {
@@ -303,4 +343,18 @@ export async function initMcpServers(): Promise<void> {
   console.log(`[MCP] 初始化完成: ${succeeded} 成功, ${failed} 失败`);
 
   startHealthCheck();
+}
+
+export function initMcpServers(): Promise<void> {
+  if (!initMcpServersPromise) {
+    initMcpServersPromise = initMcpServersInternal().finally(() => {
+      initMcpServersPromise = null;
+    });
+  }
+  return initMcpServersPromise;
+}
+
+export async function ensureMcpServersReady(): Promise<void> {
+  if (getAllDiscoveredTools().length > 0) return;
+  await initMcpServers();
 }

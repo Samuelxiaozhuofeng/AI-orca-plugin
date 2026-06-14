@@ -14,16 +14,19 @@ const { proxy } = (window as any).Valtio as {
 export type ContextPriority = 0 | 1;
 
 /**
- * Context reference types (simplified: only page and tag, no block-level)
+ * Context reference types
  */
 export type ContextRef =
   | { kind: "page"; rootBlockId: DbId; title: string; priority?: ContextPriority }
+  | { kind: "block"; blockId: DbId; title: string; priority?: ContextPriority }
   | { kind: "tag"; tag: string; priority?: ContextPriority };
 
 export function contextKey(ref: ContextRef): string {
   switch (ref.kind) {
     case "page":
       return `page:${ref.rootBlockId}`;
+    case "block":
+      return `block:${ref.blockId}`;
     case "tag":
       return `tag:${normalizeTagName(ref.tag)}`;
   }
@@ -77,6 +80,16 @@ export function addPageById(rootBlockId: DbId, priority: ContextPriority = 0): b
 }
 
 /**
+ * Add a block by ID as context.
+ * Used for dragged blocks, including child blocks that are not page roots.
+ */
+export function addBlockById(blockId: DbId, priority: ContextPriority = 1): boolean {
+  const block = (orca.state.blocks as any)?.[blockId];
+  const title = safeText(block) || `Block ${blockId}`;
+  return addContext({ kind: "block", blockId, title, priority });
+}
+
+/**
  * Add a tag as context
  */
 export function addTagContext(tag: string): boolean {
@@ -108,6 +121,8 @@ export function getDisplayLabel(ref: ContextRef): string {
   switch (ref.kind) {
     case "page":
       return ref.title || `Page ${ref.rootBlockId}`;
+    case "block":
+      return ref.title || `Block ${ref.blockId}`;
     case "tag":
       return `#${ref.tag}`;
   }

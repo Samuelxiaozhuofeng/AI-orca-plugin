@@ -2,6 +2,7 @@ import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { getAiChatSettings } from "../settings/ai-chat-settings";
 import type { ContextRef } from "../store/context-store";
 import type { WebSearchSource } from "../utils/source-attribution";
+import { extractToolProtocol } from "./ai/tool-call-protocol";
 
 /**
  * Image reference for messages (stores path, not base64)
@@ -45,7 +46,7 @@ export type Message = {
   files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型
   reasoning?: string; // AI 推理过程（DeepSeek/Claude thinking）
   model?: string; // 使用的模型（用于计费）
-  contextRefs?: Array<{ title: string; kind: string; blockId?: number }>; // 消息关联的上下文引用（用于显示和跳转）
+  contextRefs?: Array<{ title: string; kind: string; blockId?: number; preview?: string }>; // 消息关联的上下文引用（用于显示和跳转）
   // 压缩控制
   pinned?: boolean;    // 标记为重要，不会被压缩
   noCompress?: boolean; // 不压缩此消息
@@ -89,6 +90,42 @@ export type MessageBranch = {
   createdAt: number;       // 创建时间
   messages: Message[];     // 分支中的消息
 };
+
+function normalizePersistedMessage(message: Message): Message {
+  const normalizedBranches = message.branches?.map(branch => ({
+    ...branch,
+    messages: normalizePersistedMessages(branch.messages || []),
+  }));
+
+  if (message.role !== "assistant" || !message.content) {
+    return normalizedBranches ? { ...message, branches: normalizedBranches } : message;
+  }
+
+  const extracted = extractToolProtocol(message.content);
+  if (!extracted.hasMarkup) {
+    return normalizedBranches ? { ...message, branches: normalizedBranches } : message;
+  }
+
+  const mergedToolCalls = [...(message.tool_calls || [])];
+  const seen = new Set(mergedToolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`));
+  for (const toolCall of extracted.toolCalls) {
+    const key = `${toolCall.function.name}:${toolCall.function.arguments}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedToolCalls.push(toolCall);
+  }
+
+  return {
+    ...message,
+    content: extracted.visibleText,
+    tool_calls: mergedToolCalls.length > 0 ? mergedToolCalls : message.tool_calls,
+    branches: normalizedBranches,
+  };
+}
+
+function normalizePersistedMessages(messages: Message[]): Message[] {
+  return messages.map(normalizePersistedMessage);
+}
 
 /**
  * Pending flashcard for session persistence
@@ -593,8 +630,16 @@ async function loadSessionFile(sessionId: string): Promise<SessionFileData | nul
 
   try {
     const data = JSON.parse(content) as SessionFileData;
-    sessionCache.set(sessionId, data);
-    return data;
+    const rawMessages = Array.isArray(data.messages) ? data.messages : [];
+    const normalizedMessages = normalizePersistedMessages(rawMessages);
+    const normalizedData = { ...data, messages: normalizedMessages };
+    const changed = JSON.stringify(rawMessages) !== JSON.stringify(normalizedMessages);
+    if (changed) {
+      saveSessionFile(normalizedData, false);
+    } else {
+      sessionCache.set(sessionId, normalizedData);
+    }
+    return normalizedData;
   } catch {
     console.error(`[session-service] Failed to parse session file: ${sessionId}`);
     return null;
@@ -717,7 +762,7 @@ export async function loadFullSession(sessionId: string): Promise<SavedSession |
  * Save or update a session
  */
 export async function saveSession(session: SavedSession): Promise<void> {
-  const filteredMessages = session.messages.filter(m => !m.localOnly);
+  const filteredMessages = normalizePersistedMessages(session.messages.filter(m => !m.localOnly));
 
   if (filteredMessages.length === 0) {
     console.log("[session-service] Session has no messages, skipping save");
@@ -960,7 +1005,7 @@ export async function renameSession(sessionId: string, newTitle: string): Promis
  * Uses debounced writes for better performance
  */
 export async function autoCacheSession(session: SavedSession): Promise<void> {
-  const filteredMessages = session.messages.filter(m => !m.localOnly);
+  const filteredMessages = normalizePersistedMessages(session.messages.filter(m => !m.localOnly));
   const index = await loadIndex();
 
   // 查找现有元数据

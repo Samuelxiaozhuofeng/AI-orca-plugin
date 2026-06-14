@@ -15,6 +15,7 @@ import {
   addModelToProvider,
 } from "../../settings/ai-chat-settings";
 import { fetchModelsFromApi } from "../../services/ai/model-fetcher";
+import { normalizeToolRoundLimit } from "../../services/ai/tool-round-limit";
 import {
   menuContainerStyle,
   modelListPanelStyle,
@@ -333,6 +334,7 @@ function ModelEditPanel({
   const [temperature, setTemperature] = useState(String(model.temperature ?? ""));
   const [maxTokens, setMaxTokens] = useState(String(model.maxTokens ?? ""));
   const [maxToolRounds, setMaxToolRounds] = useState(String(model.maxToolRounds ?? ""));
+  const [overrideToolRounds, setOverrideToolRounds] = useState(model.maxToolRoundsOverride === true);
   const [capabilities, setCapabilities] = useState<ModelCapability[]>(model.capabilities || []);
 
   const inputStyle: React.CSSProperties = {
@@ -365,14 +367,26 @@ function ModelEditPanel({
   };
 
   const handleSave = () => {
+    const parseOptionalFloat = (value: string): number | undefined => {
+      if (!value.trim()) return undefined;
+      const parsed = parseFloat(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    };
+    const parseOptionalInt = (value: string): number | undefined => {
+      if (!value.trim()) return undefined;
+      const parsed = parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    };
+
     onUpdate({
       ...model,
       label: label.trim() || model.id,
-      inputPrice: inputPrice ? parseFloat(inputPrice) : undefined,
-      outputPrice: outputPrice ? parseFloat(outputPrice) : undefined,
-      temperature: temperature ? parseFloat(temperature) : undefined,
-      maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
-      maxToolRounds: maxToolRounds ? parseInt(maxToolRounds, 10) : undefined,
+      inputPrice: parseOptionalFloat(inputPrice),
+      outputPrice: parseOptionalFloat(outputPrice),
+      temperature: parseOptionalFloat(temperature),
+      maxTokens: parseOptionalInt(maxTokens),
+      maxToolRounds: overrideToolRounds ? normalizeToolRoundLimit(maxToolRounds) : undefined,
+      maxToolRoundsOverride: overrideToolRounds,
       capabilities: capabilities.length > 0 ? capabilities : undefined,
     });
     onClose();
@@ -419,8 +433,45 @@ function ModelEditPanel({
       ),
       createElement("div", { style: { flex: 1 } },
         createElement("label", { style: labelStyle }, "工具轮数"),
-        createElement("input", { type: "number", min: "1", max: "10", value: maxToolRounds, onChange: (e: any) => setMaxToolRounds(e.target.value), placeholder: "5", style: inputStyle })
+        createElement("input", {
+          type: "number",
+          min: "0",
+          max: "100",
+          value: overrideToolRounds ? maxToolRounds : "",
+          onChange: (e: any) => {
+            setOverrideToolRounds(true);
+            setMaxToolRounds(e.target.value);
+          },
+          placeholder: "继承全局",
+          style: inputStyle,
+          disabled: !overrideToolRounds,
+        })
       )
+    ),
+    createElement(
+      "label",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          fontSize: "12px",
+          color: "var(--orca-color-text-2)",
+          marginTop: "-6px",
+          marginBottom: "12px",
+          cursor: "pointer",
+        },
+      },
+      createElement("input", {
+        type: "checkbox",
+        checked: !overrideToolRounds,
+        onChange: (e: any) => {
+          const inherit = !!e.target.checked;
+          setOverrideToolRounds(!inherit);
+          if (!inherit && maxToolRounds === "") setMaxToolRounds("0");
+        },
+      }),
+      "工具轮数继承全局设置；取消勾选后，填 0 表示该模型无限轮"
     ),
 
     // 能力标签

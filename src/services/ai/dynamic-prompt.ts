@@ -46,7 +46,9 @@ const WEB_SEARCH_SECTION = `## 联网搜索
 
 const DRAGGED_CONTEXT_SECTION = `## 上下文优先
 - 用户已提供具体内容块，优先基于这些块回答
-- 不需要再搜索笔记库`;
+- 系统消息中的“用户上下文”就是这些拖入块/页面/标签的正文，必须先阅读并引用其中内容
+- 如果用户只拖入上下文但没有额外问题，请主动总结、分析或回答这些上下文，而不是说没有收到内容
+- 不需要再搜索笔记库，除非用户明确要求补充检索`;
 
 export interface SkillPromptInfo {
   name: string;

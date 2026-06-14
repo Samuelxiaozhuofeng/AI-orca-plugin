@@ -1,3 +1,5 @@
+import { sanitizeToolProtocolText } from "./tool-call-protocol";
+
 export type OpenAIChatRole = "system" | "user" | "assistant" | "tool";
 
 export type OpenAIChatMessage = {
@@ -297,23 +299,6 @@ function buildAnthropicMessagesFromOpenAI(
 // 流式传输中 invoke/DSML 标签跨 chunk 被截断的问题，在累积完整后需要统一清洗。
 // chat-stream-handler 的 DSML 解析器负责提取工具调用，此层负责最终净化显示内容。
 
-// 匹配完整 invoke 块（含可选 ｜DSML｜ 前缀）
-const INVOKE_BLOCK_RE = /<(?:｜DSML｜)?invoke[\s>][\s\S]*?<\/(?:｜DSML｜)?invoke>/gi;
-// 匹配开/闭 invoke 标签（含可选 ｜DSML｜ 前缀）
-const INVOKE_TAG_RE = /<\/(?:｜DSML｜)?invoke\s*>|<(?:｜DSML｜)?invoke[^>]*>/gi;
-// 匹配 parameter 标签（含可选 ｜DSML｜ 前缀）
-const PARAM_TAG_RE = /<\/?(?:｜DSML｜)?parameter[^>]*>/gi;
-// 匹配 ｜DSML｜function_calls 块
-const DSML_FC_BLOCK_RE = /<｜DSML｜function_calls>[\s\S]*?<\/｜DSML｜function_calls>/gi;
-// 移除含 invoke/parameter 残片的整行（处理跨 chunk 截断导致的不完整标签）
-const INVOKE_LINE_RE = /^.*<(?:｜DSML｜)?(?:\/?(?:invoke|parameter|function_calls))[^>]*>.*$/gim;
-// 孤立的属性残片
-const STRING_ATTR_RE = /^\s*string="(?:true|false)"\s*$/gim;
-// 自闭合 ｜DSML｜ 标签
-const DSML_SELF_CLOSING_RE = /<｜DSML｜[^>]*\/>/gi;
-// tool_call XML 块（Qwen/Llama 格式）
-const TOOL_CALL_BLOCK_RE = /<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi;
-
 function sanitizeContentChunk(text: string): string {
   return text;
 }
@@ -323,21 +308,7 @@ function sanitizeContentChunk(text: string): string {
  * 在显示层和存储历史前调用，确保标签不会泄漏到用户可见内容中。
  */
 export function sanitizeContent(text: string): string {
-  if (!text) return "";
-  let cleaned = text;
-  // 完整块移除（优先，避免块内容残片）
-  cleaned = cleaned.replace(INVOKE_BLOCK_RE, "");
-  cleaned = cleaned.replace(DSML_FC_BLOCK_RE, "");
-  cleaned = cleaned.replace(TOOL_CALL_BLOCK_RE, "");
-  // 标签残片移除
-  cleaned = cleaned.replace(INVOKE_TAG_RE, "");
-  cleaned = cleaned.replace(PARAM_TAG_RE, "");
-  cleaned = cleaned.replace(DSML_SELF_CLOSING_RE, "");
-  // 含有残片的整行移除
-  cleaned = cleaned.replace(INVOKE_LINE_RE, "");
-  // 孤立的属性残片
-  cleaned = cleaned.replace(STRING_ATTR_RE, "");
-  return cleaned.trim();
+  return sanitizeToolProtocolText(text);
 }
 
 function safeDeltaFromEvent(obj: any): StreamChunk {

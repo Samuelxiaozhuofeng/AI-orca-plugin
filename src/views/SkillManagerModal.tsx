@@ -28,10 +28,9 @@ import {
   deleteSkill,
   exportSkill,
   importSkill,
-  isSkillEnabled,
-  setSkillEnabled,
+  setSkillMode,
 } from "../services/ai/skills-manager";
-import type { Skill, SkillRef, SkillScope } from "../types/skills";
+import type { Skill, SkillRef, SkillScope, SkillMode } from "../types/skills";
 import MarkdownMessage from "../components/MarkdownMessage";
 
 const SKILL_NAME_MAX_LENGTH = 100;
@@ -133,12 +132,17 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
     return list;
   }, [skills, activeTab, searchQuery]);
 
-  // ─── Toggle ───
-  const handleToggle = useCallback(
-    async (skill: Skill) => {
-      const next = !skill.enabled;
-      await setSkillEnabled(skill.id, next, skill.scope);
-      setSkills((prev) => prev.map((s) => (s.id === skill.id && s.scope === skill.scope ? { ...s, enabled: next } : s)));
+  // ─── Mode 切换 ───
+  const handleModeChange = useCallback(
+    async (skill: Skill, newMode: SkillMode) => {
+      await setSkillMode(skill.id, newMode, skill.scope);
+      setSkills((prev) =>
+        prev.map((s) =>
+          s.id === skill.id && s.scope === skill.scope
+            ? { ...s, mode: newMode }
+            : s
+        )
+      );
     },
     []
   );
@@ -387,18 +391,42 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
     boxShadow: "0 12px 40px rgba(0,0,0,0.25)", overflow: "hidden",
   };
 
-  const toggleStyle = (enabled: boolean): React.CSSProperties => ({
-    width: 40, height: 22, borderRadius: 11, cursor: "pointer",
-    background: enabled ? "var(--orca-color-primary)" : "var(--orca-color-border)",
-    position: "relative", transition: "background 0.2s", flexShrink: 0,
+  // ─── 三态分段控件 ───
+  const modeControlStyle: React.CSSProperties = {
+    display: "flex", borderRadius: "var(--orca-radius-sm, 4px)",
+    border: "1px solid var(--orca-color-border)",
+    overflow: "hidden", flexShrink: 0,
+  };
+
+  const modeOptionStyle = (active: boolean): React.CSSProperties => ({
+    padding: "3px 6px", fontSize: 11, cursor: "pointer",
+    border: "none", lineHeight: 1,
+    background: active ? "var(--orca-color-primary)" : "transparent",
+    color: active ? "#fff" : "var(--orca-color-text-3)",
+    transition: "all 0.15s ease",
+    display: "flex", alignItems: "center", gap: 2,
   });
 
-  const toggleKnobStyle = (enabled: boolean): React.CSSProperties => ({
-    width: 18, height: 18, borderRadius: "50%", background: "#fff",
-    position: "absolute", top: 2,
-    left: enabled ? 20 : 2,
-    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-  });
+  const renderModeControl = (skill: Skill) =>
+    createElement(
+      "div",
+      { style: modeControlStyle, onClick: (e: any) => e.stopPropagation() },
+      createElement(
+        "button",
+        { style: modeOptionStyle(skill.mode === "auto"), onClick: () => handleModeChange(skill, "auto"), title: "自动执行" },
+        createElement("i", { className: "ti ti-bolt", style: { fontSize: 12 } })
+      ),
+      createElement(
+        "button",
+        { style: modeOptionStyle(skill.mode === "ask"), onClick: () => handleModeChange(skill, "ask"), title: "询问用户" },
+        createElement("i", { className: "ti ti-help", style: { fontSize: 12 } })
+      ),
+      createElement(
+        "button",
+        { style: modeOptionStyle(skill.mode === "disabled"), onClick: () => handleModeChange(skill, "disabled"), title: "禁用" },
+        createElement("i", { className: "ti ti-ban", style: { fontSize: 12 } })
+      )
+    );
 
   // ════════════════════════════════════════════════════════════
   // Render helpers
@@ -431,15 +459,8 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
           { style: { fontSize: 14, fontWeight: 600, color: "var(--orca-color-text-1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
           skill.name
         ),
-        // Toggle
-        createElement(
-          "div",
-          {
-            style: toggleStyle(skill.enabled),
-            onClick: (e: any) => { e.stopPropagation(); handleToggle(skill); },
-          },
-          createElement("div", { style: toggleKnobStyle(skill.enabled) })
-        )
+        // 三态模式切换
+        renderModeControl(skill)
       ),
       // 描述（两行截断）
       skill.description &&
@@ -475,7 +496,7 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
             },
             `块 #${skill.blockSource.blockId}`
           ),
-        !skill.enabled &&
+        skill.mode === "disabled" &&
           createElement(
             "div",
             {
@@ -485,6 +506,17 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
               },
             },
             "已禁用"
+          ),
+        skill.mode === "ask" &&
+          createElement(
+            "div",
+            {
+              style: {
+                fontSize: 10, color: "var(--orca-color-warning, #f59e0b)",
+                fontStyle: "italic", marginLeft: "auto",
+              },
+            },
+            "需确认"
           )
       ),
       // 标签 chips

@@ -21,7 +21,10 @@
  */
 
 import { executeTool } from "./ai-tools";
+import { createToolRoundLimit } from "./tool-round-limit";
 import { isWebSearchEnabled } from "../../store/tool-store";
+
+const AGENTIC_RAG_UNLIMITED_SAFETY_CAP = 12;
 
 // 检查是否是 Skill 工具
 function isSkillToolName(toolName: string): boolean {
@@ -704,7 +707,7 @@ export async function executeAgenticRAG(
   options: AgenticRAGOptions = {}
 ): Promise<RAGResult> {
   const {
-    maxIterations = 5,
+    maxIterations = 0,
     enableReflection = true,
     enableWebSearch = isWebSearchEnabled(),
     confidenceThreshold = 0.7,
@@ -713,9 +716,15 @@ export async function executeAgenticRAG(
   } = options;
 
   const steps: RAGStep[] = [];
+  const requestedIterationLimit = createToolRoundLimit(maxIterations);
+  const iterationLimit = requestedIterationLimit.hasLimit
+    ? requestedIterationLimit
+    : createToolRoundLimit(AGENTIC_RAG_UNLIMITED_SAFETY_CAP);
+  const usingSafetyCap = !requestedIterationLimit.hasLimit;
   let collectedContext = "";
   let iteration = 0;
   let hitLimit = false;
+  let noProgressCount = 0;
   
   // 初始化检索记忆
   const memory: RetrievalMemory = {
@@ -761,9 +770,9 @@ export async function executeAgenticRAG(
   console.log("[AgenticRAG] Starting with query:", userQuery);
   addReasoning("analyzing", "分析问题中...", `🧠 **分析用户问题**\n> ${userQuery}\n`);
 
-  while (iteration < maxIterations) {
+  while (iterationLimit.canRun(iteration)) {
     iteration++;
-    console.log(`[AgenticRAG] Iteration ${iteration}/${maxIterations}`);
+    console.log(`[AgenticRAG] Iteration ${iteration}/${iterationLimit.label}${usingSafetyCap ? " safety cap" : ""}`);
     
     if (iteration > 1) {
       addReasoning("planning", `第 ${iteration} 轮检索...`, `\n---\n\n🔄 **第 ${iteration} 轮检索**\n`);
@@ -826,6 +835,11 @@ export async function executeAgenticRAG(
     if (memory.usedStrategies.has(strategyKey)) {
       console.log("[AgenticRAG] Duplicate strategy detected, skipping:", strategyKey);
       addReasoning("planning", "跳过重复策略", `⏭️ 跳过重复的检索策略: ${plan.tool}\n`);
+      noProgressCount++;
+      if (noProgressCount >= 3) {
+        addReasoning("done", "停止重复检索", "\n连续遇到重复检索策略，停止继续调用工具，将基于已有信息回答。\n");
+        break;
+      }
       continue;
     }
     
@@ -838,8 +852,14 @@ export async function executeAgenticRAG(
         "跳过相似策略", 
         `⏭️ 跳过语义相似的策略: ${plan.tool}\n   已有相似: ${similarStrategy.tool}(${JSON.stringify(similarStrategy.args)})\n`
       );
+      noProgressCount++;
+      if (noProgressCount >= 3) {
+        addReasoning("done", "停止重复检索", "\n连续遇到相似检索策略，停止继续调用工具，将基于已有信息回答。\n");
+        break;
+      }
       continue;
     }
+    noProgressCount = 0;
     
     // 记录策略（先添加，成功状态稍后更新）
     memory.usedStrategies.add(strategyKey);
@@ -934,7 +954,7 @@ export async function executeAgenticRAG(
     }
 
     // Step 3: 反思 - 评估结果质量
-    if (enableReflection && iteration < maxIterations) {
+    if (enableReflection && iterationLimit.canRun(iteration)) {
       addReasoning("reflecting", "评估检索结果...", `\n💭 **评估检索结果**\n正在判断信息是否充足...\n`);
       const reflectionPrompt = buildReflectionPrompt(userQuery, collectedContext, retrieveStep, memory);
       const reflectionResponse = await callLLM(reflectionPrompt, { temperature: 0.2, maxTokens: 400 });
@@ -999,10 +1019,10 @@ export async function executeAgenticRAG(
     }
   }
 
-  if (iteration >= maxIterations) {
+  if (iterationLimit.isReached(iteration)) {
     hitLimit = true;
     console.log("[AgenticRAG] Hit max iterations limit");
-    addReasoning("done", "达到最大轮数", `\n⚠️ **达到最大检索轮数** (${maxIterations} 轮)\n将基于已收集的信息生成回答\n`);
+    addReasoning("done", "达到最大轮数", `\n⚠️ **达到最大检索轮数** (${iterationLimit.limit} 轮)\n将基于已收集的信息生成回答\n`);
   }
 
   // Step 4: 生成最终答案

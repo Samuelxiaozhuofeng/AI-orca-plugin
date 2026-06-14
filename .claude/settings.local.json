@@ -31,7 +31,13 @@
       "Bash(gh api *)",
       "Bash(npx vite *)",
       "Bash(node *)",
-      "Bash(npx tsx --eval ' *)"
+      "Bash(npx tsx --eval ' *)",
+      "Bash(git merge *)",
+      "Bash(git stash *)",
+      "Bash(git --no-pager log --oneline -5)",
+      "Bash(git *)",
+      "Bash(gh pr *)",
+      "Bash(where gh *)"
     ]
   }
 }

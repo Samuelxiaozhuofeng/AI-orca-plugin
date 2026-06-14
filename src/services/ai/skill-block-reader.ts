@@ -231,7 +231,7 @@ function parseBlockToSkill(block: any): Skill | null {
     instruction,
     scope: "local",
     sourceType: "block",
-    enabled: true, // 默认启用
+    mode: "auto",
     tags: tags.length > 0 ? tags : undefined,
     blockSource,
   };

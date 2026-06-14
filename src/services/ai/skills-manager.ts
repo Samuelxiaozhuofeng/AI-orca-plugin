@@ -10,7 +10,7 @@
 
 import { getAiChatPluginName } from "../../ui/ai-chat-ui";
 import { readBlockSkills, listBlockSkillRefs, getBlockSkill } from "./skill-block-reader";
-import type { Skill, SkillRef, SkillScope, SkillMetadata, SkillFile } from "../../types/skills";
+import type { Skill, SkillRef, SkillScope, SkillMode, SkillMetadata, SkillFile } from "../../types/skills";
 
 const SKILLS_ROOT = "skills";
 const SKILL_METADATA_FILE = "SKILL.md";
@@ -62,7 +62,7 @@ const BUILT_IN_SKILLS: Skill[] = [
 - ❌ 不要使用其他工具`,
     scope: "internal",
     sourceType: "builtin",
-    enabled: true,
+    mode: "auto",
     tags: ["日记", "总结", "回顾", "反思"],
   },
   {
@@ -109,7 +109,7 @@ const BUILT_IN_SKILLS: Skill[] = [
 - ❌ 不要编造数据或进度`,
     scope: "internal",
     sourceType: "builtin",
-    enabled: true,
+    mode: "auto",
     tags: ["周报", "总结", "汇总", "报告"],
   },
 ];
@@ -321,16 +321,16 @@ export async function getSkill(skillId: string, isGlobal?: boolean): Promise<Ski
     // 1. 先检查内置技能
     const builtIn = BUILT_IN_SKILLS.find((s) => s.id === skillId);
     if (builtIn) {
-      const enabled = await isSkillEnabled(skillId, "internal");
-      return { ...builtIn, enabled };
+      const mode = await getSkillMode(skillId, "internal");
+      return { ...builtIn, mode };
     }
 
     // 2. 块技能（从 skill-block-reader）
     if (skillId.startsWith("block-")) {
       const blockSkill = await getBlockSkill({ id: skillId, name: skillId, scope: "local" });
       if (blockSkill) {
-        const enabled = await isSkillEnabled(skillId, "local");
-        return { ...blockSkill, enabled };
+        const mode = await getSkillMode(skillId, "local");
+        return { ...blockSkill, mode };
       }
       return null;
     }
@@ -369,7 +369,7 @@ async function buildSkillFromContent(skillId: string, content: string, isGlobal:
   metadata.id = skillId;
 
   const files = await listSkillFiles(skillId, isGlobal);
-  const enabled = await isSkillEnabled(skillId, isGlobal ? "global" : "local");
+  const mode = await getSkillMode(skillId, isGlobal ? "global" : "local");
 
   return {
     id: skillId,
@@ -378,7 +378,7 @@ async function buildSkillFromContent(skillId: string, content: string, isGlobal:
     instruction,
     scope: isGlobal ? "global" : "local",
     sourceType: "file" as const,
-    enabled,
+    mode,
     tags: metadata.tags,
     files,
     isGlobal,
@@ -611,46 +611,74 @@ export async function deleteSkillFile(skillId: string, filePath: string, isGloba
 }
 
 /**
- * 检查 Skill 是否启用
+ * 获取 Skill 的执行模式（含懒迁移）
  * @param skillId Skill ID
  * @param scopeOrIsGlobal Skill 作用域或旧版 isGlobal 布尔值
  */
-export async function isSkillEnabled(skillId: string, scopeOrIsGlobal?: SkillScope | boolean): Promise<boolean> {
+export async function getSkillMode(skillId: string, scopeOrIsGlobal?: SkillScope | boolean): Promise<SkillMode> {
   const scope = normalizeScope(scopeOrIsGlobal);
   const pluginName = "ai-chat";
-  const disabledKey = `skills:disabled:${scope}:${skillId}`;
+  const modeKey = `skills:mode:${scope}:${skillId}`;
+  const oldDisabledKey = `skills:disabled:${scope}:${skillId}`;
 
   try {
-    const value = await orca.plugins.getData(pluginName, disabledKey);
-    return !value;
+    // 1. 先查新 key
+    const modeValue = await orca.plugins.getData(pluginName, modeKey);
+    if (modeValue === "auto" || modeValue === "ask" || modeValue === "disabled") {
+      return modeValue as SkillMode;
+    }
+
+    // 2. 懒迁移：查旧 key
+    const oldValue = await orca.plugins.getData(pluginName, oldDisabledKey);
+    const newMode: SkillMode = oldValue === "true" ? "disabled" : "auto";
+
+    // 3. 写入新 key，清理旧 key
+    await orca.plugins.setData(pluginName, modeKey, newMode);
+    await orca.plugins.setData(pluginName, oldDisabledKey, null);
+
+    return newMode;
   } catch {
-    return true; // 默认启用
+    return "auto"; // 默认启用
   }
 }
 
 /**
- * 启用/禁用 Skill
+ * @deprecated 使用 getSkillMode 替代
+ */
+export async function isSkillEnabled(skillId: string, scopeOrIsGlobal?: SkillScope | boolean): Promise<boolean> {
+  const mode = await getSkillMode(skillId, scopeOrIsGlobal);
+  return mode !== "disabled";
+}
+
+/**
+ * 设置 Skill 的执行模式
  * @param skillId Skill ID
- * @param enabled 是否启用
+ * @param mode 执行模式
  * @param scopeOrIsGlobal Skill 作用域或旧版 isGlobal 布尔值
  */
-export async function setSkillEnabled(skillId: string, enabled: boolean, scopeOrIsGlobal?: SkillScope | boolean): Promise<boolean> {
+export async function setSkillMode(skillId: string, mode: SkillMode, scopeOrIsGlobal?: SkillScope | boolean): Promise<boolean> {
   const scope = normalizeScope(scopeOrIsGlobal);
   const pluginName = "ai-chat";
-  const disabledKey = `skills:disabled:${scope}:${skillId}`;
+  const modeKey = `skills:mode:${scope}:${skillId}`;
+  const oldDisabledKey = `skills:disabled:${scope}:${skillId}`;
 
   try {
-    if (enabled) {
-      await orca.plugins.setData(pluginName, disabledKey, null);
-    } else {
-      await orca.plugins.setData(pluginName, disabledKey, "true");
-    }
-    console.log(`[SkillsManager] Skill ${skillId} ${enabled ? "enabled" : "disabled"} (scope: ${scope})`);
+    await orca.plugins.setData(pluginName, modeKey, mode);
+    // 清理旧 key
+    try { await orca.plugins.setData(pluginName, oldDisabledKey, null); } catch { /* ignore */ }
+    console.log(`[SkillsManager] Skill ${skillId} mode set to ${mode} (scope: ${scope})`);
     return true;
   } catch (err) {
-    console.error(`[SkillsManager] Failed to set skill ${skillId} enabled=${enabled}:`, err);
+    console.error(`[SkillsManager] Failed to set skill ${skillId} mode=${mode}:`, err);
     return false;
   }
+}
+
+/**
+ * @deprecated 使用 setSkillMode 替代
+ */
+export async function setSkillEnabled(skillId: string, enabled: boolean, scopeOrIsGlobal?: SkillScope | boolean): Promise<boolean> {
+  return setSkillMode(skillId, enabled ? "auto" : "disabled", scopeOrIsGlobal);
 }
 
 /** Normalize old boolean isGlobal to SkillScope */
@@ -675,7 +703,8 @@ export async function exportSkill(skillId: string, isGlobal: boolean): Promise<s
       id: skill.id,
       metadata: skill.metadata || { name: skill.name, description: skill.description },
       instruction: skill.instruction,
-      enabled: skill.enabled,
+      mode: skill.mode,
+      enabled: skill.mode !== "disabled",
       isGlobal: skill.isGlobal,
     };
 
@@ -700,9 +729,11 @@ export async function importSkill(skillId: string, jsonContent: string, isGlobal
     const success = await createSkill(skillId, data.metadata, data.instruction, isGlobal);
     if (!success) return false;
 
-    // 设置启用状态
-    if (data.enabled !== undefined) {
-      await setSkillEnabled(skillId, data.enabled, isGlobal);
+    // 恢复执行模式（兼容新旧格式）
+    if (data.mode && ["auto", "ask", "disabled"].includes(data.mode)) {
+      await setSkillMode(skillId, data.mode as SkillMode, isGlobal);
+    } else if (data.enabled !== undefined) {
+      await setSkillMode(skillId, data.enabled ? "auto" : "disabled", isGlobal);
     }
 
     return true;

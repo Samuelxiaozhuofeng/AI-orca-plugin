@@ -15,262 +15,22 @@ import {
   estimateTotalTokens,
   type ManagedContext,
 } from "./context-manager";
+import {
+  createToolProtocolStream,
+  dedupeToolCalls,
+  extractToolProtocol,
+  type ToolCallInfo,
+} from "./tool-call-protocol";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// <tool_call> XML 标签适配层 (Qwen3/Llama/DeepSeek/GLM 等模型)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * 解析 <tool_call> XML 标签，支持多种格式：
- * 格式1 (JSON): '<tool_call>{"name": "searchNotes", "arguments": {"query": "酒馆"}}</tool_call>'
- * 格式2 (arg_key/arg_value): '<tool_call>searchNotes<arg_key>query</arg_key><arg_value>脂肪</arg_value></tool_call>'
- * 格式3 (name属性): '<tool_call name="searchNotes"><arg>...</arg></tool_call>'
- * 输出: [{ id, type, function: { name, arguments } }]
- */
-export function parseXmlToolCalls(content: string): ToolCallInfo[] {
-  const toolCalls: ToolCallInfo[] = [];
-  
-  // 匹配所有 <tool_call>...</tool_call> 块
-  const toolCallRegex = /<tool_call(?:\s+name="([^"]+)")?[^>]*>\s*([\s\S]*?)\s*<\/tool_call>/g;
-  let match;
-  let index = 0;
-  
-  while ((match = toolCallRegex.exec(content)) !== null) {
-    const nameAttr = match[1]; // 从 name 属性获取的工具名
-    const innerContent = match[2].trim();
-    
-    let toolName = "";
-    let args: Record<string, any> = {};
-    let parsed = false;
-    
-    // 尝试格式1: JSON 格式（必须包含 name 或 function.name 字段）
-    if (!parsed && innerContent.startsWith("{")) {
-      try {
-        const jsonObj = JSON.parse(innerContent);
-        toolName = jsonObj.name || jsonObj.function?.name || "";
-        
-        // 只有当 JSON 中包含工具名时，才认为格式1成功
-        if (toolName) {
-          let jsonArgs = jsonObj.arguments ?? jsonObj.parameters ?? {};
-          if (typeof jsonArgs === "object") {
-            args = jsonArgs;
-          } else if (typeof jsonArgs === "string") {
-            try {
-              args = JSON.parse(jsonArgs);
-            } catch {
-              args = { value: jsonArgs };
-            }
-          }
-          parsed = true;
-        }
-        // 如果 JSON 中没有 name 字段，不设置 parsed，继续尝试其他格式
-      } catch {
-        // 不是有效 JSON，继续尝试其他格式
-      }
-    }
-    
-    // 尝试格式2: <arg_key>...</arg_key><arg_value>...</arg_value> 格式
-    if (!parsed && innerContent.includes("<arg_key>")) {
-      // 工具名是 <arg_key> 之前的文本
-      const argKeyIndex = innerContent.indexOf("<arg_key>");
-      toolName = innerContent.substring(0, argKeyIndex).trim();
-      
-      // 解析所有 arg_key/arg_value 对
-      const argPairRegex = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g;
-      let argMatch;
-      while ((argMatch = argPairRegex.exec(innerContent)) !== null) {
-        const key = argMatch[1].trim();
-        let value: any = argMatch[2].trim();
-        // 尝试解析为 JSON
-        try {
-          value = JSON.parse(value);
-        } catch {
-          // 保持字符串值
-        }
-        args[key] = value;
-      }
-      parsed = true;
-    }
-    
-    // 尝试格式3: 使用 name 属性，内容可能是其他参数格式
-    if (!parsed && nameAttr) {
-      toolName = nameAttr;
-      // 尝试解析内容为参数
-      if (innerContent.startsWith("{")) {
-        try {
-          args = JSON.parse(innerContent);
-          parsed = true;
-        } catch (err) {
-          console.warn("[parseXmlToolCalls] Failed to parse JSON args for name-attribute form:", err);
-          args = { input: innerContent };
-          parsed = true;
-        }
-      } else if (innerContent) {
-        args = { input: innerContent };
-        parsed = true;
-      } else {
-        // 无参数的工具调用
-        args = {};
-        parsed = true;
-      }
-    }
-    
-    // 如果以上都失败，尝试将整个内容作为简单的工具名+参数
-    if (!parsed && innerContent) {
-      // 简单启发式：如果内容看起来像是 "toolName param1 param2"
-      const parts = innerContent.split(/\s+/);
-      if (parts.length > 0) {
-        toolName = parts[0];
-        if (parts.length > 1) {
-          args = { input: parts.slice(1).join(" ") };
-        }
-        parsed = true;
-      }
-    }
-    
-    if (toolName) {
-      toolCalls.push({
-        id: `xml_tool_call_${index++}`,
-        type: "function",
-        function: {
-          name: toolName,
-          arguments: JSON.stringify(args),
-        },
-      });
-    } else {
-      console.warn("[parseXmlToolCalls] Could not parse tool call:", innerContent);
-    }
-  }
-  
-  return toolCalls;
-}
-
-/**
- * 检查内容是否包含 <tool_call> 标签
- *
- * 注意：部分模型会输出带属性的形式，例如：<tool_call name="xxx">...</tool_call>
- */
-export function hasXmlToolCalls(content: string): boolean {
-  return /<tool_call\b/i.test(content);
-}
-
-/**
- * 从内容中移除 <tool_call> 块，返回纯文本内容
- */
-export function stripXmlToolCalls(content: string): string {
-  return content.replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, "").trim();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// DSML / 纯 invoke 工具调用适配层 (DeepSeek/GLM 等模型)
-// 同时支持两种格式:
-//   带前缀: <｜DSML｜invoke name="..."><｜DSML｜parameter name="...">value</｜DSML｜parameter></｜DSML｜invoke>
-//   纯格式: <invoke name="..."><parameter name="...">value</parameter></invoke>
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** DSML 前缀（可选匹配） */
-const DSML = "(?:｜DSML｜)?";
-
-/**
- * 检查内容是否包含 DSML 或纯 invoke 格式的工具调用
- */
-export function hasDsmlToolCalls(content: string): boolean {
-  return /<｜DSML｜function_calls>/.test(content)
-    || /<｜DSML｜invoke/.test(content)
-    || /<invoke[\s>]/.test(content);
-}
-
-/**
- * 解析 DSML 或纯 invoke 格式的工具调用
- */
-export function parseDsmlToolCalls(content: string): ToolCallInfo[] {
-  const toolCalls: ToolCallInfo[] = [];
-
-  // 匹配所有 invoke 块（可选 DSML 前缀）
-  const invokeRegex = new RegExp(
-    `<${DSML}invoke\\s+name="([^"]+)"[^>]*>([\\s\\S]*?)<\\/${DSML}invoke>`,
-    "g"
-  );
-  let match;
-  let index = 0;
-
-  while ((match = invokeRegex.exec(content)) !== null) {
-    const toolName = match[1];
-    const invokeContent = match[2];
-
-    // 解析参数（可选 DSML 前缀）
-    const args: Record<string, any> = {};
-    const paramRegex = new RegExp(
-      `<${DSML}parameter\\s+name="([^"]+)"[^>]*>([\\s\\S]*?)<\\/${DSML}parameter>`,
-      "g"
-    );
-    let paramMatch;
-
-    while ((paramMatch = paramRegex.exec(invokeContent)) !== null) {
-      const paramName = paramMatch[1];
-      let paramValue: any = paramMatch[2].trim();
-
-      // 尝试解析 JSON 值
-      try {
-        paramValue = JSON.parse(paramValue);
-      } catch {
-        // 保持字符串值
-      }
-
-      args[paramName] = paramValue;
-    }
-
-    toolCalls.push({
-      id: `dsml_tool_call_${index++}`,
-      type: "function",
-      function: {
-        name: toolName,
-        arguments: JSON.stringify(args),
-      },
-    });
-  }
-
-  return toolCalls;
-}
-
-/**
- * 从内容中移除 DSML 或纯 invoke 工具调用块
- */
-export function stripDsmlToolCalls(content: string): string {
-  // 移除 DSML function_calls 块
-  let result = content.replace(/<｜DSML｜function_calls>[\s\S]*?<\/｜DSML｜function_calls>/g, "");
-  // 移除 invoke 块（带或不带 DSML 前缀）
-  result = result.replace(/<(?:｜DSML｜)?invoke[\s\S]*?<\/(?:｜DSML｜)?invoke>/g, "");
-  // 移除 parameter 标签残余
-  result = result.replace(/<(?:｜DSML｜)?parameter[\s\S]*?<\/(?:｜DSML｜)?parameter>/g, "");
-  // 移除自闭合标签
-  result = result.replace(/<｜DSML｜[^>]*\/>/g, "");
-  // 移除孤立的 invoke 开标签
-  result = result.replace(/<(?:｜DSML｜)?\/?invoke[^>]*>/gi, "");
-  // 移除孤立的 parameter 标签
-  result = result.replace(/<(?:｜DSML｜)?\/?parameter[^>]*>/gi, "");
-  return result.trim();
-}
-
-/** 检查字符串末尾是否为 <invoke（含 DSML 前缀）的部分前缀，用于跨 chunk 缓冲 */
-function getTrailingInvokePrefixLen(s: string): number {
-  const prefixes = ["<invok", "<invo", "<inv", "<in", "<i", "<"];
-  for (const p of prefixes) {
-    if (s.endsWith(p)) return p.length;
-  }
-  // Also check for DSML prefixed form: <｜DSML｜invoke...
-  // The DSML prefix uses fullwidth vertical bar characters
-  if (/<[｜|]?DSML[｜|]?invok$/.test(s)) return 16;
-  if (/<[｜|]?DSML[｜|]?invo$/.test(s)) return 14;
-  if (/<[｜|]?DSML[｜|]?inv$/.test(s)) return 13;
-  if (/<[｜|]?DSML[｜|]?in$/.test(s)) return 12;
-  if (/<[｜|]?DSML[｜|]?i$/.test(s)) return 11;
-  if (/<[｜|]?DSML[｜|]?$/.test(s)) return 10;
-  return 0;
-}
-
-/** 检测内容中是否出现 invoke 标签（含 DSML 前缀） */
-const INVOKE_DETECT_RE = /<(?:｜DSML｜)?invoke[\s>]/;
+export {
+  hasDsmlToolCalls,
+  hasXmlToolCalls,
+  parseDsmlToolCalls,
+  parseXmlToolCalls,
+  stripDsmlToolCalls,
+  stripXmlToolCalls,
+  type ToolCallInfo,
+} from "./tool-call-protocol";
 
 export interface StreamOptions {
   apiUrl: string;
@@ -302,15 +62,6 @@ export interface StreamResult {
   reasoning?: string;
   /** 模型停止原因: "stop" | "length" | "tool_calls" | "content_filter" | "end_turn" | "max_tokens" */
   finishReason?: string;
-}
-
-export interface ToolCallInfo {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
 }
 
 export type StreamChunk =
@@ -409,6 +160,22 @@ export function mergeToolCalls(
   return result;
 }
 
+function finalizeToolProtocolContent(
+  rawContent: string,
+  existingToolCalls: ToolCallInfo[],
+): { content: string; toolCalls: ToolCallInfo[]; extractedToolCalls: ToolCallInfo[] } {
+  const extracted = extractToolProtocol(rawContent);
+  const toolCalls = extracted.toolCalls.length > 0
+    ? dedupeToolCalls([...existingToolCalls, ...extracted.toolCalls])
+    : existingToolCalls;
+
+  return {
+    content: extracted.visibleText,
+    toolCalls,
+    extractedToolCalls: extracted.toolCalls,
+  };
+}
+
 /**
  * Stream chat completions from the API.
  * Yields chunks as they arrive for real-time UI updates.
@@ -420,9 +187,7 @@ export async function* streamChatCompletion(
   let reasoning = "";
   let toolCalls: ToolCallInfo[] = [];
   let finishReason: string | undefined;
-  // 闸门：检测到 invoke XML 后停止向 UI 输出文本，静默累积用于 DSML 解析
-  let invokeDetected = false;
-  let yieldedContentLen = 0;
+  const protocolStream = createToolProtocolStream();
 
   for await (const chunk of openAIChatCompletionsStream({
     apiUrl: options.apiUrl,
@@ -439,22 +204,9 @@ export async function* streamChatCompletion(
   })) {
     if (chunk.type === "content" && chunk.content) {
       content += chunk.content;
-      if (!invokeDetected) {
-        const invokeIdx = content.search(INVOKE_DETECT_RE);
-        if (invokeIdx >= 0) {
-          invokeDetected = true;
-          if (invokeIdx > yieldedContentLen) {
-            yield { type: "content", content: content.substring(yieldedContentLen, invokeIdx) };
-            yieldedContentLen = invokeIdx;
-          }
-        } else {
-          const partialLen = getTrailingInvokePrefixLen(content);
-          const safeEnd = content.length - partialLen;
-          if (safeEnd > yieldedContentLen) {
-            yield { type: "content", content: content.substring(yieldedContentLen, safeEnd) };
-            yieldedContentLen = safeEnd;
-          }
-        }
+      const visibleDelta = protocolStream.append(chunk.content);
+      if (visibleDelta) {
+        yield { type: "content", content: visibleDelta };
       }
     } else if (chunk.type === "reasoning" && chunk.reasoning != null) {
       reasoning += chunk.reasoning;
@@ -467,33 +219,11 @@ export async function* streamChatCompletion(
     }
   }
 
-  // 检查 content 中是否包含 <tool_call> XML 标签
-  // 即使存在原生 tool_calls，也必须剥离 XML/DSML，防止标签泄漏到回复文本
-  if (hasXmlToolCalls(content)) {
-    const xmlToolCalls = parseXmlToolCalls(content);
-    content = stripXmlToolCalls(content);
-    if (xmlToolCalls.length > 0) {
-      const existingKeys = new Set(toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`));
-      for (const xtc of xmlToolCalls) {
-        const key = `${xtc.function.name}:${xtc.function.arguments}`;
-        if (!existingKeys.has(key)) { toolCalls.push(xtc); existingKeys.add(key); }
-      }
-      yield { type: "tool_calls", toolCalls };
-    }
-  }
-
-  // 即使存在原生 tool_calls，也必须剥离 DSML，防止标签泄漏到回复文本
-  if (hasDsmlToolCalls(content)) {
-    const dsmlToolCalls = parseDsmlToolCalls(content);
-    content = stripDsmlToolCalls(content);
-    if (dsmlToolCalls.length > 0) {
-      const existingKeys = new Set(toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`));
-      for (const dtc of dsmlToolCalls) {
-        const key = `${dtc.function.name}:${dtc.function.arguments}`;
-        if (!existingKeys.has(key)) { toolCalls.push(dtc); existingKeys.add(key); }
-      }
-      yield { type: "tool_calls", toolCalls };
-    }
+  const finalized = finalizeToolProtocolContent(content, toolCalls);
+  content = finalized.content;
+  toolCalls = finalized.toolCalls;
+  if (finalized.extractedToolCalls.length > 0) {
+    yield { type: "tool_calls", toolCalls };
   }
 
   yield { type: "done", result: { content, toolCalls, reasoning: reasoning != null ? reasoning : undefined, finishReason } };
@@ -524,8 +254,7 @@ export async function* streamChatWithRetry(
   let toolCalls: ToolCallInfo[] = [];
   let finishReason: string | undefined;
   let usedFallback = false;
-  let invokeDetected = false;
-  let yieldedContentLen = 0;
+  let protocolStream = createToolProtocolStream();
 
   // Apply context compression if enabled and messages exceed threshold
   const maybeCompressMessages = async (messages: OpenAIChatMessage[]): Promise<OpenAIChatMessage[]> => {
@@ -600,22 +329,9 @@ export async function* streamChatWithRetry(
 
         if (chunk.type === "content" && chunk.content) {
           content += chunk.content;
-          if (!invokeDetected) {
-            const invokeIdx = content.search(INVOKE_DETECT_RE);
-            if (invokeIdx >= 0) {
-              invokeDetected = true;
-              if (invokeIdx > yieldedContentLen) {
-                yield { type: "content", content: content.substring(yieldedContentLen, invokeIdx) };
-                yieldedContentLen = invokeIdx;
-              }
-            } else {
-              const partialLen = getTrailingInvokePrefixLen(content);
-              const safeEnd = content.length - partialLen;
-              if (safeEnd > yieldedContentLen) {
-                yield { type: "content", content: content.substring(yieldedContentLen, safeEnd) };
-                yieldedContentLen = safeEnd;
-              }
-            }
+          const visibleDelta = protocolStream.append(chunk.content);
+          if (visibleDelta) {
+            yield { type: "content", content: visibleDelta };
           }
         } else if (chunk.type === "reasoning" && chunk.reasoning != null) {
           reasoning += chunk.reasoning;
@@ -648,8 +364,7 @@ export async function* streamChatWithRetry(
     reasoning = "";
     toolCalls = [];
     finishReason = undefined;
-    invokeDetected = false;
-    yieldedContentLen = 0;
+    protocolStream = createToolProtocolStream();
     onRetry?.();
 
     try {
@@ -668,8 +383,7 @@ export async function* streamChatWithRetry(
     usedFallback = true;
     content = "";
     reasoning = ""; // 重置 reasoning
-    invokeDetected = false;
-    yieldedContentLen = 0;
+    protocolStream = createToolProtocolStream();
     onRetry?.();
 
     try {
@@ -678,38 +392,11 @@ export async function* streamChatWithRetry(
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // Qwen3/Llama 适配: 检查 content 中是否包含 <tool_call> XML 标签
-  // 如果模型不支持原生 tool_calls 格式，会把调用写在 content 里
-  // ═══════════════════════════════════════════════════════════════════════════
-  // 即使存在原生 tool_calls，也必须剥离 XML/DSML，防止标签泄漏到回复文本
-  if (hasXmlToolCalls(content)) {
-    console.log("[streamChatWithRetry] Detected <tool_call> XML in content, parsing...");
-    const xmlToolCalls = parseXmlToolCalls(content);
-    content = stripXmlToolCalls(content);
-    if (xmlToolCalls.length > 0) {
-      const existingKeys = new Set(toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`));
-      for (const xtc of xmlToolCalls) {
-        const key = `${xtc.function.name}:${xtc.function.arguments}`;
-        if (!existingKeys.has(key)) { toolCalls.push(xtc); existingKeys.add(key); }
-      }
-      yield { type: "tool_calls", toolCalls };
-    }
-  }
-
-  // 即使存在原生 tool_calls，也必须剥离 DSML，防止标签泄漏到回复文本
-  if (hasDsmlToolCalls(content)) {
-    console.log("[streamChatWithRetry] Detected DSML format tool calls in content, parsing...");
-    const dsmlToolCalls = parseDsmlToolCalls(content);
-    content = stripDsmlToolCalls(content);
-    if (dsmlToolCalls.length > 0) {
-      const existingKeys = new Set(toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`));
-      for (const dtc of dsmlToolCalls) {
-        const key = `${dtc.function.name}:${dtc.function.arguments}`;
-        if (!existingKeys.has(key)) { toolCalls.push(dtc); existingKeys.add(key); }
-      }
-      yield { type: "tool_calls", toolCalls };
-    }
+  const finalized = finalizeToolProtocolContent(content, toolCalls);
+  content = finalized.content;
+  toolCalls = finalized.toolCalls;
+  if (finalized.extractedToolCalls.length > 0) {
+    yield { type: "tool_calls", toolCalls };
   }
 
   // ── 最大输出恢复：finish_reason 为 "length"/"max_tokens" 时自动续写 ──
@@ -752,6 +439,7 @@ export async function* streamChatWithRetry(
     let contFinishReason: string | undefined;
     let contToolCalls: ToolCallInfo[] = [];
     let contError: string | null = null;
+    const contProtocolStream = createToolProtocolStream();
 
     try {
       const contTimeoutController = new AbortController();
@@ -783,8 +471,10 @@ export async function* streamChatWithRetry(
           contResetTimeout();
           if (chunk.type === "content" && chunk.content) {
             contContent += chunk.content;
-            // 实时输出续写内容
-            yield { type: "content", content: chunk.content };
+            const visibleDelta = contProtocolStream.append(chunk.content);
+            if (visibleDelta) {
+              yield { type: "content", content: visibleDelta };
+            }
           } else if (chunk.type === "reasoning" && chunk.reasoning != null) {
             contReasoning += chunk.reasoning;
             yield { type: "reasoning", reasoning: chunk.reasoning };
@@ -807,6 +497,9 @@ export async function* streamChatWithRetry(
 
     // 累加续写内容
     if (contContent) {
+      const finalizedContinuation = finalizeToolProtocolContent(contContent, contToolCalls);
+      contContent = finalizedContinuation.content;
+      contToolCalls = finalizedContinuation.toolCalls;
       content += contContent;
     }
     if (contReasoning) {

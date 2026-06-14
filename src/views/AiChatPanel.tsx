@@ -1,7 +1,7 @@
 import type { PanelProps } from "../orca.d.ts";
 
 import { buildContextForSend } from "../services/notes/context-builder";
-import { contextStore, type ContextRef } from "../store/context-store";
+import { contextKey, contextStore, type ContextRef } from "../store/context-store";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
@@ -42,6 +42,7 @@ import {
   updateAiChatSettings,
   validateCurrentConfig,
   modelSupportsTools,
+  getModelRuntimeConfig,
   type AiChatSettings,
 } from "../settings/ai-chat-settings";
 import { buildDynamicSystemPrompt, getCurrentRepoId } from "../services/ai/dynamic-prompt";
@@ -63,7 +64,7 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { FLASHCARD_TOOL, executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName } from "../services/ai/ai-tools";
+import { FLASHCARD_TOOL, executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
 import { getToolStatus, isToolDisabled, shouldAskForTool, isAgenticRAGEnabled, getAgenticRAGConfig, isWebSearchEnabled } from "../store/tool-store";
 import { listSkills, getSkill } from "../services/ai/skills-manager";
 import type { Skill, SkillRef } from "../types/skills";
@@ -73,7 +74,14 @@ import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
+import {
+  createSyntheticToolErrorMessage,
+  createToolCallSignature,
+  resolveToolCallName,
+} from "../services/ai/tool-call-router";
 import { executeAgenticRAG, getToolDisplayName } from "../services/ai/agentic-rag-service";
+import { createToolRoundLimit } from "../services/ai/tool-round-limit";
+import { ensureMcpServersReady } from "../services/external/mcp-server-manager";
 import { normalizeWebSearchResults, type WebSearchSource } from "../utils/source-attribution";
 import {
   panelContainerStyle,
@@ -340,6 +348,7 @@ function EditableTitle({ title, onSave }: EditableTitleProps) {
 export default function AiChatPanel({ panelId }: PanelProps) {
   const orcaSnap = useSnapshot(orca.state);
   const uiSnap = useSnapshot(uiStore);
+  const contextSnap = useSnapshot(contextStore);
   const [sending, setSending] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
@@ -800,7 +809,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       const sessionToCache: SavedSession = {
         ...currentSession,
         messages,
-        contexts: [...contextStore.selected],
+        contexts: [...contextSnap.selected],
         scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
         flashcardState,
       };
@@ -814,15 +823,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         clearTimeout(autoCacheTimeoutRef.current);
       }
     };
-  }, [messages, currentSession, sessionsLoaded, flashcardMode, pendingFlashcards, flashcardIndex, flashcardKeptCount, flashcardSkippedCount]);
+  }, [messages, currentSession, sessionsLoaded, flashcardMode, pendingFlashcards, flashcardIndex, flashcardKeptCount, flashcardSkippedCount, contextSnap.selected]);
 
   // Sync state to session store for auto-save on close
   useEffect(() => {
     const hasRealMessages = messages.some((m) => !m.localOnly);
     if (hasRealMessages) {
-      updateSessionStore(currentSession, messages, [...contextStore.selected]);
+      updateSessionStore(currentSession, messages, [...contextSnap.selected]);
     }
-  }, [messages, currentSession]);
+  }, [messages, currentSession, contextSnap.selected]);
 
   useEffect(() => {
     // 注入样式，但不返回清理函数，避免面板关闭时影响样式
@@ -997,8 +1006,16 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
 	    const pluginName = getAiChatPluginName();
 	    const settings = getAiChatSettings(pluginName);
-	    // 工具调用最大轮数：可在设置中配置；若缺失则默认 5（向后兼容）
-	    const MAX_TOOL_ROUNDS = settings.maxToolRounds || 5;
+	    const model = (currentSession.model || "").trim() || settings.selectedModelId;
+	    const runtimeConfig = getModelRuntimeConfig(settings, model);
+	    try {
+	      await ensureMcpServersReady();
+	    } catch (err) {
+	      console.warn("[handleSend] MCP readiness check failed:", err);
+	    }
+	    // 0 表示不设置固定工具轮数上限，依靠重复/错误/取消等状态退出（Codex 式 agent loop）。
+	    const toolRoundLimit = runtimeConfig.maxToolRounds;
+	    const toolRoundController = createToolRoundLimit(toolRoundLimit);
 
 	    // 加载已启用的技能，注入系统提示词让 AI 自动识别并调用
 	    const enabledSkills: Array<{ name: string; description: string; instruction: string }> = [];
@@ -1006,7 +1023,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      const allSkillRefs = await listSkills();
 	      for (const ref of allSkillRefs) {
 	        const skill = await getSkill(ref.id, ref.scope === "global");
-	        if (skill && skill.enabled) {
+	        if (skill && skill.mode !== "disabled") {
 	          enabledSkills.push({
 	            name: skill.name || skill.id,
 	            description: skill.description || "",
@@ -1035,7 +1052,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      }
 	    }
 
-	    // 系统提示词模板变量：支持 {maxToolRounds}，按当前 MAX_TOOL_ROUNDS 注入
+	    // 系统提示词
 	    let systemPrompt = buildDynamicSystemPrompt({
       hasMcpTools: getDiscoveredTools().length > 0,
       hasTodoistTools: enableTodoistTools,
@@ -1111,8 +1128,21 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    }
 	    
 	    // /timeline - 时间线格式
-	    if (content.includes("/timeline")) {
-	      processedContent = processedContent.replace(/\/timeline/g, "").trim();
+	    const wantsTimelineFormat = /\/timeline|用\s*timeline\s*格式展示|timeline\s*格式|时间线格式/.test(content);
+	    if (wantsTimelineFormat) {
+	      const timelineRequest = processedContent
+	        .replace(/\/timeline|用\s*timeline\s*格式展示|timeline\s*格式|时间线格式/g, "")
+	        .trim();
+	      if (timelineRequest) {
+	        processedContent = timelineRequest;
+	      } else {
+	        const priorAssistantMessage = [...(historyOverride || messages)]
+	          .reverse()
+	          .find((message) => message.role === "assistant" && !message.localOnly && message.content.trim());
+	        processedContent = priorAssistantMessage
+	          ? `请把下面这段内容重新整理为 timeline 格式，不要重新问候，不要询问我要展示什么。\n\n${sanitizeContent(priorAssistantMessage.content)}`
+	          : "请用 timeline 格式展示最近一次可用的对话内容；如果没有可用内容，简短询问需要展示的日期或主题。";
+	      }
 	      systemPrompt += `\n\n【格式要求 - 时间线】用户要求使用时间线格式展示结果。
 格式：
 \`\`\`timeline
@@ -1125,7 +1155,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 4. 描述要详细，包含关键内容摘要
 5. 类型用中文，可选值：工作、娱乐、学习、生活、健康、旅行、财务、社交
 6. 根据内容智能判断类型，如日记默认生活，任务默认工作
-7. 按时间顺序排列`;
+7. 按时间顺序排列
+8. 最终回答必须包含一个 fenced code block，语言名必须是 timeline，不要用普通 Markdown 列表替代：
+\`\`\`timeline
+日期时间 | 标题 | 描述 | 类型
+\`\`\``;
 	    }
 	    
 	    // /brief - 简洁回答
@@ -1428,8 +1462,8 @@ graph TD
               model,
               protocol: apiConfig.protocol,
               anthropicApiPath: apiConfig.anthropicApiPath,
-              temperature: settings.temperature,
-              maxTokens: settings.maxTokens,
+              temperature: runtimeConfig.temperature,
+              maxTokens: runtimeConfig.maxTokens,
               signal: aborter.signal,
               tools: [FLASHCARD_TOOL],
             },
@@ -1519,7 +1553,6 @@ graph TD
 	    const currentChatMode = getMode();
 	    const includeTools = currentChatMode !== 'ask';
 
-	    const model = (currentSession.model || "").trim() || settings.selectedModelId;
 	    const validationError = validateCurrentConfig(settings);
 	    if (validationError) {
 	      orca.notify("warn", validationError);
@@ -1529,12 +1562,26 @@ graph TD
     setSending(true);
 
     // 获取高优先级上下文（拖入的块）用于显示
-    const highPriorityContexts = contextStore.selected
-      .filter(c => (c.priority ?? 0) > 0)
-      .map(c => ({
-        title: c.kind === 'page' ? c.title : `#${c.tag}`,
+    const highPrioritySourceContexts = contextStore.selected.filter(c => (c.priority ?? 0) > 0);
+    const contextPreviewMap = new Map<string, string>();
+    await Promise.all(highPrioritySourceContexts.map(async (ctx) => {
+      const key = contextKey(ctx);
+      try {
+        const result = await buildContextForSend([ctx], {
+          maxChars: Math.min(settings.maxContextChars || 60_000, 8_000),
+          maxBlocks: 120,
+        });
+        contextPreviewMap.set(key, result.text);
+      } catch (err: any) {
+        contextPreviewMap.set(key, `Context preview failed: ${String(err?.message ?? err ?? "unknown error")}`);
+      }
+    }));
+
+    const highPriorityContexts = highPrioritySourceContexts.map(c => ({
+        title: c.kind === 'tag' ? `#${c.tag}` : c.title,
         kind: c.kind,
-        blockId: c.kind === 'page' ? c.rootBlockId : undefined,
+        blockId: c.kind === 'page' ? c.rootBlockId : c.kind === 'block' ? c.blockId : undefined,
+        preview: contextPreviewMap.get(contextKey(c)),
       }));
 
     // 先添加用户消息到列表
@@ -1620,8 +1667,6 @@ graph TD
           modelKeys: selectedModels,
           messages: apiMessages,
           fallbackMessages: apiMessagesFallback,
-          temperature: settings.temperature,
-          maxTokens: settings.maxTokens,
           signal: aborter.signal,
         })) {
           setMultiModelResponses(prev => updateModelResponse(prev, update));
@@ -1709,6 +1754,67 @@ graph TD
       const getSearchResultsForMessage = () => (
         aggregatedSearchResults.length > 0 ? aggregatedSearchResults : undefined
       );
+      const isToolErrorResult = (message: Message) => {
+        const content = (message.content || "").trim();
+        return /^Error[:：]/i.test(content)
+          || /^Unknown tool[:：]/i.test(content)
+          || /^Tool not found[:：]/i.test(content)
+          || content.includes("Invalid JSON in tool arguments")
+          || content.includes("Tool execution timed out")
+          || content.includes("Repeated tool call skipped")
+          || content.includes("用户拒绝执行");
+      };
+
+      const buildToolContractSystemPrompt = (
+        basePrompt: string,
+        availableTools: Array<{ function: { name: string } }> | undefined,
+      ) => {
+        if (!availableTools?.length) return basePrompt;
+        const names = availableTools
+          .map((tool) => tool.function.name)
+          .filter(Boolean)
+          .sort();
+        const listed = names.join("\n");
+        const mcpNames = names.filter((name) => name.startsWith("mcp__"));
+        const orcaNoteNames = mcpNames.filter((name) => name.startsWith("mcp__orca-note__"));
+        const mcpGuidance = mcpNames.length
+          ? `
+
+## MCP Tool Routing
+- MCP tools in the allowlist are available external tools. Do not claim MCP tools are unavailable when an allowlisted mcp__ name matches the task.
+- For Orca Note notes, journals, pages, blocks, tags, timeline extraction, or local repository content, prefer the matching mcp__orca-note__* tool over skill_* tools.
+- Copy the complete MCP tool name exactly, including server prefix and any suffix. Do not add "s", change singular/plural, translate, abbreviate, or infer a missing tool name.
+- If no allowlisted tool matches the requested action, answer directly instead of inventing a function name.
+${orcaNoteNames.length ? `\nAvailable Orca Note MCP tools:\n${orcaNoteNames.join("\n")}` : ""}`
+          : "";
+        return `${basePrompt}
+
+## Tool Name Contract
+When calling a tool, the function name must be copied exactly from this allowlist. Do not invent, translate, pluralize, abbreviate, or change punctuation in tool names. MCP tools are especially strict: one character difference means a different tool.
+
+${listed}${mcpGuidance}`;
+      };
+
+      const buildToolRecoverySystemPrompt = (basePrompt: string, reason: string) => `${basePrompt}
+
+## Tool Recovery
+Reason: ${reason}
+
+Do not call any more tools in this response. Do not output DSML, XML, <invoke>, <parameter>, <tool_call>, <tool_calls>, or <function_calls> markup. Use the available conversation and tool results/errors to answer the user directly. If the requested action could not be completed, say that plainly and give the best useful next step.`;
+
+      const buildEmptyToolRecoveryText = (reason: string, toolMessages: Message[]) => {
+        const errorSummary = toolMessages
+          .filter(isToolErrorResult)
+          .map((m) => (m.content || "").split("\n")[0])
+          .filter(Boolean)
+          .slice(0, 3)
+          .join("\n");
+        return [
+          `工具调用没有成功完成，我已停止继续调用工具。原因：${reason}`,
+          errorSummary ? `\n${sanitizeContent(errorSummary)}` : "",
+          "\n请检查工具是否已连接、工具名是否仍然存在，或换一种更明确的说法重试。",
+        ].join("").trim();
+      };
 
       // Stream initial response with timeout protection
       let currentContent = "";
@@ -1723,16 +1829,6 @@ graph TD
 
       // 获取模型特定的 API 配置
       const apiConfig = getModelApiConfig(settings, model);
-
-      const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
-        messages: conversation,
-        systemPrompt,
-        contextText,
-        customMemory: memoryText,
-        chatMode: currentChatMode,
-        maxHistoryMessages: settings.maxHistoryMessages,
-        modelId: model,
-      });
 
       // 根据是否有拖入的块来选择工具列表
       // 有拖入块时禁用搜索类工具，强制 AI 使用已提供的上下文
@@ -1768,6 +1864,22 @@ graph TD
       }
       // 只有当模型支持 tools 时才传递工具，避免不支持的模型输出 XML 格式
       const toolsToUse = includeTools && supportsTools && filteredTools.length > 0 ? filteredTools : undefined;
+      const availableExecutionTools = includeTools ? filteredTools : [];
+
+      const toolAwareSystemPrompt = buildToolContractSystemPrompt(
+        systemPrompt,
+        availableExecutionTools.length > 0 ? availableExecutionTools : toolsToUse,
+      );
+
+      const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
+        messages: conversation,
+        systemPrompt: toolAwareSystemPrompt,
+        contextText,
+        customMemory: memoryText,
+        chatMode: currentChatMode,
+        maxHistoryMessages: settings.maxHistoryMessages,
+        modelId: model,
+      });
 
       // ─────────────────────────────────────────────────────────────────────────
       // Agentic RAG 模式：AI 自主规划检索策略，多轮迭代
@@ -1841,7 +1953,7 @@ graph TD
           
           // 执行 Agentic RAG
           const ragResult = await executeAgenticRAG(processedContent, callLLM, {
-            maxIterations: ragConfig.maxIterations,
+            maxIterations: ragConfig.maxIterations || runtimeConfig.maxToolRounds,
             enableReflection: ragConfig.enableReflection,
             onProgress,
           });
@@ -1913,8 +2025,8 @@ graph TD
           model,
           protocol: apiConfig.protocol,
           anthropicApiPath: apiConfig.anthropicApiPath,
-          temperature: settings.temperature,
-          maxTokens: settings.maxTokens,
+          temperature: runtimeConfig.temperature,
+          maxTokens: runtimeConfig.maxTokens,
           signal: aborter.signal,
           tools: toolsToUse,
           timeoutMs: settings.streamTimeout,
@@ -1981,7 +2093,7 @@ graph TD
             currentContent = sanitizeContent(currentContent + chunk.content);
             updateMessage(reasoningMessageId, { content: currentContent });
           }
-        } else if (chunk.type === "tool_calls") {
+        } else if (chunk.type === "tool_calls" && includeTools) {
           toolCalls = chunk.toolCalls;
         } else if (chunk.type === "done" && chunk.result) {
           // 使用 DSML 清洗后的最终内容，确保 invoke 标签不进入历史
@@ -1991,7 +2103,7 @@ graph TD
               updateMessage(reasoningMessageId, { content: currentContent });
             }
           }
-          if (chunk.result.toolCalls?.length) {
+          if (includeTools && chunk.result.toolCalls?.length) {
             toolCalls = chunk.result.toolCalls;
           }
         }
@@ -2011,6 +2123,16 @@ graph TD
           id: assistantId, 
           role: "assistant", 
           content: "(empty response)", 
+          createdAt: assistantCreatedAt,
+          model,
+          searchResults: getSearchResultsForMessage(),
+        }]);
+      } else if (!hasAssistantMessage && currentContent) {
+        // 有些兼容网关只在 done 阶段返回最终正文，此时也需要补建消息气泡。
+        setMessages((prev) => [...prev, {
+          id: assistantId,
+          role: "assistant",
+          content: sanitizeContent(currentContent),
           createdAt: assistantCreatedAt,
           model,
           searchResults: getSearchResultsForMessage(),
@@ -2042,9 +2164,9 @@ graph TD
 		      let currentToolCalls = toolCalls;
 		      let currentAssistantId = assistantId;
 		      const allToolResultMessages: Message[] = [];
-          const executedSkillToolNames = new Set<string>();
+          const executedToolSignatures = new Set<string>();
 
-      while (currentToolCalls.length > 0 && toolRound < MAX_TOOL_ROUNDS) {
+      while (currentToolCalls.length > 0 && toolRoundController.canRun(toolRound)) {
         toolRound++;
 
         updateMessage(currentAssistantId, { tool_calls: currentToolCalls });
@@ -2061,7 +2183,44 @@ graph TD
           break;
         }
         
-        if (newToolCalls.length < currentToolCalls.length) {
+        const preToolResultMessages: Message[] = [];
+        const routedToolCallsForConversation: ToolCallInfo[] = [];
+        const executableToolCalls: ToolCallInfo[] = [];
+
+        for (const tc of newToolCalls) {
+          const resolution = resolveToolCallName(tc, availableExecutionTools);
+          if (resolution.status === "invalid") {
+            routedToolCallsForConversation.push(tc);
+            preToolResultMessages.push(createSyntheticToolErrorMessage(tc, resolution.message) as Message);
+            continue;
+          }
+
+          if (resolution.status === "renamed") {
+            console.warn(
+              `[Tool Call] Normalized tool name "${resolution.originalName}" -> "${resolution.resolvedName}" (${resolution.reason})`
+            );
+          }
+
+          const routedToolCall = resolution.toolCall;
+          routedToolCallsForConversation.push(routedToolCall);
+          const signature = createToolCallSignature(routedToolCall);
+          if (executedToolSignatures.has(signature)) {
+            preToolResultMessages.push(createSyntheticToolErrorMessage(
+              routedToolCall,
+              `Error: Repeated tool call skipped: ${routedToolCall.function.name}. Use prior tool results and answer directly.`,
+            ) as Message);
+            continue;
+          }
+
+          executedToolSignatures.add(signature);
+          executableToolCalls.push(routedToolCall);
+        }
+
+        if (routedToolCallsForConversation.length > 0) {
+          currentToolCalls = routedToolCallsForConversation;
+          updateMessage(currentAssistantId, { tool_calls: currentToolCalls });
+          const routedAssistantIdx = conversation.findIndex((m) => m.id === currentAssistantId);
+          if (routedAssistantIdx >= 0) conversation[routedAssistantIdx].tool_calls = currentToolCalls;
         }
 
         // ── JSON 修复辅助函数 ──────────────────────────────────────────────
@@ -2178,33 +2337,42 @@ graph TD
                 if (!resolvedSkillId) {
                   result = `Error: Skill not found for tool: ${toolName}`;
                 } else {
-                  try {
-                    const skill = await getSkill(resolvedSkillId.id, (resolvedSkillId as any).isGlobal);
-                    if (!skill) {
+                  const skillMode = getSkillToolMode(toolName) || "auto";
+
+                  if (skillMode === "disabled") {
+                    result = `Error: Skill is disabled: ${resolvedSkillId.id}`;
+                  } else if (skillMode === "auto") {
+                    // 自动执行：无需确认，直接加载指令
+                    const instructions = await getSkillInstructionsAsync(resolvedSkillId);
+                    if (!instructions) {
                       result = `Error: Skill not found: ${resolvedSkillId.id}`;
                     } else {
-                      const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
-                      const userApproved = await createToolConfirmPromise(
-                        `skill: ${skill.name}`,
-                        { skillId: resolvedSkillId.id, input: args.input || "" }
-                      );
-                      if (!userApproved) {
-                        result = `用户拒绝执行 Skill。请尝试其他方式或直接回答用户的问题。`;
+                      const userInput = args.input || "";
+                      result = `${instructions}\n\n## 用户输入\n${userInput}`;
+                    }
+                  } else {
+                    // ask 模式：在对话中内联确认（非模态弹窗）
+                    try {
+                      const skill = await getSkill(resolvedSkillId.id, (resolvedSkillId as any).isGlobal);
+                      if (!skill) {
+                        result = `Error: Skill not found: ${resolvedSkillId.id}`;
                       } else {
-                        const instructions = await getSkillInstructionsAsync(resolvedSkillId);
-                        if (!instructions) {
-                          result = `Error: Skill not found: ${resolvedSkillId.id}`;
+                        const userApproved = await requestSkillConfirm(skill);
+                        if (!userApproved) {
+                          result = `用户拒绝执行技能「${skill.name}」。请尝试其他方式或直接回答用户的问题。`;
                         } else {
-                          const userInput = args.input || "";
-                          result = `${instructions}
-
-## 用户输入
-${userInput}`;
+                          const instructions = await getSkillInstructionsAsync(resolvedSkillId);
+                          if (!instructions) {
+                            result = `Error: Skill not found: ${resolvedSkillId.id}`;
+                          } else {
+                            const userInput = args.input || "";
+                            result = `${instructions}\n\n## 用户输入\n${userInput}`;
+                          }
                         }
                       }
+                    } catch (err: any) {
+                      result = `Error: Failed to execute skill ${resolvedSkillId.id}: ${err?.message || "Unknown error"}`;
                     }
-                  } catch (err: any) {
-                    result = `Error: Failed to execute skill ${resolvedSkillId.id}: ${err?.message || "Unknown error"}`;
                   }
                 }
               } catch (err: any) {
@@ -2242,9 +2410,9 @@ ${userInput}`;
           }
 
           // 强制截断过长的工具结果，防止原始数据污染对话
-          const maxChars = Math.max(settings.maxToolResultChars || 8000, 500);
+          const maxChars = Math.max(settings.maxToolResultChars, 0);
           let finalContent = result || "Error: Tool execution returned empty result";
-          if (finalContent.length > maxChars) {
+          if (maxChars > 0 && finalContent.length > maxChars) {
             finalContent = finalContent.slice(0, maxChars) +
               `\n\n...[已截断，原长度 ${finalContent.length} 字符]`;
           }
@@ -2262,8 +2430,15 @@ ${userInput}`;
         // ── 分组：需确认 vs 无需确认 ────────────────────────────────────
         const confirmTools: ToolCallInfo[] = [];
         const parallelTools: ToolCallInfo[] = [];
-        for (const tc of newToolCalls) {
-          if (tc.function.name.startsWith("skill_") || shouldAskForTool(tc.function.name)) {
+        for (const tc of executableToolCalls) {
+          if (tc.function.name.startsWith("skill_")) {
+            const mode = getSkillToolMode(tc.function.name);
+            if (mode === "ask") {
+              confirmTools.push(tc);  // 需内联确认，顺序执行
+            } else {
+              parallelTools.push(tc); // auto 模式，无需确认，可并行
+            }
+          } else if (shouldAskForTool(tc.function.name)) {
             confirmTools.push(tc);
           } else {
             parallelTools.push(tc);
@@ -2271,7 +2446,7 @@ ${userInput}`;
         }
 
         // ── 并行执行无需确认的工具 ──────────────────────────────────────
-        const toolResultMessages: Message[] = [];
+        const toolResultMessages: Message[] = [...preToolResultMessages];
         if (parallelTools.length > 0) {
           const parallelResults = await Promise.all(
             parallelTools.map(tc => executeSingleToolCall(tc))
@@ -2312,6 +2487,14 @@ ${userInput}`;
         captureSearchResults(toolResultMessages);
         allToolResultMessages.push(...toolResultMessages);
         conversation.push(...toolResultMessages);
+        const hasToolError = toolResultMessages.some(isToolErrorResult);
+        const reachedToolRoundLimit = toolRoundController.isReached(toolRound);
+        const recoveryReason = hasToolError
+          ? "A tool call failed, used an unknown tool, had malformed arguments, or repeated a previous call."
+          : reachedToolRoundLimit
+          ? `The configured tool round limit (${toolRoundController.limit}) has been reached.`
+          : "";
+        const enableTools = !hasToolError && !reachedToolRoundLimit;
 
         setMessages((prev) => [...prev, ...toolResultMessages]);
         queueMicrotask(scrollToBottom);
@@ -2319,7 +2502,9 @@ ${userInput}`;
         // Build messages for next response including all prior tool results
         const { standard, fallback } = await buildConversationMessages({
           messages: conversation,
-          systemPrompt,
+          systemPrompt: recoveryReason
+            ? buildToolRecoverySystemPrompt(toolAwareSystemPrompt, recoveryReason)
+            : toolAwareSystemPrompt,
           contextText,
           customMemory: memoryText,
           chatMode: currentChatMode,
@@ -2333,7 +2518,6 @@ ${userInput}`;
         let nextToolCalls: ToolCallInfo[] = [];
         let nextReasoningMessageId: string | null = null;
         let nextReasoningCreatedAt: number | null = null;
-        const enableTools = toolRound < MAX_TOOL_ROUNDS;
 
         // 获取模型特定的 API 配置
         const toolApiConfig = getModelApiConfig(settings, model);
@@ -2346,10 +2530,10 @@ ${userInput}`;
               apiKey: toolApiConfig.apiKey,
               model,
               protocol: toolApiConfig.protocol,
-              temperature: settings.temperature,
-              maxTokens: settings.maxTokens,
+              temperature: runtimeConfig.temperature,
+              maxTokens: runtimeConfig.maxTokens,
               signal: aborter.signal,
-              tools: enableTools ? filteredTools : undefined, // Last round: disable tools to force an answer
+              tools: enableTools ? toolsToUse : undefined,
               timeoutMs: settings.streamTimeout,
               maxContextTokens: toolContextLength,
             },
@@ -2423,7 +2607,7 @@ ${userInput}`;
                   updateMessage(nextReasoningMessageId, { content: nextContent });
                 }
               }
-              if (chunk.result.toolCalls?.length) {
+              if (enableTools && chunk.result.toolCalls?.length) {
                 nextToolCalls = chunk.result.toolCalls;
               }
             }
@@ -2438,26 +2622,37 @@ ${userInput}`;
         const nextAssistantId = nextReasoningMessageId || nowId();
         const nextAssistantCreatedAt = nextReasoningCreatedAt || Date.now();
 
-        // 如果只有 reasoning 没有 content，需要创建 assistant 消息
-        if (!nextContent && toolCalls.length === 0 && !nextReasoningMessageId) {
-          setMessages((prev) => [...prev, { 
-            id: nextAssistantId, 
-            role: "assistant", 
-            content: "(empty response)", 
+        if (nextToolCalls.length > 0) {
+          if (nextReasoningMessageId) {
+            updateMessage(nextReasoningMessageId, { tool_calls: nextToolCalls });
+          } else {
+            setMessages((prev) => [...prev, {
+              id: nextAssistantId,
+              role: "assistant",
+              content: sanitizeContent(nextContent),
+              createdAt: nextAssistantCreatedAt,
+              model,
+              tool_calls: nextToolCalls,
+              searchResults: getSearchResultsForMessage(),
+            }]);
+          }
+        } else if (nextContent.trim().length > 0 && !nextReasoningMessageId) {
+          setMessages((prev) => [...prev, {
+            id: nextAssistantId,
+            role: "assistant",
+            content: sanitizeContent(nextContent),
             createdAt: nextAssistantCreatedAt,
             model,
             searchResults: getSearchResultsForMessage(),
           }]);
         }
 
-        if (nextToolCalls.length > 0 && nextReasoningMessageId) {
-          updateMessage(nextReasoningMessageId, { tool_calls: nextToolCalls });
-        }
-
-        // If the model returned nothing, surface tool outputs so the user isn't left with an empty bubble.
+        // If the model returned nothing, surface a controlled fallback so the user isn't left with an empty bubble.
         if (nextContent.trim().length === 0 && nextToolCalls.length === 0) {
-          const toolFallback = allToolResultMessages.map((m) => m.content).join("\n\n").trim();
-          const fallbackText = toolFallback || "(empty response from API)";
+          const toolFallback = sanitizeContent(allToolResultMessages.map((m) => m.content).join("\n\n").trim());
+          const fallbackText = recoveryReason
+            ? buildEmptyToolRecoveryText(recoveryReason, toolResultMessages)
+            : toolFallback || "(empty response from API)";
           if (nextReasoningMessageId) {
             updateMessage(nextReasoningMessageId, { content: fallbackText, searchResults: getSearchResultsForMessage() });
           } else {
@@ -2483,26 +2678,11 @@ ${userInput}`;
         });
 
         // Check if model wants to call more tools
-        if (nextToolCalls.length > 0 && toolRound < MAX_TOOL_ROUNDS) {
+        if (nextToolCalls.length > 0 && toolRoundController.canRun(toolRound)) {
           currentToolCalls = nextToolCalls;
           currentAssistantId = nextAssistantId;
           // Continue loop
         } else {
-          // No more tool calls or reached max rounds
-          if (nextToolCalls.length > 0) {
-            const toolFallback = allToolResultMessages.map((m) => m.content).join("\n\n").trim();
-            const warning = [
-              nextContent?.trim(),
-              toolFallback ? `\n\n${toolFallback}` : "",
-              "\n\n_[已达到最大工具调用轮数限制]_",
-            ]
-              .join("")
-              .trim();
-            if (nextReasoningMessageId) {
-              updateMessage(nextReasoningMessageId, { content: warning || "_[已达到最大工具调用轮数限制]_" });
-            }
-          }
-
           break;
         }
       }
@@ -3472,7 +3652,7 @@ ${userInput}`;
       onSend: (text: string, files?: FileRef[], clearContext?: boolean) => {
         // clearContext=true 时，传递空历史给 handleSend，但不清空显示的消息
         // 这样 AI 会把这条消息当作新对话的开始，但用户仍能看到之前的消息
-        handleSend(text, files, clearContext ? [] : undefined);
+        return handleSend(text, files, clearContext ? [] : undefined);
       },
       onStop: stop,
       disabled: sending, // 生成时显示停止按钮

@@ -10,6 +10,7 @@ import MarkdownMessage from "./MarkdownMessage";
 import ImageGallery, { type ImageItem } from "./ImageGallery";
 import CitationList, { type Citation } from "./CitationList";
 import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
+import { sanitizeContent } from "../services/ai/openai-client";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -153,40 +154,11 @@ export default function EnhancedMarkdownMessage({
   
   // 使用useCallback优化内容清理函数
   const cleanContent = useCallback((rawContent: string) => {
-    let contentToUse = rawContent;
-    
-    // 只有当内容包含工具调用标记时才进行清理
-    if (contentToUse.includes('<｜DSML｜') || contentToUse.includes('<function_calls>') || contentToUse.includes('<orca-tool')) {
-      // 清理完整的工具调用块 - 匹配从开始到结束的完整结构
-      contentToUse = contentToUse.replace(/<｜DSML｜function_calls>[\s\S]*?<\/｜DSML｜function_calls>/g, '');
-      
-      // 清理单独的invoke标签（没有被function_calls包围的情况）
-      contentToUse = contentToUse.replace(/<｜DSML｜invoke[\s\S]*?<\/｜DSML｜invoke>/g, '');
-      
-      // 清理单独的parameter标签
-      contentToUse = contentToUse.replace(/<｜DSML｜parameter[\s\S]*?<\/｜DSML｜parameter>/g, '');
-      
-      // 清理自闭合的invoke标签（如果存在）
-      contentToUse = contentToUse.replace(/<｜DSML｜invoke[^>]*\/>/g, '');
-      
-      // 清理其他可能的工具调用格式
-      contentToUse = contentToUse.replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '');
-      contentToUse = contentToUse.replace(/<invoke[\s\S]*?<\/invoke>/g, '');
-      
-      // 清理 orca-tool 格式的工具调用标记（自闭合和成对标签）
-      contentToUse = contentToUse.replace(/<orca-tool[^>]*><\/orca-tool>/g, '');
-      contentToUse = contentToUse.replace(/<orca-tool[^>]*\/>/g, '');
-      
-      // 清理多余的空行和空白
-      contentToUse = contentToUse.replace(/\n{3,}/g, '\n\n').trim();
-      
-      // 只在内容实际被清理时才输出日志
-      if (contentToUse.length !== rawContent.length) {
-        console.log(`[EnhancedMarkdownMessage] Cleaned content from ${rawContent.length} to ${contentToUse.length} chars`);
-      }
-    }
-    
-    return contentToUse;
+    return sanitizeContent(rawContent)
+      .replace(/<orca-tool[^>]*><\/orca-tool>/gi, "")
+      .replace(/<orca-tool[^>]*\/>/gi, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }, []);
   
   // 解析内容中的图片和引用 - 智能显示模式切换

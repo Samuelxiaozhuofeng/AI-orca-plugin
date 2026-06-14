@@ -813,7 +813,7 @@ async function executeQueryWithFallback(
   try {
     return await runQuery(description);
   } catch (err) {
-    console.warn(
+    console.debug(
       "[queryBlocksByTag] QueryDescription2 failed, retrying legacy:",
       err
     );
@@ -838,7 +838,7 @@ async function executeQueryWithFallback(
   try {
     return await runQuery(legacyDescription);
   } catch (legacyErr) {
-    console.warn(
+    console.debug(
       "[queryBlocksByTag] Legacy format failed, trying direct tag:",
       legacyErr
     );

@@ -7,7 +7,7 @@
 import type { OpenAIChatMessage } from "./openai-client";
 import type { ModelResponse } from "../../components/MultiModelResponse";
 import { streamChatWithRetry, type StreamChunk } from "./chat-stream-handler";
-import { getAiChatSettings, getModelApiConfig } from "../../settings/ai-chat-settings";
+import { getAiChatSettings, getModelApiConfig, getModelRuntimeConfig } from "../../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../../ui/ai-chat-ui";
 import { parseModelKey } from "../../store/multi-model-store";
 import { nowId } from "../../utils/text-utils";
@@ -61,6 +61,7 @@ export async function* streamMultiModelChat(
     
     const { providerId, modelId } = parsed;
     const apiConfig = getModelApiConfig(settings, modelId, providerId);
+    const runtimeConfig = getModelRuntimeConfig(settings, modelId, providerId);
     
     if (!apiConfig.apiUrl || !apiConfig.apiKey) {
       yield {
@@ -78,8 +79,8 @@ export async function* streamMultiModelChat(
         model: modelId,
         protocol: apiConfig.protocol,
         anthropicApiPath: apiConfig.anthropicApiPath,
-        temperature: request.temperature,
-        maxTokens: request.maxTokens,
+        temperature: request.temperature ?? runtimeConfig.temperature,
+        maxTokens: request.maxTokens ?? runtimeConfig.maxTokens,
         signal: request.signal,
       },
       request.messages,

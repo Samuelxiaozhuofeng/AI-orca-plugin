@@ -8,6 +8,7 @@
 import { proxy } from "valtio";
 import type { MCPServerConfig } from "../services/external/mcp-client";
 import type { OpenAITool } from "../services/ai/openai-client";
+import { isMcpToolNameForServer } from "../services/external/mcp-tool-names";
 
 // ─── 类型 ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,8 @@ const DEFAULT_MCP_SERVER: MCPServerConfig = {
 
 const STORAGE_KEY = "ai-chat-mcp-servers";
 const DISABLED_KEY = "ai-chat-mcp-disabled-tools";
+const DEFAULT_MCP_PROTOCOL_VERSION = "2025-06-18";
+const DEFAULT_MCP_TIMEOUT_MS = 120000;
 
 let saveMcpTimer: ReturnType<typeof setTimeout> | null = null;
 let saveDisabledTimer: ReturnType<typeof setTimeout> | null = null;
@@ -65,6 +68,41 @@ async function saveMcpSettings(): Promise<void> {
   } catch (e) {
     console.warn("[MCP Store] 保存配置失败:", e);
   }
+}
+
+function normalizeHeaders(headers: unknown): Record<string, string> {
+  if (!headers || typeof headers !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers as Record<string, any>)) {
+    const headerName = key.trim();
+    if (!headerName) continue;
+    const headerValue = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+    if (headerValue) out[headerName] = headerValue;
+  }
+  return out;
+}
+
+function normalizeMcpServerConfig(raw: any): MCPServerConfig | null {
+  if (!raw || typeof raw !== "object") return null;
+  const id = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : "";
+  const name = typeof raw.name === "string" && raw.name.trim() ? raw.name.trim() : id;
+  const url = typeof raw.url === "string" && raw.url.trim() ? raw.url.trim() : "";
+  if (!id || !url) return null;
+
+  const timeoutMs = Number(raw.timeoutMs);
+  return {
+    id,
+    name,
+    type: "http",
+    url,
+    headers: normalizeHeaders(raw.headers),
+    protocolVersion: typeof raw.protocolVersion === "string" && raw.protocolVersion.trim()
+      ? raw.protocolVersion.trim()
+      : DEFAULT_MCP_PROTOCOL_VERSION,
+    timeoutMs: Number.isFinite(timeoutMs)
+      ? Math.max(10000, Math.min(600000, Math.floor(timeoutMs)))
+      : DEFAULT_MCP_TIMEOUT_MS,
+  };
 }
 
 function saveMcpSettingsDebounced(): void {
@@ -99,7 +137,11 @@ export async function loadMcpSettings(): Promise<void> {
     if (!raw) raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) mcpStore.servers = parsed;
+      if (Array.isArray(parsed)) {
+        mcpStore.servers = parsed
+          .map(normalizeMcpServerConfig)
+          .filter((server): server is MCPServerConfig => !!server);
+      }
     }
   } catch (e) {
     console.warn("[MCP Store] 加载配置失败:", e);
@@ -130,8 +172,9 @@ export function ensureDefaultMcpServer(): void {
 }
 
 export function addMcpServer(config: MCPServerConfig): void {
-  if (mcpStore.servers.some((s) => s.id === config.id)) return;
-  mcpStore.servers.push(config);
+  const normalized = normalizeMcpServerConfig(config);
+  if (!normalized || mcpStore.servers.some((s) => s.id === normalized.id)) return;
+  mcpStore.servers.push(normalized);
   saveMcpSettings();
 }
 
@@ -145,7 +188,9 @@ export function removeMcpServer(id: string): void {
 export function updateMcpServer(id: string, patch: Partial<MCPServerConfig>): void {
   const idx = mcpStore.servers.findIndex((s) => s.id === id);
   if (idx === -1) return;
-  mcpStore.servers[idx] = { ...mcpStore.servers[idx], ...patch };
+  const normalized = normalizeMcpServerConfig({ ...mcpStore.servers[idx], ...patch });
+  if (!normalized) return;
+  mcpStore.servers[idx] = normalized;
   saveMcpSettingsDebounced();
 }
 
@@ -163,29 +208,15 @@ export function setServerStatus(id: string, status: Partial<MCPServerStatus>): v
 /** 替换指定服务器的已发现工具 */
 export function setDiscoveredToolsForServer(serverId: string, tools: OpenAITool[]): void {
   // 辅助函数放在内部避免循环导入
-  const prefix = `mcp__`;
   mcpStore.discoveredTools = [
-    ...mcpStore.discoveredTools.filter((t) => {
-      const name = t.function.name;
-      if (!name.startsWith(prefix)) return true;
-      const rest = name.slice(prefix.length);
-      const sep = rest.indexOf("__");
-      return sep === -1 || rest.slice(0, sep) !== serverId;
-    }),
+    ...mcpStore.discoveredTools.filter((t) => !isMcpToolNameForServer(t.function.name, serverId)),
     ...tools,
   ];
 }
 
 /** 移除指定服务器的所有已发现工具 */
 export function removeDiscoveredToolsForServer(serverId: string): void {
-  const prefix = `mcp__`;
-  mcpStore.discoveredTools = mcpStore.discoveredTools.filter((t) => {
-    const name = t.function.name;
-    if (!name.startsWith(prefix)) return true;
-    const rest = name.slice(prefix.length);
-    const sep = rest.indexOf("__");
-    return sep === -1 || rest.slice(0, sep) !== serverId;
-  });
+  mcpStore.discoveredTools = mcpStore.discoveredTools.filter((t) => !isMcpToolNameForServer(t.function.name, serverId));
 }
 
 /** 获取所有已发现工具（不过滤禁用） */

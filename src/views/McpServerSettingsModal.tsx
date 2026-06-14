@@ -31,6 +31,31 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function parseHeadersJson(text: string): Record<string, string> | null {
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const headers: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, any>)) {
+      const headerName = key.trim();
+      const headerValue = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+      if (headerName && headerValue) headers[headerName] = headerValue;
+    }
+    return headers;
+  } catch {
+    return null;
+  }
+}
+
+function formatHeadersJson(headers: Record<string, string> | undefined): string {
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers || {})) {
+    if (key && value) normalized[key] = value;
+  }
+  return JSON.stringify(normalized, null, 2);
+}
+
 // ─── 样式 ──────────────────────────────────────────────────────────────────
 const overlay: React.CSSProperties = {
   position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
@@ -71,12 +96,20 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
   const snap = useSnapshot(mcpStore);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
-  const [newServer, setNewServer] = useState<{ name: string; url: string; authHeader: string } | null>(null);
+  const [newServer, setNewServer] = useState<{
+    name: string;
+    url: string;
+    authHeader: string;
+    protocolVersion: string;
+    timeoutMs: number;
+  } | null>(null);
+  const [headerDrafts, setHeaderDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!isOpen) {
       setExpandedServer(null);
       setNewServer(null);
+      setHeaderDrafts({});
     }
   }, [isOpen]);
 
@@ -116,6 +149,8 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
       type: "http",
       url,
       headers,
+      protocolVersion: newServer?.protocolVersion?.trim() || "2025-06-18",
+      timeoutMs: Math.max(10000, Math.floor(newServer?.timeoutMs || 120000)),
     });
     setNewServer(null);
   };
@@ -129,7 +164,17 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
       // 即使断开失败，仍然删除配置（用户主动操作）
     }
     removeMcpServer(serverId);
+    setHeaderDrafts((prev) => {
+      const next = { ...prev };
+      delete next[serverId];
+      return next;
+    });
     if (expandedServer === serverId) setExpandedServer(null);
+  };
+
+  const updateServerHeaders = (serverId: string, headers: Record<string, string>) => {
+    updateMcpServer(serverId, { headers });
+    setHeaderDrafts((prev) => ({ ...prev, [serverId]: formatHeadersJson(headers) }));
   };
 
   if (!isOpen) return null;
@@ -249,6 +294,16 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
                   createElement("div", { style: { fontSize: 13, color: "var(--orca-color-text-1)", fontWeight: 500 } },
                     tool.originalName
                   ),
+                  createElement("div", {
+                    style: {
+                      ...desc,
+                      fontSize: 10,
+                      fontFamily: "monospace",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                  }, tool.name),
                   createElement("div", { style: { ...desc, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" } },
                     tool.description.replace(/^\[.*?\]\s*/, "") // 去掉 [serverId] 前缀
                   ),
@@ -280,10 +335,55 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
               createElement("input", {
                 style: input, placeholder: "Bearer your-token",
                 value: server.headers?.Authorization || "",
-                onChange: (e: any) => updateMcpServer(server.id, {
-                  headers: { ...server.headers, Authorization: e.target.value },
+                onChange: (e: any) => updateServerHeaders(server.id, {
+                  ...server.headers,
+                  Authorization: e.target.value.trim(),
                 }),
               }),
+            ),
+            createElement("div", { style: { marginBottom: 8 } },
+              createElement("div", { style: { fontSize: 12, color: "var(--orca-color-text-2)", marginBottom: 4 } }, "Headers JSON"),
+              createElement("textarea", {
+                style: {
+                  ...input,
+                  minHeight: 78,
+                  fontFamily: "monospace",
+                  resize: "vertical",
+                  borderColor: headerDrafts[server.id] && !parseHeadersJson(headerDrafts[server.id])
+                    ? "var(--orca-color-danger)"
+                    : "var(--orca-color-border)",
+                },
+                value: headerDrafts[server.id] ?? formatHeadersJson(server.headers),
+                onChange: (e: any) => {
+                  const text = e.target.value;
+                  setHeaderDrafts((prev) => ({ ...prev, [server.id]: text }));
+                  const headers = parseHeadersJson(text);
+                  if (headers) updateMcpServer(server.id, { headers });
+                },
+              }),
+            ),
+            createElement("div", { style: { display: "flex", gap: 8, marginBottom: 8 } },
+              createElement("div", { style: { flex: 1 } },
+                createElement("div", { style: { fontSize: 12, color: "var(--orca-color-text-2)", marginBottom: 4 } }, "协议版本"),
+                createElement("input", {
+                  style: input,
+                  value: server.protocolVersion || "2025-06-18",
+                  placeholder: "2025-06-18",
+                  onChange: (e: any) => updateMcpServer(server.id, { protocolVersion: e.target.value }),
+                }),
+              ),
+              createElement("div", { style: { width: 150 } },
+                createElement("div", { style: { fontSize: 12, color: "var(--orca-color-text-2)", marginBottom: 4 } }, "调用超时(ms)"),
+                createElement("input", {
+                  type: "number",
+                  min: 10000,
+                  max: 600000,
+                  step: 1000,
+                  style: input,
+                  value: server.timeoutMs || 120000,
+                  onChange: (e: any) => updateMcpServer(server.id, { timeoutMs: Number(e.target.value) || 120000 }),
+                }),
+              ),
             ),
           ),
         );
@@ -310,6 +410,22 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
           onChange: (e: any) => setNewServer({ ...newServer, authHeader: e.target.value }),
         }),
         createElement("div", { style: { display: "flex", gap: 8 } },
+          createElement("input", {
+            style: input, placeholder: "2025-06-18",
+            value: newServer.protocolVersion,
+            onChange: (e: any) => setNewServer({ ...newServer, protocolVersion: e.target.value }),
+          }),
+          createElement("input", {
+            type: "number",
+            min: 10000,
+            max: 600000,
+            step: 1000,
+            style: { ...input, width: 150 },
+            value: newServer.timeoutMs,
+            onChange: (e: any) => setNewServer({ ...newServer, timeoutMs: Number(e.target.value) || 120000 }),
+          }),
+        ),
+        createElement("div", { style: { display: "flex", gap: 8 } },
           createElement("button", {
             style: { flex: 1, padding: "8px 16px", borderRadius: 6, background: "var(--orca-color-success)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13 },
             onClick: handleAddServer,
@@ -321,7 +437,7 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
         ),
       ) : createElement("button", {
         style: { marginTop: 12, padding: "8px 16px", borderRadius: 6, background: "var(--orca-color-primary)", color: "#fff", border: "none", cursor: "pointer", fontSize: 13, width: "100%" },
-        onClick: () => setNewServer({ name: "", url: "", authHeader: "" }),
+        onClick: () => setNewServer({ name: "", url: "", authHeader: "", protocolVersion: "2025-06-18", timeoutMs: 120000 }),
       }, "+ 添加 MCP 服务器"),
 
       // ── 底部 ────────────────────────────────────────────────────────

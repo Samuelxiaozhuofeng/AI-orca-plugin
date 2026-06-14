@@ -330,7 +330,8 @@ export function getRecentCommands(): string[] {
  * **Validates: Requirements 7.2**
  */
 export function addRecentCommand(command: string): void {
-  const limited = addRecentCommandPure(getRecentCommands(), command, MAX_RECENT_COMMANDS);
+  const commands = getRecentCommands();
+  const limited = addRecentCommandPure(commands, command, MAX_RECENT_COMMANDS);
   
   // Save to localStorage
   const store: RecentCommandsStore = {
@@ -346,11 +347,17 @@ export function addRecentCommand(command: string): void {
 }
 
 export function addRecentCommandPure(
-  commands: string[],
+  existingCommands: string[],
   command: string,
   maxItems: number = MAX_RECENT_COMMANDS
 ): string[] {
-  return [command, ...commands.filter((cmd) => cmd !== command)].slice(0, maxItems);
+  const seen = new Set<string>([command]);
+  const deduped = existingCommands.filter((cmd) => {
+    if (seen.has(cmd)) return false;
+    seen.add(cmd);
+    return true;
+  });
+  return [command, ...deduped].slice(0, Math.max(0, maxItems));
 }
 
 /**
@@ -375,7 +382,7 @@ export function clearRecentCommands(): void {
 export interface EnhancedContextChip {
   id: string;
   title: string;
-  kind: "page" | "tag";
+  kind: "page" | "block" | "tag";
   tokenCount: number;
   preview?: string;
 }
