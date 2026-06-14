@@ -236,4 +236,3 @@ export function getBubblePadding(compactMode: boolean): string {
 export function shouldRenderTimestamp(showTimestamps: boolean): boolean {
   return showTimestamps;
 }
-
