@@ -13,6 +13,7 @@ import {
   resolveAiModel,
   getCurrentApiConfig,
   validateCurrentConfig,
+  type ApiProtocol,
 } from "../../settings/ai-chat-settings";
 import { buildChatUrlCandidates, readErrorMessage, extractJsonFromResponse } from "./api-helpers";
 
@@ -194,7 +195,7 @@ export async function extractMemories(conversationContext: string, customPrompt?
 interface ExtractionAPIParams {
   apiUrl: string;
   apiKey: string;
-  protocol: "openai" | "anthropic" | "xml-tools";  // xml-tools 使用 OpenAI 兼容格式
+  protocol: ApiProtocol | "xml-tools";  // xml-tools 使用 OpenAI 兼容格式
   anthropicApiPath?: string;
   model: string;
   prompt: string;

@@ -1,4 +1,6 @@
 import { sanitizeToolProtocolText } from "./tool-call-protocol";
+import type { ApiProtocol } from "../../settings/ai-chat-settings";
+import { LOCAL_CLI_UNSUPPORTED } from "./local-cli-client";
 
 export type OpenAIChatRole = "system" | "user" | "assistant" | "tool";
 
@@ -39,7 +41,7 @@ export type OpenAIChatStreamArgs = {
   maxTokens?: number;
   signal?: AbortSignal;
   tools?: OpenAITool[];
-  protocol?: "openai" | "anthropic";
+  protocol?: ApiProtocol;
   anthropicApiPath?: string;
   /** 模型上下文长度限制（tokens），超出时自动截断 */
   maxContextTokens?: number;
@@ -725,6 +727,7 @@ function createTimeoutSignal(timeoutMs: number, existingSignal?: AbortSignal): {
 export async function* openAIChatCompletionsStream(
   args: OpenAIChatStreamArgs,
 ): AsyncGenerator<StreamChunk, void, unknown> {
+  if (args.protocol === "local-cli") throw new Error(LOCAL_CLI_UNSUPPORTED);
   const protocol = args.protocol || "openai";
   const logPrefix = protocol === "anthropic" ? "[anthropic]" : "[openAI]";
   const urlCandidates =

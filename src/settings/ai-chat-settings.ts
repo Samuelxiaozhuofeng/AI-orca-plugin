@@ -33,13 +33,20 @@ export type ProviderModel = {
   contextLength?: number;  // 模型上下文长度（tokens），用于本地模型防溢出
 };
 
+/** API 协议类型；local-cli = 经本机 bridge 调 Claude Code */
+export type ApiProtocol = "openai" | "anthropic" | "local-cli";
+
+export function normalizeApiProtocol(protocol: unknown): ApiProtocol {
+  return protocol === "anthropic" || protocol === "local-cli" ? protocol : "openai";
+}
+
 /** AI 平台/提供商配置 */
 export type AiProvider = {
   id: string;              // 平台唯一 ID
   name: string;            // 平台显示名称
   apiUrl: string;          // API 地址
   apiKey: string;          // API 密钥
-  protocol?: "openai" | "anthropic"; // API 协议类型，默认 openai
+  protocol?: ApiProtocol; // API 协议类型，默认 openai
   anthropicApiPath?: string; // Anthropic 请求路径（可选；留空则自动拼接 /v1/messages 并回退 /messages）
   models: ProviderModel[]; // 该平台下的模型列表
   enabled: boolean;        // 是否启用
@@ -647,7 +654,7 @@ export function getCurrentApiConfig(settings: AiChatSettings): {
   apiUrl: string;
   apiKey: string;
   model: string;
-  protocol: "openai" | "anthropic";
+  protocol: ApiProtocol;
   anthropicApiPath?: string;
 } {
   const provider = getSelectedProvider(settings);
@@ -655,7 +662,7 @@ export function getCurrentApiConfig(settings: AiChatSettings): {
     apiUrl: provider?.apiUrl || "",
     apiKey: provider?.apiKey || "",
     model: settings.selectedModelId,
-    protocol: provider?.protocol === "anthropic" ? "anthropic" : "openai",
+    protocol: normalizeApiProtocol(provider?.protocol),
     anthropicApiPath: typeof provider?.anthropicApiPath === "string" ? provider.anthropicApiPath : undefined,
   };
 }
@@ -720,7 +727,7 @@ export function getModelApiConfig(
   settings: AiChatSettings,
   modelName: string,
   providerId?: string,
-): { apiUrl: string; apiKey: string; protocol: "openai" | "anthropic"; anthropicApiPath?: string } {
+): { apiUrl: string; apiKey: string; protocol: ApiProtocol; anthropicApiPath?: string } {
   // 如果指定了 providerId，直接查找该 provider
   if (providerId) {
     const provider = settings.providers.find(p => p.id === providerId);
@@ -728,7 +735,7 @@ export function getModelApiConfig(
       return {
         apiUrl: provider.apiUrl,
         apiKey: provider.apiKey,
-        protocol: provider.protocol === "anthropic" ? "anthropic" : "openai",
+        protocol: normalizeApiProtocol(provider.protocol),
         anthropicApiPath: typeof provider.anthropicApiPath === "string" ? provider.anthropicApiPath : undefined,
       };
     }
@@ -747,7 +754,7 @@ export function getModelApiConfig(
     return {
       apiUrl: selectedProvider.apiUrl,
       apiKey: selectedProvider.apiKey,
-      protocol: selectedProvider.protocol === "anthropic" ? "anthropic" : "openai",
+      protocol: normalizeApiProtocol(selectedProvider.protocol),
       anthropicApiPath: typeof selectedProvider.anthropicApiPath === "string" ? selectedProvider.anthropicApiPath : undefined,
     };
   }
@@ -767,7 +774,7 @@ export function getModelApiConfig(
     return {
       apiUrl: best.apiUrl,
       apiKey: best.apiKey,
-      protocol: best.protocol === "anthropic" ? "anthropic" : "openai",
+      protocol: normalizeApiProtocol(best.protocol),
       anthropicApiPath: typeof best.anthropicApiPath === "string" ? best.anthropicApiPath : undefined,
     };
   }

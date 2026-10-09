@@ -21,6 +21,8 @@ import {
   extractToolProtocol,
   type ToolCallInfo,
 } from "./tool-call-protocol";
+import { LOCAL_CLI_UNSUPPORTED, streamLocalCli, type LocalCliContext } from "./local-cli-client";
+import type { ApiProtocol } from "../../settings/ai-chat-settings";
 
 export {
   hasDsmlToolCalls,
@@ -42,7 +44,9 @@ export interface StreamOptions {
   signal?: AbortSignal;
   tools?: OpenAITool[];
   timeoutMs?: number;
-  protocol?: "openai" | "anthropic";
+  protocol?: ApiProtocol;
+  /** protocol 为 local-cli 时必填（仅主对话传入）；未传则报「不支持此功能」 */
+  localCli?: LocalCliContext;
   anthropicApiPath?: string;
   /** 模型上下文长度限制（tokens），超出时自动截断 */
   maxContextTokens?: number;
@@ -243,6 +247,12 @@ export async function* streamChatWithRetry(
   fallbackMessages: OpenAIChatMessage[],
   onRetry?: () => void
 ): AsyncGenerator<StreamChunk, void, unknown> {
+  if (options.protocol === "local-cli") {
+    if (!options.localCli) throw new Error(LOCAL_CLI_UNSUPPORTED);
+    yield* streamLocalCli({ ...options, localCli: options.localCli }, standardMessages);
+    return;
+  }
+
   const timeoutMs = options.timeoutMs ?? 30000;
   const enableContextCompression = options.enableContextCompression ?? true;
   const maxContextTokens = options.maxContextTokens ?? 128000;

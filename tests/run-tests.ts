@@ -10,6 +10,7 @@ import "./settings-runtime.test";
 import "./tool-round-limit.test";
 import "./mcp-client.test";
 import "./mcp-tool-names.test";
+import "./local-cli-client.test";
 import { run } from "./test-harness";
 
 await run();

@@ -13,6 +13,7 @@ import {
   resolveAiModel,
   getCurrentApiConfig,
   validateCurrentConfig,
+  type ApiProtocol,
 } from "../settings/ai-chat-settings";
 import type { MemoryItem, PortraitTag, PortraitCategory } from "../store/memory-store";
 import { generateId, parseContentToItems } from "../store/memory-store";
@@ -211,7 +212,7 @@ export async function generatePortrait(memories: MemoryItem[], signal?: AbortSig
 interface PortraitAPIParams {
   apiUrl: string;
   apiKey: string;
-  protocol: "openai" | "anthropic" | "xml-tools";  // xml-tools 使用 OpenAI 兼容格式
+  protocol: ApiProtocol | "xml-tools";  // xml-tools 使用 OpenAI 兼容格式
   anthropicApiPath?: string;
   model: string;
   prompt: string;

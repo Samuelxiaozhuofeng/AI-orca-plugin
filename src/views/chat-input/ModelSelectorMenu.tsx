@@ -8,12 +8,15 @@ import type {
   ProviderModel, 
   ModelCapability,
   AiChatSettings,
+  ApiProtocol,
 } from "../../settings/ai-chat-settings";
 import { 
   MODEL_CAPABILITY_LABELS,
   createProvider,
   addModelToProvider,
+  normalizeApiProtocol,
 } from "../../settings/ai-chat-settings";
+import { LOCAL_CLI_DEFAULT_URL } from "../../services/ai/local-cli-client";
 import { fetchModelsFromApi } from "../../services/ai/model-fetcher";
 import { normalizeToolRoundLimit } from "../../services/ai/tool-round-limit";
 import {
@@ -531,7 +534,7 @@ function ProviderConfigPanel({
   const [name, setName] = useState(provider.name);
   const [apiUrl, setApiUrl] = useState(provider.apiUrl);
   const [apiKey, setApiKey] = useState(provider.apiKey);
-  const [protocol, setProtocol] = useState<"openai" | "anthropic">(provider.protocol === "anthropic" ? "anthropic" : "openai");
+  const [protocol, setProtocol] = useState<ApiProtocol>(normalizeApiProtocol(provider.protocol));
   const [anthropicApiPath, setAnthropicApiPath] = useState(provider.anthropicApiPath || "");
   const [newModelId, setNewModelId] = useState("");
   const [newModelLabel, setNewModelLabel] = useState("");
@@ -676,11 +679,16 @@ function ProviderConfigPanel({
       createElement("label", { style: labelStyle }, "协议"),
       createElement("select", {
         value: protocol,
-        onChange: (e: any) => setProtocol(e.target.value),
+        onChange: (e: any) => {
+          const next = normalizeApiProtocol(e.target.value);
+          setProtocol(next);
+          if (next === "local-cli") setApiUrl(LOCAL_CLI_DEFAULT_URL);
+        },
         style: { ...inputStyle, appearance: "none", cursor: "pointer" },
       },
         createElement("option", { value: "openai" }, "OpenAI 兼容"),
-        createElement("option", { value: "anthropic" }, "Anthropic 兼容")
+        createElement("option", { value: "anthropic" }, "Anthropic 兼容"),
+        createElement("option", { value: "local-cli" }, "本机 AI（Claude Code）")
       )
     ),
 

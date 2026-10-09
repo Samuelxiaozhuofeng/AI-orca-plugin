@@ -132,15 +132,22 @@ export default function ToolConfirmDialog({
 /**
  * 创建一个 Promise，等待用户确认工具执行
  * 使用自定义弹窗替代浏览器原生 confirm()
+ * full: 全量显示参数（本机 AI 用，长内容可滚动）；signal 中止时关闭弹窗并按拒绝处理
  */
 export function createToolConfirmPromise(
   toolName: string,
   args: Record<string, any>,
+  options?: { full?: boolean; signal?: AbortSignal },
 ): Promise<boolean> {
   return new Promise((resolve) => {
+    if (options?.signal?.aborted) {
+      resolve(false);
+      return;
+    }
+    const full = options?.full === true;
     const displayName = TOOL_DISPLAY_NAMES[toolName] || toolName;
     const argsStr = Object.entries(args)
-      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`)
+      .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v, null, full ? 2 : undefined) : v}`)
       .join("\n");
 
     // ── 遮罩层 ──
@@ -164,7 +171,7 @@ export function createToolConfirmPromise(
       borderRadius: "12px",
       padding: "20px 24px",
       minWidth: "380px",
-      maxWidth: "480px",
+      maxWidth: full ? "min(720px, 90vw)" : "480px",
       boxShadow: "0 16px 48px rgba(0,0,0,0.35)",
       color: "var(--orca-color-text-1, #ddd)",
       fontSize: "13px",
@@ -206,7 +213,7 @@ export function createToolConfirmPromise(
       color: "var(--orca-color-text-2, #aaa)",
       whiteSpace: "pre-wrap",
       wordBreak: "break-all",
-      maxHeight: "140px",
+      maxHeight: full ? "50vh" : "140px",
       overflow: "auto",
       lineHeight: "1.5",
     });
@@ -262,6 +269,7 @@ export function createToolConfirmPromise(
     const cleanup = (value: boolean) => {
       overlay.removeEventListener("click", onBackdrop);
       window.removeEventListener("keydown", onKey);
+      options?.signal?.removeEventListener("abort", onAbort);
       overlay.remove();
       resolve(value);
     };
@@ -276,6 +284,9 @@ export function createToolConfirmPromise(
       if (e.key === "Enter") cleanup(true);
     };
     window.addEventListener("keydown", onKey);
+
+    const onAbort = () => cleanup(false);
+    options?.signal?.addEventListener("abort", onAbort);
 
     denyBtn.addEventListener("click", () => cleanup(false));
     allowBtn.addEventListener("click", () => cleanup(true));

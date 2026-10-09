@@ -72,6 +72,7 @@ import { getAutoTriggerSkill } from "../services/ai/skill-recommender";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
+import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -645,6 +646,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
+    // 新对话：中止进行中的生成（本机 AI 会随之结束子进程、关闭确认弹窗）
+    if (abortRef.current) abortRef.current.abort();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -2031,6 +2034,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           tools: toolsToUse,
           timeoutMs: settings.streamTimeout,
           maxContextTokens: modelContextLength,
+          localCli: apiConfig.protocol === "local-cli" ? buildLocalCliContext(currentSession.id) : undefined,
         },
         apiMessages,
         apiMessagesFallback,

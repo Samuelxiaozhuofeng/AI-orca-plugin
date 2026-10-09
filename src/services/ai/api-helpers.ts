@@ -2,6 +2,9 @@
  * Shared API helpers — used by memory-extraction & portrait-generation.
  */
 
+import type { ApiProtocol } from "../../settings/ai-chat-settings";
+import { LOCAL_CLI_UNSUPPORTED } from "./local-cli-client";
+
 // ─── URL builders ────────────────────────────────────────────────────────────
 
 function buildChatCompletionsUrl(apiUrl: string): string {
@@ -42,9 +45,10 @@ function buildAnthropicMessagesUrlCandidates(apiUrl: string, anthropicApiPath?: 
 
 export function buildChatUrlCandidates(
   apiUrl: string,
-  protocol: "openai" | "anthropic" | "xml-tools",
+  protocol: ApiProtocol | "xml-tools",
   anthropicApiPath?: string
 ): string[] {
+  if (protocol === "local-cli") throw new Error(LOCAL_CLI_UNSUPPORTED);
   return protocol === "anthropic"
     ? buildAnthropicMessagesUrlCandidates(apiUrl, anthropicApiPath)
     : buildChatCompletionsUrlCandidates(apiUrl);
