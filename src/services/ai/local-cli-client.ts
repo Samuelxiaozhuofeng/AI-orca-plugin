@@ -34,7 +34,7 @@ export interface LocalCliContext {
   conversationId: string;
   /** 用户拖入的笔记/页面等上下文；每轮都拼进 prompt */
   contextText?: string;
-  /** 用户的技能、本条消息的格式要求；放在 prompt 最前面 */
+  /** 本条消息的格式要求；放在 prompt 最前面 */
   instructions?: string;
   orcaMcp?: { url: string; token: string };
   /** 本对话选的工作文件夹；空 = 中转默认文件夹 */

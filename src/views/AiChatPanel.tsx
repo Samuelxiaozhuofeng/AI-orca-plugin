@@ -2573,7 +2573,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         onToggleFavorite: handleToggleFavorite,
         onRename: handleRenameSession,
       }),
-      // More Menu (Settings, Memory, Clear, Export)
+      // More Menu (Settings, Clear, Export)
       createElement(HeaderMenu, {
         onClearChat: clear,
         onOpenSettings: () => {

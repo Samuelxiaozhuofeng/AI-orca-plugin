@@ -66,8 +66,6 @@ export interface MessageListProps {
   onRollbackToMessage?: (messageId: string) => void;
   /** 切换消息置顶回调 */
   onTogglePinned?: (messageId: string) => void;
-  /** 建议回复点击回调 */
-  /** 生成建议回调 */
 }
 
 /**
