@@ -1,12 +1,15 @@
 /**
- * 防抖保存：schedule 在 delayMs 后执行最近一次登记的保存；
- * flush 立刻执行还没跑的那次，并等正在跑的那次写完（离开 / 删除对话前用，
+ * 防抖保存：schedule 登记「拍快照」函数，delayMs 后执行；它同步拍下要存的内容，
+ * 返回真正的写入函数。写入一律串行，前一次写完才写下一次。
+ * flush 立刻拍下还没跑的那次快照并排队写入，同时等之前的写入都写完（离开 / 删除对话前用，
  * 别让防抖把最后一条回复吞掉，也别让晚到的保存把刚删的对话写回来）。
  * 保存失败只记日志，不打断后面的切换 / 删除。
  */
+type Save = () => Promise<void> | void;
+
 export function createPendingSave(delayMs: number) {
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let job: (() => Promise<void> | void) | null = null;
+  let job: (() => Save) | null = null;
   let running: Promise<void> = Promise.resolve();
 
   const cancel = () => {
@@ -15,18 +18,25 @@ export function createPendingSave(delayMs: number) {
     job = null;
   };
 
-  const start = (run: () => Promise<void> | void) => {
-    // 串行：后一次保存等前一次写完，旧对话的保存不会晚于新对话落地
-    running = running.then(run).catch((err) => {
+  // 拍快照同步做（调用方此刻的界面状态），写入排到上一次后面
+  const start = (snapshot: () => Save) => {
+    let save: Save;
+    try {
+      save = snapshot();
+    } catch (err) {
+      console.error("[pending-save] snapshot failed:", err);
+      return running;
+    }
+    running = running.then(save).catch((err) => {
       console.error("[pending-save] save failed:", err);
     });
     return running;
   };
 
   return {
-    schedule(fn: () => Promise<void> | void) {
+    schedule(snapshot: () => Save) {
       cancel();
-      job = fn;
+      job = snapshot;
       timer = setTimeout(() => {
         const run = job;
         timer = null;
@@ -35,10 +45,10 @@ export function createPendingSave(delayMs: number) {
       }, delayMs);
     },
     cancel,
-    async flush() {
+    flush(): Promise<void> {
       const run = job;
       cancel();
-      await (run ? start(run) : running);
+      return run ? start(run) : running;
     },
   };
 }

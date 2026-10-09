@@ -668,14 +668,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMultiModelResponses([]);
   };
 
-  const handleNewSession = useCallback(async () => {
+  const handleNewSession = useCallback(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
     abandonCurrentRequest();
-    // 等离开的对话存完再建新的，免得晚到的旧保存把「上次打开的对话」改回旧的
-    await pendingSave.flush();
+    // 立即补存离开的对话（快照此刻同步拍下；写入串行，先于新对话的保存落地）
+    void pendingSave.flush();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -707,7 +707,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
     if (sessionId !== currentSession.id) {
       abandonCurrentRequest();
-      await pendingSave.flush();
+      void pendingSave.flush();
     }
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -789,7 +789,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const handleClearAllSessions = useCallback(async () => {
     // 当前对话会被清掉（没收藏）时同上先停生成；收藏的当前对话先存好不丢
-    if (!sessions.find(s => s.id === currentSession.id)?.favorited) abandonCurrentRequest();
+    // 收藏与否按服务里的最新索引判断，界面列表可能还没回填
+    const latest = await loadSessions();
+    if (!latest.sessions.find(s => s.id === currentSession.id)?.favorited) abandonCurrentRequest();
     await pendingSave.flush();
     await clearAllSessions();
     const data = await loadSessions();
@@ -803,7 +805,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         handleNewSession();
       }
     }
-  }, [handleNewSession, currentSession.id, handleSelectSession, sessions]);
+  }, [handleNewSession, currentSession.id, handleSelectSession]);
 
   // Toggle session pinned status
   const handleTogglePin = useCallback(async (sessionId: string) => {
@@ -839,7 +841,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     if ((!hasRealMessages && !hasFlashcards) || !sessionsLoaded) return;
 
     // Debounce auto-cache to avoid too frequent saves
-    pendingSave.schedule(async () => {
+    // 两步：触发时先同步拍下离开时的快照（滚动位置等），再排队写入
+    pendingSave.schedule(() => {
       const flashcardState = hasFlashcards ? {
         cards: pendingFlashcards,
         currentIndex: flashcardIndex,
@@ -854,9 +857,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
         flashcardState,
       };
-      await autoCacheSession(sessionToCache);
-      const data = await loadSessions();
-      setSessions(data.sessions);
+      return async () => {
+        await autoCacheSession(sessionToCache);
+        const data = await loadSessions();
+        setSessions(data.sessions);
+      };
     });
 
     return () => pendingSave.cancel();
