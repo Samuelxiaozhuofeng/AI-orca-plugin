@@ -18,6 +18,11 @@ function code(text: unknown, max = MAX_SUMMARY): string {
   return s ? `\`${s}\`` : "";
 }
 
+/** 不进行内代码的外来文字：去掉 markdown 记号和括号 / #，块引用关键字后插零宽空格，不被渲染成块链接（((1))、orca-block:1、blockid 1、块 #1、[123]） */
+function plain(text: string): string {
+  return text.replace(/[`*_[\]<>()#]/g, " ").replace(/(orca-block|blockid|block|块|笔记)(?=[\s:：]*\d)/gi, "$1\u200b");
+}
+
 /** 路径只留最后三段 */
 function shortPath(p: unknown): string {
   const parts = String(p ?? "").split("/").filter(Boolean);
@@ -37,7 +42,7 @@ function describe(name: string, input: any): string {
     case "WebFetch": return `打开 ${code(i.url)}`;
     case "WebSearch": return `网上搜索 ${code(i.query)}`;
     case "Task":
-    case "Agent": return `派子任务：${oneLine(i.description, MAX_SUMMARY).replace(/[`*_[\]<>]/g, " ")}`;
+    case "Agent": return `派子任务：${plain(oneLine(i.description, MAX_SUMMARY))}`;
     case "TaskStop": return "停止子任务";
     case "ToolSearch": return `查找可用工具 ${code(i.query)}`;
     case "Skill": return `使用技能 ${code(i.skill ?? i.command)}`;
@@ -61,5 +66,5 @@ export function summarizeToolCall(ev: any): string {
 export function summarizeToolResult(ev: any): string {
   if (ev?.ok) return "";
   const reason = ev?.error ? `：${code(ev.error, MAX_ERROR)}` : "";
-  return `${lead(ev?.sub)}${String(ev?.name ?? "工具").replace(/[`*_[\]<>\s]/g, "")} 失败${reason}\n`;
+  return `${lead(ev?.sub)}${plain(String(ev?.name ?? "工具")).replace(/\s/g, "")} 失败${reason}\n`;
 }

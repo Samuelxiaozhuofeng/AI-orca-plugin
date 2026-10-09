@@ -9,8 +9,8 @@
 import type { OpenAIChatMessage } from "./openai-client";
 import type { StreamChunk } from "./chat-stream-handler";
 import { summarizeToolCall, summarizeToolResult } from "./local-cli-tool-summary";
-import { collectLocalCliImages, imageNotesText } from "./local-cli-images";
-import { autostartLocalCli, fetchWithReconnect } from "./local-cli-autostart";
+import { collectLocalCliImages, IMAGE_NOTES_RE, imageNotesText } from "./local-cli-images";
+import { autostartLocalCli, fetchWithReconnect, NotDeliveredError, probe } from "./local-cli-autostart";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
@@ -163,7 +163,7 @@ function buildConversationPrompt(messages: OpenAIChatMessage[], contextText?: st
   const context = contextText?.trim() ? `以下是用户提供的上下文：\n\n${contextText.trim()}\n\n---\n` : "";
   const history = convo
     .slice(0, Math.max(lastUser, 0))
-    .map((m) => ({ role: m.role, text: (m.role === "assistant" ? messageText(m).replace(BANNER_RE, "") : messageText(m)).trim() }))
+    .map((m) => ({ role: m.role, text: (m.role === "assistant" ? messageText(m).replace(BANNER_RE, "").replace(IMAGE_NOTES_RE, "") : messageText(m)).trim() }))
     .filter((m) => m.text)
     .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.text}`);
   if (history.length === 0) return context ? `${context}当前问题：\n${current}` : current;
@@ -205,11 +205,16 @@ async function* readBridge(
           body: JSON.stringify(body),
           signal: ctrl.signal,
         }),
-        () => autostartLocalCli([{ apiUrl: base, apiKey, protocol: "local-cli" } as any]),
+        () => autostartLocalCli([{ apiUrl: base, apiKey, protocol: "local-cli" } as any], { signal: ctrl.signal }),
         ctrl.signal,
+        () => probe({ apiUrl: base, apiKey } as any, 2000, ctrl.signal),
       );
-    } catch {
-      throw failure(new BridgeError(NOT_CONNECTED));
+    } catch (err) {
+      throw failure(new BridgeError(err instanceof NotDeliveredError ? err.message : NOT_CONNECTED));
+    }
+    if (res.status === 413) {
+      const text = await res.json().then((j: any) => String(j?.error || ""), () => "");
+      throw new BridgeError(text || "请求太大，请减少图片或缩小图片");
     }
     if (res.status === 401) {
       throw new BridgeError("本机 AI 令牌不对：请把 ~/.orca-agent-bridge/token 里的令牌填到该平台的「API 密钥」");

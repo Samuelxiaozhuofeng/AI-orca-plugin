@@ -220,10 +220,15 @@ function sendJson(res, status, body) {
 function readJson(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0;
+    let tooBig = false;
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > limit) { reject(new Error(`请求体过大（上限 ${limit / 1024 / 1024}MB），图片请少发几张或换小一点的`)); req.destroy(); return; }
+      // 超限不立即断开：先回 413（见 server 的 catch），剩下的请求体读完丢掉，客户端才能读到原因而不是连接错误
+      if (size > limit) {
+        if (!tooBig) { tooBig = true; chunks.length = 0; const err = new Error(`请求太大（超过 ${limit / 1024 / 1024}MB），请减少图片或缩小图片`); err.status = 413; reject(err); }
+        return;
+      }
       chunks.push(c);
     });
     req.on("end", () => {
@@ -508,12 +513,13 @@ function queryModels() {
     done = true;
     clearTimeout(timer);
     if (why) console.warn(`查询模型列表失败（${why}），用默认列表`);
-    children.delete(child);
+    if (child.exitCode !== null || child.signalCode !== null) return;
     child.kill("SIGTERM");
+    setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, EXIT_GRACE_MS);
   };
   const timer = setTimeout(() => end("超时"), MODEL_QUERY_MS);
   child.on("error", (err) => end(err.message));
-  child.on("exit", (code) => end(`claude 提前退出（${code}）`));
+  child.on("exit", (code) => { children.delete(child); end(`claude 提前退出（${code}）`); });
   child.stdin.on("error", () => {});
   child.stdout.setEncoding("utf8");
   onLines(child.stdout, (line) => {
@@ -563,7 +569,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
     sendJson(res, 404, { error: "not found" });
   } catch (err) {
-    if (!res.headersSent) sendJson(res, 400, { error: String(err?.message || err) });
+    if (!res.headersSent) {
+      if (err?.status === 413) res.setHeader("Connection", "close");
+      sendJson(res, err?.status || 400, { error: String(err?.message || err) });
+    }
   }
 });
 
