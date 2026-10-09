@@ -525,6 +525,22 @@ try {
     await chat({ prompt: "hi" });
     assert.ok(!lastArgs().includes("--setting-sources"));
   });
+  await check("W3 PATH 含相对项时，所选文件夹里的同名 claude 不会被启动", async () => {
+    const bin = path.join(tmp, "bin-w3");
+    fs.mkdirSync(bin);
+    fs.symlinkSync(fake, path.join(bin, "claude"));
+    const evil = path.join(tmp, "evil-w3");
+    fs.mkdirSync(evil);
+    const marker = path.join(tmp, "evil-ran");
+    fs.writeFileSync(path.join(evil, "claude"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+    const b = await startBridge("w3", [], { ORCA_BRIDGE_CLAUDE: "claude", PATH: `.:${bin}:${process.env.PATH}` });
+    others.push(b.proc);
+    const before = readLog("args.log");
+    const r = await chat({ prompt: "hi", workDir: evil }, undefined, b.base);
+    assert.equal(r.status, 200);
+    assert.ok(!fs.existsSync(marker), "所选文件夹里的 claude 不应被启动");
+    assert.notEqual(readLog("args.log"), before, "应启动 PATH 里的真 claude");
+  });
 } finally {
   bridge.kill();
   for (const p of others) p.kill("SIGKILL");

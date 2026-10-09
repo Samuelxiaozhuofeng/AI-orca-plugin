@@ -2437,6 +2437,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     }
   }
 
+  // 重试 / 重新生成的回调按 messages 等缓存，直接调 handleSend 会拿到旧渲染里的会话（旧模型、旧文件夹）
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+
   const handleRegenerate = useCallback(() => {
     if (sending) return;
 
@@ -2454,7 +2458,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         const content = lastUserMsg.content || "";
         const historyBeforeUser = messages.slice(0, lastUserIdx);
         // Resend using the history BEFORE the last user message, and re-using the last user content.
-        handleSend(content, lastUserMsg.files, historyBeforeUser);
+        handleSendRef.current(content, lastUserMsg.files, historyBeforeUser);
     }
   }, [messages, sending]);
 
@@ -2479,7 +2483,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       return prev;
     });
     // Retry the request
-    handleSend(content, files, historyOverride);
+    handleSendRef.current(content, files, historyOverride);
   }, [sending, lastError]);
 
 

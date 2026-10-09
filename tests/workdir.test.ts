@@ -3,14 +3,17 @@ import { BANNER_RE, sessionBanner, buildLocalCliPrompt, streamLocalCli } from ".
 
 // 每个对话单独选工作文件夹：模式行新格式（带文件夹段）、新旧模式行都能剥、请求体带 workDir、旧中转提示一次
 
-test("W sessionBanner：带 cwd 加文件夹段（家目录缩成 ~），不带 cwd 同旧格式", () => {
+test("W sessionBanner：带 cwd 加文件夹段（完整路径），不带 cwd 同旧格式", () => {
   assertEqual(
-    sessionBanner({ mode: "full", model: "opus", cwd: "/Users/sam/Projects/demo" }),
-    "本机 AI · 模型 opus · ⚠ 完全放开模式 · 文件夹「~/Projects/demo」\n\n",
+    sessionBanner({ mode: "full", model: "opus", cwd: "/Users/Shared/demo" }),
+    "本机 AI · 模型 opus · ⚠ 完全放开模式 · 文件夹「/Users/Shared/demo」\n\n",
   );
   assertEqual(sessionBanner({ mode: "safe", model: "sonnet", cwd: "/opt/work" }), "本机 AI · 模型 sonnet · 安全模式 · 文件夹「/opt/work」\n\n");
   assertEqual(sessionBanner({ mode: "safe", model: "sonnet" }), "本机 AI · 模型 sonnet · 安全模式\n\n");
-  assertEqual(sessionBanner({ mode: "safe", cwd: "/home/u" }), "本机 AI · 模型 claude · 安全模式 · 文件夹「~」\n\n");
+  assertEqual(sessionBanner({ mode: "safe", cwd: "/home/u" }), "本机 AI · 模型 claude · 安全模式 · 文件夹「/home/u」\n\n");
+  // 路径里的 」和换行换掉，生成的模式行整行能被剥掉
+  const odd = sessionBanner({ mode: "safe", model: "m", cwd: "/tmp/a」b\nc" })!;
+  assertEqual((odd + "正文").replace(BANNER_RE, ""), "正文");
 });
 
 test("W BANNER_RE：剥新旧两种模式行，换行被 trim 掉也行，正文不误伤", () => {

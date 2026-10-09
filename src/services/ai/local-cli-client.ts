@@ -91,17 +91,11 @@ function lastUserIndex(list: Array<{ role: string }>): number {
 // 不依赖换行：面板累加时会 trim，模式行后面的换行可能被吃掉；文件夹段用「」包住以便定界（旧格式没有文件夹段）
 export const BANNER_RE = /^本机 AI · 模型 [^\n]*? · (?:安全模式|⚠ 完全放开模式)(?: · 文件夹「[^」\n]*」)?\s*/;
 
-/** 家目录前缀缩成 ~（渲染进程拿不到 homedir，按 macOS/Linux 的常见布局猜） */
-// ponytail: 只认 /Users/<名> 与 /home/<名>，家目录在别处时显示完整路径
-export function shortenHome(p: string): string {
-  return p.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
-}
-
-/** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示；带 cwd 才加文件夹段 */
+/** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示；带 cwd 才加文件夹段（完整路径；」和换行换掉，保证 BANNER_RE 能定界） */
 export function sessionBanner(ev: any): string | null {
   if (ev?.mode !== "safe" && ev?.mode !== "full") return null;
   const model = ev.model ? String(ev.model) : "claude";
-  const folder = typeof ev.cwd === "string" && ev.cwd ? ` · 文件夹「${shortenHome(ev.cwd)}」` : "";
+  const folder = typeof ev.cwd === "string" && ev.cwd ? ` · 文件夹「${ev.cwd.replace(/[」\r\n]/g, "』")}」` : "";
   return `本机 AI · 模型 ${model} · ${ev.mode === "full" ? "⚠ 完全放开模式" : "安全模式"}${folder}\n\n`;
 }
 

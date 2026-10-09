@@ -9,7 +9,18 @@ import path from "node:path";
 
 const HOST = "127.0.0.1";
 const BRIDGE_HOME = process.env.ORCA_BRIDGE_HOME || path.join(os.homedir(), ".orca-agent-bridge");
-const CLAUDE_BIN = process.env.ORCA_BRIDGE_CLAUDE || "claude";
+// 启动时锁定 claude 的绝对路径：对话可指定任意工作目录，PATH 里若有相对项（如 "."）会按 cwd 找到所选文件夹里的同名程序
+function resolveClaudeBin(bin) {
+  if (bin.includes("/")) return path.resolve(bin);
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!path.isAbsolute(dir)) continue;
+    const full = path.join(dir, bin);
+    try { fs.accessSync(full, fs.constants.X_OK); if (fs.statSync(full).isFile()) return full; } catch {}
+  }
+  return null;
+}
+const CLAUDE_NAME = process.env.ORCA_BRIDGE_CLAUDE || "claude";
+const CLAUDE_BIN = resolveClaudeBin(CLAUDE_NAME);
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
 const EXIT_GRACE_MS = 3000;
@@ -222,6 +233,7 @@ function handleChat(req, res, body) {
   if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
   const workDir = resolveWorkDir(body.workDir);
   if (workDir === null) return sendJson(res, 400, { error: `文件夹 ${String(body.workDir)} 不存在或不是文件夹` });
+  if (!CLAUDE_BIN) return sendJson(res, 500, { error: `找不到 claude 命令（${CLAUDE_NAME}），请先安装 Claude Code` });
 
   const args = [...BASE_ARGS, ...addDirArgs];
   let mcpDir = null;
