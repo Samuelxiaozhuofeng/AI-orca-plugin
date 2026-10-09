@@ -1354,7 +1354,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         apiMessages,
         apiMessagesFallback,
       )) {
-        if (chunk.type === "reasoning" || (chunk.type === "content" && !isBannerOnly(chunk.content))) {
+        if (chunk.type === "reasoning" || (chunk.type === "content" && !(apiConfig.protocol === "local-cli" && isBannerOnly(chunk.content)))) {
           const t = Date.now();
           for (const p of streamedMsgs) p.start ??= t;
         }
@@ -1385,7 +1385,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             // 没有 reasoning，直接创建 assistant 消息
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
-            streamedMsgs.push({ id: assistantId, start: isBannerOnly(chunk.content) ? undefined : assistantCreatedAt });
+            streamedMsgs.push({ id: assistantId, start: apiConfig.protocol === "local-cli" && isBannerOnly(chunk.content) ? undefined : assistantCreatedAt });
             setStreamingMessageId(assistantId);
             setMessages((prev) => [...prev, {
               id: assistantId,
