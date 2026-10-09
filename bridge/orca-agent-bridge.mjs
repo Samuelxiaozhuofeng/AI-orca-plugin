@@ -35,6 +35,7 @@ const BAD_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk"];
 const AUTO_ALLOW_MCP_TOOLS = [];
 // 不读用户级全局规则（CLAUDE.md 和 rules/）：插件对话只按所选工作文件夹自己的 CLAUDE.md 办事（终端里直接用 Claude Code 不受影响）
 const USER_CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : path.join(os.homedir(), ".claude");
+if (process.env.CLAUDE_CONFIG_DIR) SAFE_ENV.CLAUDE_CONFIG_DIR = USER_CLAUDE_DIR; // 相对路径会按所选文件夹解析，和排除路径对不上
 const COMMON_ARGS = [
   "-p",
   "--settings", JSON.stringify({ claudeMdExcludes: [path.join(USER_CLAUDE_DIR, "CLAUDE.md"), path.join(USER_CLAUDE_DIR, "rules", "**")] }),
@@ -244,21 +245,23 @@ function resolveWorkDir(raw) {
 
 // 项目级设置不加载（完全放开靠 --setting-sources user，安全模式靠 --restricted），所选文件夹的 CLAUDE.md 也跟着读不到：
 // 这里只把那一份正文交给 AI，钩子和设置照旧不加载。不跟 @引用、子目录 CLAUDE.md、.claude/rules
-const MAX_RULES_BYTES = 100 * 1024; // Linux 单个参数上限 128KB
+const MAX_RULES_BYTES = 100 * 1024;
+const MAX_RULES_ARG_BYTES = 120 * 1024; // Linux 单个参数上限 128KB；非法 UTF-8 解码成 U+FFFD 会变长，按最终字节数卡
 function readProjectRules(dir) {
   let fd;
   try {
-    // 符号链接只认指向文件夹内的（别人的仓库可能把 CLAUDE.md 链到 ~/.ssh 之类）；O_NONBLOCK + fstat：读前被换成 FIFO 也不卡住中转
-    const root = fs.realpathSync(dir); // 默认工作目录没转真实路径（如 /tmp → /private/tmp），不转会误判成文件夹外
-    const real = fs.realpathSync(path.join(root, "CLAUDE.md"));
-    if (!real.startsWith(root + path.sep)) return null;
-    fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    // 不跟符号链接（别人的仓库可能把 CLAUDE.md 链到 ~/.ssh 之类；链到文件夹内也不认，免得中间目录被换掉时越界）；
+    // O_NONBLOCK + 同一 fd 上 fstat：读前被换成 FIFO 也不卡住中转
+    const file = path.join(fs.realpathSync(dir), "CLAUDE.md");
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) return null;
-    if (st.size > MAX_RULES_BYTES) { console.warn(`${real} 超过 100KB，未读给 AI`); return null; }
+    if (st.size > MAX_RULES_BYTES) { console.warn(`${file} 超过 100KB，未读给 AI`); return null; }
     const buf = Buffer.alloc(MAX_RULES_BYTES);
     const text = buf.toString("utf8", 0, fs.readSync(fd, buf, 0, MAX_RULES_BYTES, 0)).replace(/\0/g, "").trim();
-    return text ? `# 工作文件夹的项目规则（${real}）\n\n${text}` : null;
+    const rules = text ? `# 工作文件夹的项目规则（${file}）\n\n${text}` : null;
+    if (rules && Buffer.byteLength(rules) > MAX_RULES_ARG_BYTES) { console.warn(`${file} 内容过长，未读给 AI`); return null; }
+    return rules;
   } catch { return null; } finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 

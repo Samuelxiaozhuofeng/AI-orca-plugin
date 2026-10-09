@@ -663,6 +663,16 @@ try {
     const a = lastArgs();
     assert.ok(a[a.indexOf("--append-system-prompt") + 1].includes("暗号 BANANA"));
     assert.equal(a[a.indexOf("--system-prompt-snapshot") + 1], "off");
+    // 链到文件夹内也不读；非法 UTF-8 解码后超长 → 不带
+    fs.writeFileSync(path.join(d, "real.md"), "INSIDE");
+    fs.rmSync(path.join(d, "CLAUDE.md"));
+    fs.symlinkSync(path.join(d, "real.md"), path.join(d, "CLAUDE.md"));
+    await chat({ prompt: "hi", workDir: d });
+    assert.ok(!lastArgs().includes("--append-system-prompt"));
+    fs.rmSync(path.join(d, "CLAUDE.md"));
+    fs.writeFileSync(path.join(d, "CLAUDE.md"), Buffer.alloc(50 * 1024, 0xff));
+    await chat({ prompt: "hi", workDir: d });
+    assert.ok(!lastArgs().includes("--append-system-prompt"));
     // 链到文件夹外 → 不读；FIFO → 不卡住、照常启动不带参数
     const secret = path.join(tmp, "secret-w2b.txt");
     fs.writeFileSync(secret, "SECRET");
