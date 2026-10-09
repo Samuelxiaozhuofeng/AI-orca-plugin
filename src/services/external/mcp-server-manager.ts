@@ -237,10 +237,9 @@ export async function connectToServer(serverId: string): Promise<void> {
 
     setDiscoveredToolsForServer(serverId, converted);
 
-    // 自动注册到工具管理
+    // 注册工具显示名称
     registerMcpTools(
       serverId,
-      server.name,
       converted.map((t) => {
         const toolName = toolRegistry.get(t.function.name)?.originalName || t.function.name;
         return {

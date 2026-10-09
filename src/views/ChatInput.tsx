@@ -20,11 +20,8 @@ import {
 } from "../services/file-service";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
-import { ModelSelectorButton, ModeSelectorButton, WorkDirButton } from "./chat-input";
-import { loadFromStorage } from "../store/chat-mode-store";
+import { ModelSelectorButton, WorkDirButton } from "./chat-input";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
-import ToolPanel from "../components/ToolPanel";
-import { loadToolSettings, toolStore, toggleWebSearch } from "../store/tool-store";
 import { getAllCommandsInfo } from "../services/commands-loader";
 import { listSkills } from "../services/ai/skills-manager";
 import type { SkillRef } from "../types/skills";
@@ -150,8 +147,6 @@ const inputContainerStyle: React.CSSProperties = {
 const TOOLBAR_HIDE_BREAKPOINTS = {
   token: 520,
   workDir: 300,
-  web: 400,
-  mode: 280,
 };
 
 const overflowMenuStyle: React.CSSProperties = {
@@ -164,12 +159,6 @@ const overflowMenuStyle: React.CSSProperties = {
   gap: "10px",
   maxHeight: "60vh",
   overflowY: "auto",
-};
-
-const overflowSectionTitleStyle: React.CSSProperties = {
-  fontSize: "11px",
-  fontWeight: 600,
-  color: "var(--orca-color-text-3)",
 };
 
 const overflowItemStyle: React.CSSProperties = {
@@ -185,11 +174,6 @@ const overflowItemStyle: React.CSSProperties = {
 const overflowItemLabelStyle: React.CSSProperties = {
   fontSize: "12px",
   color: "var(--orca-color-text-2)",
-};
-
-const overflowToggleButtonStyle: React.CSSProperties = {
-  padding: "4px",
-  borderRadius: "4px",
 };
 
 const textareaWrapperStyle = (focused: boolean, isDragging: boolean = false): React.CSSProperties => ({
@@ -260,7 +244,6 @@ export default function ChatInput({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const leftToolbarRef = useRef<HTMLDivElement | null>(null);
   const contextSnap = useSnapshot(contextStore);
-  const toolSnap = useSnapshot(toolStore);
   const [contextContents, setContextContents] = useState<Map<string, string>>(() => new Map());
   const contextSignature = contextSnap.selected.map((ctx) => contextKey(ctx)).join("|");
 
@@ -339,20 +322,14 @@ export default function ChatInput({
   const overflowFlags = useMemo(() => {
     const width = toolbarWidth || 9999;
     const hideWorkDir = isLocalCli && width < TOOLBAR_HIDE_BREAKPOINTS.workDir;
-    const hideWeb = width < TOOLBAR_HIDE_BREAKPOINTS.web;
-    const hideMode = width < TOOLBAR_HIDE_BREAKPOINTS.mode;
-    const hasOverflow = hideWeb || hideMode || hideWorkDir;
+    const hasOverflow = hideWorkDir;
 
     return {
       hideWorkDir,
-      hideWeb,
-      hideMode,
       hasOverflow,
     };
   }, [toolbarWidth, isLocalCli]);
 
-  const showModeSection = overflowFlags.hideMode;
-  const showToolSection = overflowFlags.hideWeb;
   const showTokenIndicator = tokenEstimate.inputTokens > 0;
 
   // 检测是否显示斜杠命令菜单 - 使用模糊匹配
@@ -496,15 +473,13 @@ export default function ChatInput({
     }
   }, [skillMenuIndex, skillMenuOpen]);
 
-  // Load chat mode from storage on mount (Requirements: 5.2)
+  // Load commands and skills on mount
   useEffect(() => {
     // Load settings asynchronously
     Promise.all([
-      loadFromStorage(),
-      loadToolSettings(),
       getAllCommandsInfo(),
       listSkills()
-    ]).then(([, , commands, skills]) => {
+    ]).then(([commands, skills]) => {
       setAvailableCommands(commands);
       setAvailableSkills(skills);
     }).catch(error => {
@@ -879,9 +854,6 @@ export default function ChatInput({
           },
         }, "拖放文件或块到此处")
       ),
-
-      // Tool Panel (only in Agent mode)
-      createElement(ToolPanel, null),
 
       // Slash Command Menu - Enhanced with categories and recent commands
       slashMenuOpen && filteredCommands.length > 0 && createElement(
@@ -1619,24 +1591,6 @@ export default function ChatInput({
             onUpdateSettings,
           }),
           isLocalCli && !overflowFlags.hideWorkDir && createElement(WorkDirButton, { workDir, onChange: onWorkDirChange }),
-          !overflowFlags.hideMode && createElement(ModeSelectorButton, null),
-          !overflowFlags.hideWeb && withTooltip(
-            toolSnap.webSearchEnabled ? "\u5173\u95ed\u8054\u7f51\u641c\u7d22" : "\u5f00\u542f\u8054\u7f51\u641c\u7d22",
-            createElement(
-              Button,
-              {
-                variant: "plain",
-                onClick: toggleWebSearch,
-                style: {
-                  padding: "4px",
-                  color: toolSnap.webSearchEnabled ? "var(--orca-color-primary, #007bff)" : undefined,
-                  background: toolSnap.webSearchEnabled ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.1))" : undefined,
-                  borderRadius: "4px",
-                },
-              },
-              createElement("i", { className: "ti ti-world-search" })
-            )
-          ),
         ),
 
         createElement(
@@ -1682,35 +1636,6 @@ export default function ChatInput({
                     { style: overflowItemStyle },
                     createElement("span", { style: overflowItemLabelStyle }, "工作文件夹"),
                     createElement(WorkDirButton, { workDir, onChange: onWorkDirChange })
-                  ),
-                  showModeSection && createElement("div", { style: overflowSectionTitleStyle }, "\u6a21\u5f0f"),
-                  overflowFlags.hideMode && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u5bf9\u8bdd\u6a21\u5f0f"),
-                    createElement(ModeSelectorButton, null)
-                  ),
-                  showToolSection && createElement("div", { style: overflowSectionTitleStyle }, "\u5de5\u5177"),
-                  overflowFlags.hideWeb && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u8054\u7f51\u641c\u7d22"),
-                    withTooltip(
-                      toolSnap.webSearchEnabled ? "\u5173\u95ed\u8054\u7f51\u641c\u7d22" : "\u5f00\u542f\u8054\u7f51\u641c\u7d22",
-                      createElement(
-                        Button,
-                        {
-                          variant: "plain",
-                          onClick: toggleWebSearch,
-                          style: {
-                            ...overflowToggleButtonStyle,
-                            color: toolSnap.webSearchEnabled ? "var(--orca-color-primary, #007bff)" : undefined,
-                            background: toolSnap.webSearchEnabled ? "var(--orca-color-primary-bg, rgba(0, 123, 255, 0.1))" : undefined,
-                          },
-                        },
-                        createElement("i", { className: "ti ti-world-search" })
-                      )
-                    )
                   ),
               ),
             },

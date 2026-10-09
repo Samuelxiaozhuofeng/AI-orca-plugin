@@ -17,21 +17,6 @@ import type {
   QueryCondition,
   QueryCombineMode
 } from "../../utils/query-types";
-import { isWebSearchEnabled, isImageSearchEnabled, isWikipediaEnabled } from "../../store/tool-store";
-import { searchWeb, searchWithFallback, formatSearchResults } from "../external/web-search-service";
-import { fetchWebContent } from "../external/web-fetcher";
-import { getAiChatSettings } from "../../settings/ai-chat-settings";
-import { getAiChatPluginName } from "../../ui/ai-chat-ui";
-
-// 辅助函数：从URL提取域名
-function extractDomain(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
 
 type JournalExportCacheEntry = {
   rangeLabel: string;
@@ -45,21 +30,11 @@ const JOURNAL_EXPORT_CACHE_MAX = 5;
 // 全局缓存：存储大型日记导出数据（供前端使用）
 export const journalExportDataCache = new Map<string, JournalExportCacheEntry>();
 
-// 全局缓存：存储搜索结果（供自动增强使用）
-export const searchResultsCache = new Map<string, any[]>();
-
 // 全局缓存：Skill 工具名称到 Skill ID 的映射（兼容性导出）
 export const skillToolNameToSkillIdCache = new Map<string, string>();
 
-// 日志去重缓存 - 使用更智能的去重策略
-const loggedMessages = new Map<string, number>();
-const LOG_THROTTLE_MS = 5000; // 5秒内相同消息只输出一次
-
 /**
- * 从工具结果中提取搜索结果
- * 支持两种方式：
- * 1. 从缓存中获取（如果缓存存在）
- * 2. 直接从工具结果内容中解析（作为备选）
+ * 从工具结果中提取搜索结果（仅旧会话中的 webSearch 结果）
  */
 export function extractSearchResultsFromToolResults(
   toolResults?: Map<string, { content: string; name: string }>
@@ -69,28 +44,8 @@ export function extractSearchResultsFromToolResults(
   const allSearchResults: any[] = [];
   
   for (const [toolCallId, result] of toolResults.entries()) {
+    // 兼容旧会话：解析历史 webSearch 工具结果用于来源展示
     if (result.name === "webSearch") {
-      // 方式1：从缓存中获取
-      const cacheKeyMatch = result.content.match(/<!-- search-cache:([^>]+) -->/);
-      if (cacheKeyMatch) {
-        const cacheKey = cacheKeyMatch[1];
-        const cachedResults = searchResultsCache.get(cacheKey);
-        if (cachedResults && cachedResults.length > 0) {
-          allSearchResults.push(...cachedResults);
-          
-          // 智能日志去重
-          const logKey = `cache-${cacheKey}`;
-          const now = Date.now();
-          const lastLogged = loggedMessages.get(logKey) || 0;
-          
-          if (now - lastLogged > LOG_THROTTLE_MS) {
-            loggedMessages.set(logKey, now);
-          }
-          continue; // 已从缓存获取，跳过解析
-        }
-      }
-      
-      // 方式2：直接从工具结果内容中解析搜索结果
       // 格式：1. [标题](URL)\n   发布时间: xxx\n   内容摘要
       const parsedResults = parseSearchResultsFromContent(result.content);
       if (parsedResults.length > 0) {
@@ -253,7 +208,7 @@ export const TOOLS: OpenAITool[] = [
         properties: {
           toolName: {
             type: "string",
-            description: "工具名称，如 webSearch 或以 mcp__ 开头的外部工具。",
+            description: "工具名称，如以 mcp__ 开头的外部工具。",
           },
         },
         required: ["toolName"],
@@ -263,177 +218,10 @@ export const TOOLS: OpenAITool[] = [
 ];
 
 /**
- * 联网搜索工具 - 仅在用户开启联网搜索时添加
+ * 获取工具列表（MCP 工具）
  */
-export const WEB_SEARCH_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "webSearch",
-    description: `联网搜索获取实时信息。
-
-【何时使用】
-- 用户问最新的新闻、事件、数据
-- 需要实时信息（天气、股价、比赛结果等）
-- 笔记库中没有的外部知识
-- 用户明确要求搜索网络
-
-【参数】
-- query: 搜索关键词，用英文效果更好
-- maxResults: 返回结果数，默认5
-
-【注意】
-- 优先使用笔记库工具查找用户自己的内容
-- 只在需要外部信息时使用此工具`,
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "搜索关键词",
-        },
-        maxResults: {
-          type: "number",
-          description: "最大结果数，默认5，最大20",
-        },
-      },
-      required: ["query"],
-    },
-  },
-};
-
-/**
- * 网页抓取工具 - 获取任意 URL 的完整网页内容
- */
-export const WEB_FETCH_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "webFetch",
-    description: `抓取指定 URL 的网页内容并转换为可读的 Markdown 格式。
-
-【何时使用】
-- 搜索结果中的链接需要查看完整内容时
-- 用户要求阅读/查看某个网页
-- 需要从网页获取详细信息
-- 用户分享了链接需要了解内容
-
-【参数】
-- url: 要抓取的网页 URL（必需，完整的 https/http 链接）
-
-【注意】
-- 仅支持 http/https 链接
-- 自动提取页面主要内容，过滤广告和导航
-- 返回 Markdown 格式的文本`,
-    parameters: {
-      type: "object",
-      properties: {
-        url: {
-          type: "string",
-          description: "要抓取的网页完整 URL",
-        },
-      },
-      required: ["url"],
-    },
-  },
-};
-
-
-/**
- * 图片搜索工具 - 搜索互联网上的图片
- */
-export const IMAGE_SEARCH_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "imageSearch",
-    description: `搜索互联网上的图片。
-
-【何时使用】
-- 用户要求找图片、配图、插图
-- 用户想了解某事物的外观
-- 需要为内容配展示图片
-
-【参数】
-- query: 图片搜索关键词
-- maxResults: 返回结果数，默认5`,
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "搜索关键词",
-        },
-        maxResults: {
-          type: "number",
-          description: "最大结果数，默认5，最大20",
-        },
-      },
-      required: ["query"],
-    },
-  },
-};
-
-/**
- * 维基百科搜索工具 - 查询 Wikipedia 知识
- */
-export const WIKIPEDIA_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "wikipedia",
-    description: `查询维基百科获取知识性内容。
-
-【何时使用】
-- 用户询问概念、人物、事件的定义/背景
-- 需要权威参考资料
-- 笔记库中没有的外部知识
-
-【参数】
-- query: 搜索关键词（建议用英文）
-- language: 语言代码，默认 zh（中文）`,
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "搜索关键词",
-        },
-        language: {
-          type: "string",
-          description: "语言代码：zh（中文）、en（英文）、ja（日文），默认zh",
-        },
-      },
-      required: ["query"],
-    },
-  },
-};
-
-/**
- * 获取工具列表（直接返回 MCP 工具 + 条件性联网/维基/汇率工具）
- */
-export function getTools(
-  webSearchEnabled?: boolean,
-): OpenAITool[] {
-  const webSearchOn = webSearchEnabled ?? isWebSearchEnabled();
-  const imageSearchOn = isImageSearchEnabled();
-  const wikipediaOn = isWikipediaEnabled();
-
-  const tools: OpenAITool[] = [];
-
-  // 外部 MCP 服务器工具（标准 MCP 协议）
-  tools.push(...getAllDiscoveredTools());
-
-  if (webSearchOn) {
-    tools.push(WEB_SEARCH_TOOL);
-    tools.push(WEB_FETCH_TOOL);
-  }
-
-  if (imageSearchOn) {
-    tools.push(IMAGE_SEARCH_TOOL);
-  }
-
-  if (wikipediaOn) {
-    tools.push(WIKIPEDIA_TOOL);
-  }
-
-  return tools;
+export function getTools(): OpenAITool[] {
+  return getAllDiscoveredTools();
 }
 
 /**
@@ -926,112 +714,6 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
     // ─── 外部 MCP 服务器工具（标准 MCP 协议） ──────────────────────────
     if (isExternalMcpTool(toolName)) {
       return await callRemoteTool(toolName, args);
-    }
-
-    // ─── 联网类工具 ───────────────────────────────────────────────────
-    if (toolName === "webSearch") {
-      const query = args?.query;
-      if (!query) return "Error: Missing query parameter";
-      const maxResults = args?.maxResults ?? 5;
-      const settings = getAiChatSettings(getAiChatPluginName());
-      const instances = settings.webSearch?.instances || [];
-      const searchResults = await searchWithFallback(query, instances, Math.min(maxResults, 20));
-      return formatSearchResults(searchResults);
-    }
-
-    if (toolName === "webFetch") {
-      const url = args?.url;
-      if (!url) return "Error: Missing url parameter";
-      try {
-        const fetched = await fetchWebContent(url);
-        let output = `# ${fetched.title}\n\n`;
-        output += `来源: ${fetched.url}\n\n`;
-        // 限制内容长度到 8000 字符
-        const content = fetched.content.length > 8000
-          ? fetched.content.slice(0, 8000) + "\n\n...(内容已截断，访问原文查看完整内容)"
-          : fetched.content;
-        output += content;
-        return output;
-      } catch (err: any) {
-        return `Error: 无法抓取网页 ${url}: ${err.message}`;
-      }
-    }
-
-    if (toolName === "imageSearch") {
-      const query = args?.query;
-      if (!query) return "Error: Missing query parameter";
-      const maxResults = args?.maxResults ?? 5;
-      const settings = getAiChatSettings(getAiChatPluginName());
-      const instances = settings.webSearch?.instances || [];
-      // 用"图片"后缀优化搜索
-      const imageQuery = `${query} 图片`;
-      const response = await searchWithFallback(imageQuery, instances, Math.min(maxResults, 20));
-      const results = response.results || [];
-      // 过滤出有图片的结果，没有则返回全部
-      const imageResults = results.filter((r: any) => r.image || r.thumbnail || r.img);
-      const output = imageResults.length > 0 ? imageResults : results.slice(0, maxResults);
-      let text = `图片搜索结果: ${query}\n\n`;
-      for (let i = 0; i < output.length; i++) {
-        const r = output[i];
-        text += `${i + 1}. **${r.title || "无标题"}**\n`;
-        if ((r as any).image || (r as any).thumbnail || (r as any).img) {
-          text += `   ![](${(r as any).image || (r as any).thumbnail || (r as any).img})\n`;
-        }
-        text += `   来源: ${r.url || (r as any).link}\n`;
-        if (r.content) text += `   ${r.content}\n`;
-        text += "\n";
-      }
-      return text || `未找到相关图片: ${query}`;
-    }
-
-    if (toolName === "wikipedia") {
-      const query = args?.query;
-      if (!query) return "Error: Missing query parameter";
-      const lang = args?.language || "zh";
-      try {
-        // 使用 Wikipedia REST API
-        const apiUrl = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`;
-        const resp = await fetch(apiUrl, {
-          headers: { "User-Agent": "OrcaAIPlugin/1.0" },
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!resp.ok) {
-          // 回退到搜索
-          const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
-          const searchResp = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) });
-          const searchData = await searchResp.json();
-          const searchResults = searchData?.query?.search;
-          if (!searchResults || searchResults.length === 0) {
-            return `未找到维基百科条目: ${query}`;
-          }
-          let output = `维基百科搜索结果: ${query}\n\n`;
-          for (let i = 0; i < Math.min(searchResults.length, 5); i++) {
-            const r = searchResults[i];
-            output += `${i + 1}. **${r.title}**\n`;
-            output += `   https://${lang}.wikipedia.org/wiki/${encodeURIComponent(r.title)}\n`;
-            if (r.snippet) {
-              output += `   ${r.snippet.replace(/<\/?[^>]+(>|$)/g, "")}\n`;
-            }
-            output += "\n";
-          }
-          return output;
-        }
-        const data = await resp.json();
-        let output = `# ${data.title}\n\n`;
-        if (data.description) output += `*${data.description}*\n\n`;
-        if (data.extract) {
-          const extract = data.extract.length > 3000
-            ? data.extract.slice(0, 3000) + "..."
-            : data.extract;
-          output += extract + "\n\n";
-        }
-        if (data.content_urls?.desktop?.page) {
-          output += `🔗 ${data.content_urls.desktop.page}`;
-        }
-        return output;
-      } catch (err: any) {
-        return `Error: 维基百科查询失败: ${err.message}`;
-      }
     }
 
     // ─── 元工具 ───────────────────────────────────────────────────────

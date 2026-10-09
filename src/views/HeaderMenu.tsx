@@ -15,7 +15,6 @@ interface HeaderMenuProps {
   onOpenSettings: () => void;
   onOpenMemoryManager: () => void;
   onOpenStreamSettings?: () => void;
-  onOpenWebSearchSettings?: () => void;
   onOpenVisionModelSettings?: () => void;
   onOpenMcpSettings?: () => void;
   onExportMarkdown?: () => void;
@@ -31,7 +30,6 @@ export default function HeaderMenu({
   onOpenSettings,
   onOpenMemoryManager,
   onOpenStreamSettings,
-  onOpenWebSearchSettings,
   onOpenVisionModelSettings,
   onOpenMcpSettings,
   onExportMarkdown,
@@ -186,17 +184,6 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-clock" }),
           "流式 / 工具设置"
-        ),
-        // Web Search Settings
-        onOpenWebSearchSettings && createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onOpenWebSearchSettings),
-            className: "header-menu-item",
-          },
-          createElement("i", { className: "ti ti-world" }),
-          "联网搜索"
         ),
         // Vision Model Settings
         onOpenVisionModelSettings && createElement(

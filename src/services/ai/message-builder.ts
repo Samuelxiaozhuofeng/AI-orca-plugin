@@ -7,7 +7,6 @@
 
 import type { OpenAIChatMessage, OpenAITool } from "./openai-client";
 import type { Message, ImageRef } from "../session-service";
-import type { ChatMode } from "../../store/chat-mode-store";
 import { buildImageContent, imageToBase64 } from "../external/image-service";
 import { buildFileContentsForApi } from "../file-service";
 import { extractOrcaImagesFromText, hasOrcaImageLinks } from "../../utils/orca-image-extractor";
@@ -24,7 +23,6 @@ export interface MessageBuildParams {
   systemPrompt?: string;
   contextText?: string;
   customMemory?: string;
-  chatMode?: ChatMode;
   // Token 优化参数
   maxHistoryMessages?: number; // 0=不限制
   // 模型 ID（用于判断是否需要视觉模型代理）
@@ -36,7 +34,6 @@ export interface ConversationBuildParams {
   systemPrompt?: string;
   contextText?: string;
   customMemory?: string;
-  chatMode?: ChatMode;
   // Token 优化参数
   maxHistoryMessages?: number; // 0=不限制
   // 模型 ID（用于判断是否需要视觉模型代理）
@@ -108,19 +105,6 @@ function limitHistoryMessages(messages: Message[], maxMessages: number): Message
   
   return limited;
 }
-
-/**
- * Ask mode instruction to append to system prompt
- */
-const ASK_MODE_INSTRUCTION = `
-
----
-## 重要提示：当前为 Ask 模式
-你现在处于"Ask 模式"。在此模式下：
-- 你只能回答问题和提供信息
-- 你不能执行任何操作或调用任何工具
-- 如果用户请求执行操作，请解释你当前无法执行操作，但可以提供相关信息或建议
-- 专注于提供有帮助的、信息性的回答`;
 
 /**
  * Convert internal Message to OpenAI API format (sync, text only)
@@ -437,19 +421,13 @@ async function messageToApiWithImages(m: Message, useVisionProxy: boolean = fals
 function buildSystemContent(
   systemPrompt?: string,
   contextText?: string,
-  customMemory?: string,
-  chatMode?: ChatMode
+  customMemory?: string
 ): string | null {
   const parts: string[] = [];
   if (systemPrompt?.trim()) parts.push(systemPrompt.trim());
   if (customMemory?.trim()) parts.push(`用户信息:\n${customMemory.trim()}`);
   if (contextText?.trim()) parts.push(`用户上下文:\n${contextText.trim()}`);
-  
-  // Append Ask mode instruction when in Ask mode
-  if (chatMode === 'ask') {
-    parts.push(ASK_MODE_INSTRUCTION.trim());
-  }
-  
+
   return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
@@ -463,7 +441,7 @@ export async function buildConversationMessages(params: ConversationBuildParams)
   standard: OpenAIChatMessage[];
   fallback: OpenAIChatMessage[];
 }> {
-  const { messages, systemPrompt, contextText, customMemory, chatMode, maxHistoryMessages, modelId } = params;
+  const { messages, systemPrompt, contextText, customMemory, maxHistoryMessages, modelId } = params;
 
   // 检查是否需要使用视觉模型代理
   // 检查消息中是否包含图片
@@ -478,7 +456,7 @@ export async function buildConversationMessages(params: ConversationBuildParams)
     console.log("[message-builder] 使用视觉模型代理处理图片");
   }
 
-  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory, chatMode);
+  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
   let filteredMessages = messages.filter((m) => !m.localOnly);
   
   // 硬限制历史消息数量（如果设置了）

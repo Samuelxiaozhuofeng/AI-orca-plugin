@@ -6,7 +6,6 @@ import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
 import type { ExtractedMemory } from "../services/ai/memory-extraction";
-import { getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import { generateSuggestedReplies } from "../services/ai/suggestion-service";
 import { estimateTokens, formatTokenCount } from "../utils/token-utils";
@@ -21,7 +20,6 @@ import ErrorMessage from "../components/ErrorMessage";
 import ChatHistoryMenu from "./ChatHistoryMenu";
 import HeaderMenu from "./HeaderMenu";
 import StreamSettingsModal from "./StreamSettingsModal";
-import WebSearchSettingsModal from "./WebSearchSettingsModal";
 import VisionModelSettingsModal from "./VisionModelSettingsModal";
 import EmptyState from "./EmptyState";
 import TypingIndicator from "../components/TypingIndicator";
@@ -62,7 +60,6 @@ import {
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
 import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
-import { getToolStatus, isToolDisabled, shouldAskForTool, isWebSearchEnabled } from "../store/tool-store";
 import { listSkills, getSkill } from "../services/ai/skills-manager";
 import type { Skill, SkillRef } from "../types/skills";
 import { getAutoTriggerSkill } from "../services/ai/skill-recommender";
@@ -371,7 +368,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [showStreamSettings, setShowStreamSettings] = useState(false);
 
   // Web search settings modal state
-  const [showWebSearchSettings, setShowWebSearchSettings] = useState(false);
 
   // Vision model settings modal state
   const [showVisionModelSettings, setShowVisionModelSettings] = useState(false);
@@ -1008,7 +1004,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // 系统提示词
 	    let systemPrompt = buildDynamicSystemPrompt({
       hasMcpTools: getDiscoveredTools().length > 0,
-      hasWebSearch: isWebSearchEnabled(),
       hasDraggedContext: contextStore.selected.length > 0,
       skills: enabledSkills,
       autoActivatedSkill,
@@ -1237,10 +1232,6 @@ graph TD
 
 	    systemPrompt += formatSuffix;
 
-	    // Get current chat mode for tool handling
-	    const currentChatMode = getMode();
-	    const includeTools = currentChatMode !== 'ask';
-
 	    const validationError = validateCurrentConfig(settings);
 	    if (validationError) {
 	      orca.notify("warn", validationError);
@@ -1457,7 +1448,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
       let baseTools = hasHighPriorityContext
         ? getToolsForDraggedContext()
-        : getTools(false);
+        : getTools();
 
       // 合并技能工具：将已启用的技能注册为 function calling 工具
       try {
@@ -1470,22 +1461,21 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         console.warn("[AiChatPanel] 加载技能工具失败:", err);
       }
 
-      const filteredTools = baseTools.filter(tool => !isToolDisabled(tool.function.name));
       
       // 检查模型是否支持原生 function calling
       const supportsTools = modelSupportsTools(settings, model);
       
       // 调试日志：显示加载的工具数量
-      if (filteredTools.length > 0) {
+      if (baseTools.length > 0) {
         if (supportsTools) {
-          console.log(`[AiChatPanel] Tool-as-Skill 架构: ${filteredTools.length} 个工具`);
+          console.log(`[AiChatPanel] Tool-as-Skill 架构: ${baseTools.length} 个工具`);
         } else {
           console.log(`[AiChatPanel] 模型 ${model} 不支持 tools 能力，跳过工具加载`);
         }
       }
       // 只有当模型支持 tools 时才传递工具，避免不支持的模型输出 XML 格式
-      const toolsToUse = includeTools && supportsTools && filteredTools.length > 0 ? filteredTools : undefined;
-      const availableExecutionTools = includeTools ? filteredTools : [];
+      const toolsToUse = supportsTools && baseTools.length > 0 ? baseTools : undefined;
+      const availableExecutionTools = baseTools;
 
       const toolAwareSystemPrompt = buildToolContractSystemPrompt(
         systemPrompt,
@@ -1497,7 +1487,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         systemPrompt: toolAwareSystemPrompt,
         contextText,
         customMemory: memoryText,
-        chatMode: currentChatMode,
         maxHistoryMessages: settings.maxHistoryMessages,
         modelId: model,
       });
@@ -1588,7 +1577,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             currentContent = sanitizeContent(currentContent + chunk.content);
             updateMessage(reasoningMessageId, { content: currentContent });
           }
-        } else if (chunk.type === "tool_calls" && includeTools) {
+        } else if (chunk.type === "tool_calls") {
           toolCalls = chunk.toolCalls;
         } else if (chunk.type === "done" && chunk.result) {
           // 使用 DSML 清洗后的最终内容，确保 invoke 标签不进入历史
@@ -1598,7 +1587,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               updateMessage(reasoningMessageId, { content: currentContent });
             }
           }
-          if (includeTools && chunk.result.toolCalls?.length) {
+          if (chunk.result.toolCalls?.length) {
             toolCalls = chunk.result.toolCalls;
           }
         }
@@ -1874,32 +1863,16 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 result = `Error: Failed to resolve skill for tool ${toolName}: ${err?.message || "Unknown error"}`;
               }
             } else {
-              const needsConfirm = shouldAskForTool(toolName);
-              let userApproved = true;
-
-              if (needsConfirm) {
-                try {
-                  const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
-                  userApproved = req.isCurrent() && await createToolConfirmPromise(toolName, args);
-                } catch (confirmErr: any) {
-                  result = `Error: Tool confirmation failed: ${confirmErr?.message || "Unknown error"}`;
-                }
-              }
-
-              if (result === undefined && !userApproved) {
-                result = `用户拒绝执行此工具。请尝试其他方式或直接回答用户的问题。`;
-              } else if (result === undefined) {
-                try {
-                  const timeoutPromise = new Promise<string>((_, reject) => {
-                    setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
-                  });
-                  result = await Promise.race([
-                    executeTool(toolName, args),
-                    timeoutPromise
-                  ]);
-                } catch (err: any) {
-                  result = `Error: ${err.message || "Tool execution failed"}`;
-                }
+              try {
+                const timeoutPromise = new Promise<string>((_, reject) => {
+                  setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+                });
+                result = await Promise.race([
+                  executeTool(toolName, args),
+                  timeoutPromise
+                ]);
+              } catch (err: any) {
+                result = `Error: ${err.message || "Tool execution failed"}`;
               }
             }
           }
@@ -1933,8 +1906,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             } else {
               parallelTools.push(tc); // auto 模式，无需确认，可并行
             }
-          } else if (shouldAskForTool(tc.function.name)) {
-            confirmTools.push(tc);
           } else {
             parallelTools.push(tc);
           }
@@ -2002,7 +1973,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             : toolAwareSystemPrompt,
           contextText,
           customMemory: memoryText,
-          chatMode: currentChatMode,
           maxHistoryMessages: settings.maxHistoryMessages,
           modelId: model,
         });
@@ -2879,7 +2849,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         },
         onOpenMemoryManager: handleOpenMemoryManager,
         onOpenStreamSettings: () => setShowStreamSettings(true),
-        onOpenWebSearchSettings: () => setShowWebSearchSettings(true),
         onOpenVisionModelSettings: () => setShowVisionModelSettings(true),
         onOpenMcpSettings: () => setShowMcpSettings(true),
         onExportMarkdown: () => {
@@ -2969,11 +2938,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     createElement(StreamSettingsModal, {
       isOpen: showStreamSettings,
       onClose: () => setShowStreamSettings(false),
-    }),
-    // Web Search Settings Modal
-    createElement(WebSearchSettingsModal, {
-      isOpen: showWebSearchSettings,
-      onClose: () => setShowWebSearchSettings(false),
     }),
     // Vision Model Settings Modal
     createElement(VisionModelSettingsModal, {

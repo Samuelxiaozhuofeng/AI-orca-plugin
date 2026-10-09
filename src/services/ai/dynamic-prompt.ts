@@ -34,11 +34,6 @@ const CITATION_SECTION = `## 引用标注规范
 - ❌ 禁止：无标题时使用 () 或 (未命名) 等空括号占位
 - blockid 必须从工具返回中复制，禁止编造`;
 
-const WEB_SEARCH_SECTION = `## 联网搜索
-- webSearch 用于获取实时信息
-- imageSearch 用于搜索相关图片
-- 优先使用用户笔记库中的内容，只在需要外部信息时搜索`;
-
 const DRAGGED_CONTEXT_SECTION = `## 上下文优先
 - 用户已提供具体内容块，优先基于这些块回答
 - 系统消息中的“用户上下文”就是这些拖入块/页面/标签的正文，必须先阅读并引用其中内容
@@ -59,7 +54,6 @@ export interface AutoActivatedSkill {
 
 export interface PromptOptions {
   hasMcpTools?: boolean;
-  hasWebSearch?: boolean;
   hasDraggedContext?: boolean;
   skills?: SkillPromptInfo[];
   /** 自动激活的技能（高置信度匹配时自动注入指令） */
@@ -93,11 +87,6 @@ export function buildDynamicSystemPrompt(options: PromptOptions = {}): string {
   // Technical Notes（动态值，如 repoId）
   if (options.repoId) {
     sections.push(buildTechnicalNotes(options.repoId));
-  }
-
-  // 联网搜索相关
-  if (options.hasWebSearch) {
-    sections.push(WEB_SEARCH_SECTION);
   }
 
   // 拖入上下文

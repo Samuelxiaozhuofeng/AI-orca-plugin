@@ -190,7 +190,7 @@ export const AiChatPluginAPI = {
     const maxToolRounds = options.maxToolRounds ?? runtimeConfig.maxToolRounds;
 
     // 动态获取工具列表（包含外部 MCP 工具）
-    const tools = options.tools ?? getTools(false);
+    const tools = options.tools ?? getTools();
     const toolRoundLimit = createToolRoundLimit(maxToolRounds);
 
     // 获取 API 配置
@@ -216,7 +216,6 @@ export const AiChatPluginAPI = {
       messages: conversation,
       systemPrompt,
       contextText,
-      chatMode: enableTools ? "agent" : "ask",
       modelId: model,
     });
 
@@ -385,7 +384,6 @@ export const AiChatPluginAPI = {
           messages: conversation,
           systemPrompt: nextSystemPrompt,
           contextText,
-          chatMode: enableTools ? "agent" : "ask",
           modelId: model,
         });
 

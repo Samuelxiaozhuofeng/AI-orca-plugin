@@ -62,72 +62,6 @@ export const CURRENCY_SYMBOLS: Record<CurrencyType, string> = {
   JPY: "¥",
 };
 
-/** 搜索引擎类型 */
-export type SearchProvider = "tavily" | "bing" | "duckduckgo" | "brave" | "searxng" | "google" | "serpapi";
-
-/** 单个搜索引擎实例配置 */
-export type SearchProviderInstance = {
-  id: string;              // 唯一标识
-  provider: SearchProvider;
-  enabled: boolean;        // 是否启用
-  name?: string;           // 自定义名称（如 "Tavily 主账号"）
-  // Tavily
-  tavilyApiKey?: string;
-  tavilySearchDepth?: "basic" | "advanced";
-  tavilyIncludeAnswer?: boolean;
-  tavilyIncludeDomains?: string[];
-  tavilyExcludeDomains?: string[];
-  // Bing
-  bingApiKey?: string;
-  bingMarket?: string;
-  // DuckDuckGo
-  duckduckgoRegion?: string;
-  // Brave
-  braveApiKey?: string;
-  braveCountry?: string;
-  braveSearchLang?: string;
-  braveSafeSearch?: "off" | "moderate" | "strict";  // 图片搜索安全级别
-  // SearXNG
-  searxngInstanceUrl?: string;
-  searxngLanguage?: string;
-  searxngSafeSearch?: 0 | 1 | 2;  // 图片搜索安全级别
-  // Google Custom Search
-  googleApiKey?: string;           // Google Cloud API Key
-  googleSearchEngineId?: string;   // Programmable Search Engine ID (cx)
-  googleGl?: string;               // 国家代码，如 "cn", "us"
-  googleHl?: string;               // 界面语言，如 "zh-CN", "en"
-  googleLr?: string;               // 搜索结果语言，如 "lang_zh-CN"
-  googleSafe?: "off" | "active";   // 安全搜索
-  // SerpApi (Google Images)
-  serpapiApiKey?: string;
-  serpapiGl?: string;              // 国家代码
-  serpapiHl?: string;              // 语言
-};
-
-/** 联网搜索配置 - 支持多引擎故障转移 */
-export type WebSearchConfig = {
-  enabled: boolean;
-  maxResults: number;
-  // 搜索引擎实例列表（按优先级排序，第一个失败自动尝试下一个）
-  instances: SearchProviderInstance[];
-  // 图像搜索配置
-  imageSearchEnabled: boolean;
-  maxImageResults: number;
-  // 兼容旧版单引擎配置
-  provider?: SearchProvider;
-  tavilyApiKey?: string;
-  tavilySearchDepth?: "basic" | "advanced";
-  tavilyIncludeAnswer?: boolean;
-  tavilyIncludeDomains?: string[];
-  tavilyExcludeDomains?: string[];
-  serperApiKey?: string;
-  serperCountry?: string;
-  serperLanguage?: string;
-  bingApiKey?: string;
-  bingMarket?: string;
-  duckduckgoRegion?: string;
-};
-
 /** 新的设置结构 */
 export type AiChatSettings = {
   providers: AiProvider[];           // 平台列表
@@ -144,8 +78,6 @@ export type AiChatSettings = {
   maxContextChars: number;           // 上下文最大字符数
   // 流式超时设置
   streamTimeout: number;             // 流式响应超时（毫秒），本地模型建议设置更长
-  // 联网搜索设置
-  webSearch: WebSearchConfig;
   // 兼容旧版本的字段（迁移用）
   apiKey?: string;
   apiUrl?: string;
@@ -204,14 +136,6 @@ const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
   maxContextChars: 60000,          // 恢复原来的 60000
   // 流式超时设置
   streamTimeout: 30000,            // 默认 30 秒，本地模型可设置 120000（2分钟）或更长
-  // 联网搜索设置
-  webSearch: {
-    enabled: false,
-    maxResults: 5,
-    instances: [], // 用户添加的搜索引擎实例
-    imageSearchEnabled: true, // 默认启用图像搜索
-    maxImageResults: 3, // 默认最多3张图片
-  },
 };
 
 
@@ -398,8 +322,6 @@ type StoredConfig = {
   maxContextChars?: number;
   // 流式超时设置
   streamTimeout?: number;
-  // 联网搜索设置
-  webSearch?: WebSearchConfig;
 };
 
 // 内存缓存（避免频繁读取）
@@ -540,8 +462,6 @@ export function getAiChatSettings(pluginName: string): AiChatSettings {
     maxContextChars: config?.maxContextChars ?? DEFAULT_AI_CHAT_SETTINGS.maxContextChars,
     // 流式超时设置
     streamTimeout: config?.streamTimeout ?? DEFAULT_AI_CHAT_SETTINGS.streamTimeout,
-    // 联网搜索设置
-    webSearch: config?.webSearch ?? DEFAULT_AI_CHAT_SETTINGS.webSearch,
   };
 
   merged.temperature = Math.max(0, Math.min(2, merged.temperature));
@@ -588,8 +508,6 @@ export async function updateAiChatSettings(
     maxContextChars: next.maxContextChars,
     // 流式超时设置
     streamTimeout: next.streamTimeout,
-    // 联网搜索设置
-    webSearch: next.webSearch,
   };
   
   // 保存到 data 存储
