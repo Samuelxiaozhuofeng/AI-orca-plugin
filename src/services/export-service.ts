@@ -88,7 +88,7 @@ export function sessionToMarkdown(session: SavedSession): string {
   const header = `# ${title}\n\n- **创建时间**: ${createdAt}\n- **模型**: ${model}\n\n---\n\n`;
   
   const messages = session.messages
-    .filter(m => !m.localOnly && m.role !== "tool")
+    .filter(m => !m.localOnly && !m.skillConfirm && !m.skillDraft && m.role !== "tool")
     .map(messageToMarkdown)
     .join("\n---\n\n");
   
@@ -131,7 +131,7 @@ export interface BlockInfo {
  */
 function convertMessages(messages: Message[]): SavedMessage[] {
   return messages
-    .filter(m => !m.localOnly && (m.role === "user" || m.role === "assistant"))
+    .filter(m => !m.localOnly && !m.skillConfirm && !m.skillDraft && (m.role === "user" || m.role === "assistant"))
     .map(m => {
       const saved: SavedMessage = {
         role: m.role as "user" | "assistant",
