@@ -1246,12 +1246,6 @@ export default function MessageItem({
     };
   }, []);
 
-  // Check if any tool calls are still loading
-  useMemo(() => {
-    if (!message.tool_calls || !toolResults) return true;
-    return message.tool_calls.some((tc) => !toolResults.has(tc.id));
-  }, [message.tool_calls, toolResults]);
-
   const activeSourceGroup = useMemo(
     () => sourceGroups.find((group) => group.id === activeSourceGroupId) || null,
     [sourceGroups, activeSourceGroupId]

@@ -40,7 +40,7 @@ MCP 工具名格式 `mcp__<服务器>__<原名>_<哈希>`（`mcp-tool-names.ts`�
 
 1. **去重**：跳过本次回复里已有结果的 `tool_call_id`。
 2. **纠正工具名**（`resolveToolCallName`）：精确 → 大小写 → 分隔符归一 → 单复数 → MCP 原名唯一匹配 → 单字符拼写差，只在唯一匹配时才改；对不上则生成一条 `Unknown tool` 错误结果，不执行。
-3. **重复调用拦截**：工具名 + 规范化参数相同的调用，本次对话内只执行一次，后面的返回 `Repeated tool call skipped` 错误。
+3. **重复调用拦截**：工具名 + 规范化参数相同的调用，在同一次发送（含它引发的多轮工具调用）内只执行一次；下一次发送重新计，后面的返回 `Repeated tool call skipped` 错误。
 4. **参数解析**：`JSON.parse`，失败则用 `tryRepairJson` 修复（取拼接 JSON 的第一个、补缺失括号、去重复键、去尾逗号、`blockld`→`blockId` 等）；仍失败返回 `Invalid JSON in tool arguments` 错误。
 5. **执行**：同一轮的多个调用并行（`Promise.all`），每个 60 秒超时（`Tool execution timed out after 60s`）。主循环里没有「执行前询问用户」这一步。
 6. **截断**：结果超过 `settings.maxToolResultChars`（默认 8000，0=不限制）就截断并附「已截断，原长度 N 字符」。

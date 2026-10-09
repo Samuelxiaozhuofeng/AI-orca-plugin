@@ -295,7 +295,6 @@ const sessionCache = new Map<string, SessionFileData>();
 const pendingWrites = new Map<string, { data: SessionFileData; timer: ReturnType<typeof setTimeout> }>();
 const WRITE_DEBOUNCE_MS = 2000; // 2秒防抖
 
-/** 清除缓存（用于测试或强制刷新） */
 /** 立即写入单个会话 */
 async function flushSessionWrite(sessionId: string, data: SessionFileData): Promise<void> {
   try {
@@ -831,9 +830,6 @@ export async function clearAllSessions(): Promise<void> {
   console.log(`[session-service] Cleared ${nonFavorited.length} sessions, kept ${favorited.length} favorited`);
 }
 
-/**
- * Check if auto-save is enabled based on settings
- */
 /**
  * Format a timestamp for display
  */

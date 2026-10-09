@@ -34,18 +34,16 @@
 | 函数 | 说明 |
 | --- | --- |
 | `loadSessions()` | 读索引，返回只含元数据的会话列表（消息按需再加载）和 `activeSessionId` |
-| `loadFullSession(id)` / `getSession(id)` | 读完整会话（含消息） |
+| `loadFullSession(id)` | 读完整会话（含消息） |
 | `saveSession(session)` | 立即写入并更新索引；没有非 `localOnly` 消息则跳过（关闭面板时用） |
 | `autoCacheSession(session)` | 自动保存用：文件 2 秒防抖写入、索引立即更新；只有消息变多才更新 `updatedAt`；保留已有标题 / 置顶 / 收藏 |
 | `deleteSession(id)` | 删除会话文件并更新索引 |
 | `clearAllSessions()` | 删除所有**非收藏**的会话 |
 | `toggleSessionPinned(id)` / `toggleSessionFavorited(id)` | 置顶 / 收藏 |
 | `renameSession(id, title)` | 重命名；空标题则按首条消息重新生成 |
-| `setActiveSessionId(id)` | 记录活动会话 |
 | `createNewSession()` | 创建空会话（内存中，有消息才会存） |
 | `generateSessionTitle(messages)` | 标题 = 首条用户消息前 20 字（超出加 `...`），没有则用「会话 + 时间」 |
 | `formatSessionTime(ts)` | 今天 HH:mm / 昨天 / 周几 / M月D日 |
-| `clearSessionCache()` | 清缓存并立即写出待写入内容 |
 
 ## UI
 

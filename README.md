@@ -41,8 +41,8 @@ npm run package
 ### 配置
 
 1. 在 Orca Note 中加载插件
-2. 打开插件设置
-3. 配置 AI 模型（OpenAI、Claude 等）的 API Key
+2. 打开 AI 聊天面板，点输入框下方的模型选择器
+3. 添加平台，填 API 地址和 API Key（OpenAI、Claude 等），再选模型
 4. 开始使用！
 
 ## 📖 文档

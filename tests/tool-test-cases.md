@@ -42,7 +42,7 @@
 
 - 工具名偏差：模型把工具名写错一个字符 / 单复数时，会被纠正到唯一匹配的工具（控制台 `[Tool Call] Normalized tool name`）；对不上则返回 `Unknown tool` 错误并列出可用工具名。
 - 参数 JSON 残缺（如缺右括号、拼接的两个 JSON）：控制台出现 `[Tool Call] Repaired malformed JSON`，仍无法解析则返回 `Invalid JSON in tool arguments`。
-- 重复调用：同一工具同一参数在一次对话中第二次调用会被跳过（`Repeated tool call skipped`），随后不带工具再请求一轮。
+- 重复调用：同一次发送里，同一工具同一参数第二次调用会被跳过（下一次发送不受影响）（`Repeated tool call skipped`），随后不带工具再请求一轮。
 - 工具执行超过 60 秒：返回 `Tool execution timed out after 60s`。
 - 结果过长：超过 `maxToolResultChars`（默认 8000）会被截断并附「已截断，原长度 N 字符」。
 
