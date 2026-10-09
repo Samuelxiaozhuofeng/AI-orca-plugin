@@ -395,6 +395,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 删过消息就 +1：本机 AI 一轮进行中被删过，收尾时不再把它记为续接点
+  const ccDeleteGenRef = useRef(0);
   // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态）
   const chatOwnerRef = useRef(createChatRequestOwner());
   // 对话选择的归属：只有最后一次选择 / 新建的加载结果才上屏
@@ -1315,6 +1317,8 @@ graph TD
     const ccRun: LocalCliRun = {};
     let ccAssistantId: string | null = null;
     let ccPartial = false;
+    let ccErrored = false;
+    const ccDeleteGen = ccDeleteGenRef.current;
 
     try {
       // Build context (now returns text + assets)
@@ -2170,6 +2174,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     } catch (err: any) {
       ccPartial = true;
       const isAbort = String(err?.name ?? "") === "AbortError";
+      ccErrored = !isAbort;
       const msg = String(err?.message ?? err ?? "unknown error");
       if (!isAbort) {
         orca.notify("error", msg);
@@ -2202,10 +2207,12 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // 新中转报了会话（正常 / 停止 / 出错都算）：记到本轮回复上，并记为对话的续接点；续接失败且没新会话 → 清掉续接点
       const ccSid = ccRun.sid;
       const ccMsgId = ccAssistantId;
+      // 出错（非停止）或本轮进行中删过消息：不记续接点，下次整段新开
+      const ccHeadOk = !ccErrored && ccDeleteGenRef.current === ccDeleteGen;
       if (ccSid && ccMsgId) {
         updateMessage(ccMsgId, { cc: { sid: ccSid, ...(ccRun.uuid ? { uuid: ccRun.uuid } : {}), ...(ccPartial ? { partial: true as const } : {}) } });
-        setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: { sid: ccSid, msgId: ccMsgId } }));
-      } else if (ccRun.resumeFailed) {
+        setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: ccHeadOk ? { sid: ccSid, msgId: ccMsgId } : undefined }));
+      } else if (ccRun.resumeFailed || !ccHeadOk) {
         setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: undefined }));
       }
       if (abortRef.current === aborter) abortRef.current = null;
@@ -2280,6 +2287,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     const target = messages.find((m) => m.id === messageId);
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
     // 删了 AI 看过的内容：下次本机 AI 不直接续接，整段新开
+    if (target && !target.localOnly) ccDeleteGenRef.current++;
     if (target && !target.localOnly) setCurrentSession((prev) => (prev.ccHead ? { ...prev, ccHead: undefined } : prev));
   }, [messages]);
 
