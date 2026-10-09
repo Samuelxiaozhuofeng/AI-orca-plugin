@@ -9,6 +9,7 @@
 import type { InjectionMode, UserProfile, SelectionPreset } from "../../store/memory-store";
 import { memoryStore, memoryStoreState } from "../../store/memory-store";
 import { withTooltip } from "../../utils/orca-tooltip";
+import { measureMenu } from "./chat-input-styles";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -46,6 +47,7 @@ const menuContainerStyle: React.CSSProperties = {
   width: 280,
   maxHeight: 360,
   padding: 10,
+  boxSizing: "border-box",
   background: "var(--orca-color-bg-1)",
   display: "flex",
   flexDirection: "column",
@@ -226,6 +228,7 @@ const savePresetInputStyle: React.CSSProperties = {
 // ============================================================================
 
 export default function InjectionModeSelector() {
+  const [menuLayout, setMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 280, alignment: "left" });
   const snap = useSnapshot(memoryStoreState);
   const currentMode = snap.injectionMode;
   const users = snap.users as UserProfile[];
@@ -302,13 +305,13 @@ export default function InjectionModeSelector() {
     {
       defaultPlacement: "top",
       placement: "vertical",
-      alignment: "left",
+      alignment: menuLayout.alignment,
       allowBeyondContainer: true,
       offset: 8,
       menu: (close: () => void) =>
         createElement(
           "div",
-          { style: menuContainerStyle },
+          { style: { ...menuContainerStyle, width: menuLayout.width } },
           // Mode Tabs
           createElement(
             "div",
@@ -537,6 +540,7 @@ export default function InjectionModeSelector() {
               style: savePresetInputStyle,
               autoFocus: true,
               onKeyDown: (e: any) => {
+                if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter") handleSavePreset();
                 if (e.key === "Escape") {
                   setShowSavePreset(false);
@@ -574,7 +578,10 @@ export default function InjectionModeSelector() {
           Button,
           {
             variant: "plain",
-            onClick: openMenu,
+            onClick: (e: any) => {
+              setMenuLayout(measureMenu(e.currentTarget, "left", 220, 280));
+              openMenu(e);
+            },
             style: selectorButtonStyle,
           },
           createElement("i", { className: `ti ${displayIcon}` }),

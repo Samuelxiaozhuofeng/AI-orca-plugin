@@ -29,6 +29,7 @@ import { loadToolSettings, toolStore, toggleWebSearch, toggleAgenticRAG } from "
 import { getAllCommandsInfo } from "../services/commands-loader";
 import { listSkills } from "../services/ai/skills-manager";
 import type { SkillRef } from "../types/skills";
+import { measureMenu } from "./chat-input/chat-input-styles";
 import { recommendSkills, type SkillRecommendation, getSkillSummary } from "../services/ai/skill-recommender";
 
 const React = window.React as unknown as {
@@ -157,6 +158,7 @@ const TOOLBAR_HIDE_BREAKPOINTS = {
 const overflowMenuStyle: React.CSSProperties = {
   minWidth: 240,
   padding: "10px",
+  boxSizing: "border-box",
   background: "var(--orca-color-bg-1)",
   display: "flex",
   flexDirection: "column",
@@ -227,6 +229,7 @@ export default function ChatInput({
   currency = "USD",
 }: Props) {
   const [text, setText] = useState("");
+  const [overflowMenuLayout, setOverflowMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 360, alignment: "right" });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
@@ -583,7 +586,7 @@ export default function ChatInput({
           setSkillMenuIndex(i => (i - 1 + filteredSkills.length) % filteredSkills.length);
           return;
         }
-        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
           e.preventDefault();
           const skill = filteredSkills[skillMenuIndex];
           if (skill) {
@@ -614,7 +617,7 @@ export default function ChatInput({
           setSlashMenuIndex(i => (i - 1 + flatMenuItems.length) % flatMenuItems.length);
           return;
         }
-        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
           e.preventDefault();
           const cmd = flatMenuItems[slashMenuIndex];
           if (cmd) {
@@ -636,7 +639,7 @@ export default function ChatInput({
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        if (e.nativeEvent?.isComposing) return;
+        if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         handleSend();
         return;
@@ -1751,13 +1754,13 @@ export default function ChatInput({
             {
               defaultPlacement: "top",
               placement: "vertical",
-              alignment: "right",
+              alignment: overflowMenuLayout.alignment,
               allowBeyondContainer: true,
               offset: 8,
               menu: (close: () => void) =>
                 createElement(
                   "div",
-                  { style: overflowMenuStyle },
+                  { style: { ...overflowMenuStyle, minWidth: Math.min(240, overflowMenuLayout.width), maxWidth: overflowMenuLayout.width } },
                   overflowFlags.hideClear && createElement("div", { style: overflowSectionTitleStyle }, "\u5feb\u6377\u64cd\u4f5c"),
                   overflowFlags.hideClear && createElement(
                     "div",
@@ -1842,7 +1845,10 @@ export default function ChatInput({
                   Button,
                   {
                     variant: "plain",
-                    onClick: openMenu,
+                    onClick: (e: any) => {
+                      setOverflowMenuLayout(measureMenu(e.currentTarget, "right", 160, 360));
+                      openMenu(e);
+                    },
                     style: { padding: "4px" },
                   },
                   createElement("i", { className: "ti ti-dots" })

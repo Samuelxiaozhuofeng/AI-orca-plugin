@@ -45,6 +45,7 @@ type Props = {
   onSelect: (providerId: string, modelId: string) => void;
   onUpdateSettings: (settings: AiChatSettings) => void;
   close: () => void;
+  width: number;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -397,7 +398,7 @@ function ModelEditPanel({
 
   return createElement(
     "div",
-    { style: { padding: "16px", minWidth: "320px" } },
+    { style: { padding: "16px", minWidth: 0 } },
     // 标题
     createElement(
       "div",
@@ -414,11 +415,11 @@ function ModelEditPanel({
 
     // 价格（两列）
     createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
-      createElement("div", { style: { flex: 1 } },
+      createElement("div", { style: { flex: 1, minWidth: 0 } },
         createElement("label", { style: labelStyle }, "输入价格 ($/M)"),
         createElement("input", { type: "number", step: "0.01", value: inputPrice, onChange: (e: any) => setInputPrice(e.target.value), placeholder: "0", style: inputStyle })
       ),
-      createElement("div", { style: { flex: 1 } },
+      createElement("div", { style: { flex: 1, minWidth: 0 } },
         createElement("label", { style: labelStyle }, "输出价格 ($/M)"),
         createElement("input", { type: "number", step: "0.01", value: outputPrice, onChange: (e: any) => setOutputPrice(e.target.value), placeholder: "0", style: inputStyle })
       )
@@ -426,15 +427,15 @@ function ModelEditPanel({
 
     // 模型参数（三列）
     createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
-      createElement("div", { style: { flex: 1 } },
+      createElement("div", { style: { flex: 1, minWidth: 0 } },
         createElement("label", { style: labelStyle }, "Temperature"),
         createElement("input", { type: "number", step: "0.1", min: "0", max: "2", value: temperature, onChange: (e: any) => setTemperature(e.target.value), placeholder: "0.7", style: inputStyle })
       ),
-      createElement("div", { style: { flex: 1 } },
+      createElement("div", { style: { flex: 1, minWidth: 0 } },
         createElement("label", { style: labelStyle }, "Max Tokens"),
         createElement("input", { type: "number", value: maxTokens, onChange: (e: any) => setMaxTokens(e.target.value), placeholder: "4096", style: inputStyle })
       ),
-      createElement("div", { style: { flex: 1 } },
+      createElement("div", { style: { flex: 1, minWidth: 0 } },
         createElement("label", { style: labelStyle }, "工具轮数"),
         createElement("input", {
           type: "number",
@@ -653,7 +654,7 @@ function ProviderConfigPanel({
 
   return createElement(
     "div",
-    { style: { ...addModelPanelStyle, minWidth: "320px" } },
+    { style: { ...addModelPanelStyle, minWidth: 0 } },
     // 标题
     createElement(
       "div",
@@ -746,7 +747,7 @@ function ProviderConfigPanel({
                   onMouseEnter: (e: any) => { e.currentTarget.style.borderColor = "var(--orca-color-border)"; },
                   onMouseLeave: (e: any) => { e.currentTarget.style.borderColor = "transparent"; },
                 },
-                createElement("div", { style: { flex: 1 } },
+                createElement("div", { style: { flex: 1, minWidth: 0 } },
                   createElement("div", { style: { fontSize: "12px", fontWeight: 500 } }, model.label || model.id),
                   createElement("div", { style: { fontSize: "10px", color: "var(--orca-color-text-3)", marginTop: "2px" } },
                     model.inputPrice !== undefined ? `${model.inputPrice}/${model.outputPrice ?? 0} $/M` : "未设置价格"
@@ -799,9 +800,9 @@ function ProviderConfigPanel({
     // 添加模型
     createElement(
       "div",
-      { style: { display: "flex", gap: "8px", marginBottom: "16px" } },
-      createElement("input", { type: "text", value: newModelId, onChange: (e: any) => setNewModelId(e.target.value), placeholder: "模型 ID", style: { ...inputStyle, flex: 1 } }),
-      createElement("input", { type: "text", value: newModelLabel, onChange: (e: any) => setNewModelLabel(e.target.value), placeholder: "显示名(可选)", style: { ...inputStyle, flex: 1 } }),
+      { style: { display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" } },
+      createElement("input", { type: "text", value: newModelId, onChange: (e: any) => setNewModelId(e.target.value), placeholder: "模型 ID", style: { ...inputStyle, flex: "1 1 100px", minWidth: 0 } }),
+      createElement("input", { type: "text", value: newModelLabel, onChange: (e: any) => setNewModelLabel(e.target.value), placeholder: "显示名(可选)", style: { ...inputStyle, flex: "1 1 100px", minWidth: 0 } }),
       createElement(Button, { variant: "outline", disabled: !newModelId.trim(), onClick: handleAddModel, style: { flexShrink: 0 } }, "添加")
     ),
 
@@ -826,6 +827,7 @@ export default function ModelSelectorMenu({
   onSelect,
   onUpdateSettings,
   close,
+  width,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(() => {
@@ -927,7 +929,7 @@ export default function ModelSelectorMenu({
   if (editingProvider) {
     return createElement(
       "div",
-      { style: menuContainerStyle },
+      { style: { ...menuContainerStyle, width } },
       createElement(ProviderConfigPanel, {
         provider: editingProvider,
         onUpdate: handleUpdateProvider,
@@ -939,10 +941,10 @@ export default function ModelSelectorMenu({
 
   return createElement(
     "div",
-    { style: menuContainerStyle },
+    { style: { ...menuContainerStyle, width } },
     createElement(
       "div",
-      { style: { ...modelListPanelStyle, minWidth: "320px" } },
+      { style: modelListPanelStyle },
       // 搜索框
       createElement(Input as any, {
         placeholder: "搜索模型...",

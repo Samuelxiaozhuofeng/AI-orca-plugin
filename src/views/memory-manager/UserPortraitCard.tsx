@@ -550,7 +550,7 @@ export default function UserPortraitCard({
                 setEditingCategoryTitle("");
               },
               onKeyDown: (e: any) => {
-                if (e.key === "Enter" && editingCategoryTitle.trim()) {
+                if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && editingCategoryTitle.trim()) {
                   onEditCategoryTitle(category.id, editingCategoryTitle.trim());
                   setEditingCategoryId(null);
                   setEditingCategoryTitle("");
@@ -652,7 +652,7 @@ export default function UserPortraitCard({
                   style: addInfoInputStyle,
                   autoFocus: true,
                   onKeyDown: (e: any) => {
-                    if (e.key === "Enter" && newInfoValue.trim()) {
+                    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && newInfoValue.trim()) {
                       onAddInfoItem(category.id, newInfoLabel.trim(), newInfoValue.trim());
                       setAddingInfoToCategoryId(null);
                       setNewInfoLabel("");
@@ -819,7 +819,7 @@ export default function UserPortraitCard({
               style: addCategoryInputStyle,
               autoFocus: true,
               onKeyDown: (e: any) => {
-                if (e.key === "Enter" && newCategoryTitle.trim()) {
+                if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && newCategoryTitle.trim()) {
                   onAddCategory(newCategoryTitle.trim());
                   setIsAddingCategory(false);
                   setNewCategoryTitle("");
@@ -1083,7 +1083,7 @@ export default function UserPortraitCard({
             style: valueInputStyle,
             autoFocus: true,
             onKeyDown: (e: any) => {
-              if (e.key === "Enter" && editingInfoValue.trim()) {
+              if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && editingInfoValue.trim()) {
                 handleSaveInfoItemModal();
               }
               if (e.key === "Escape") {

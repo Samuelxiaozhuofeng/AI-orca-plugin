@@ -90,9 +90,8 @@ export const containerStyle = {
 
 // Model selector menu styles
 export const menuContainerStyle = {
-  // width removed to let content define width (minWidth ensures it's not too narrow)
-  minWidth: 540,
   padding: 16,
+  boxSizing: "border-box" as const,
   background: "var(--orca-color-bg-1)",
 };
 
@@ -104,9 +103,6 @@ export const menuFlexStyle = {
 export const modelListPanelStyle = {
   flex: 1,
   minWidth: 0,
-  // Restore paddingRight to ensure input doesn't touch the border
-  paddingRight: 16,
-  borderRight: "1px solid var(--orca-color-border)",
   display: "flex",
   flexDirection: "column" as const,
 };
@@ -140,3 +136,40 @@ export const addModelHintStyle = {
   color: "var(--orca-color-text-3)",
   lineHeight: 1.4,
 };
+
+/**
+ * Measure where a toolbar popup fits inside the clipping panel.
+ * Popups are portaled to the panel, so the boundary is searched from outside any open popup
+ * (a menu opened from inside another menu is measured against the panel, not the outer menu).
+ * Prefers `prefer` side; flips to the other side when it has more room and `prefer` can't fit `min`.
+ * alignment "left" = grows rightwards from the anchor's left edge; "right" = grows leftwards.
+ */
+export function measureMenu(
+  anchor: Element | null | undefined,
+  prefer: "left" | "right",
+  min: number,
+  max: number,
+): { width: number; alignment: "left" | "right" } {
+  if (!anchor) return { width: Math.max(min, Math.min(360, max)), alignment: prefer };
+  const rect = anchor.getBoundingClientRect();
+  let clipLeft = 0;
+  let clipRight = window.innerWidth;
+  const start = anchor.closest(".orca-popup")?.parentElement ?? anchor.parentElement;
+  for (let el = start; el; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.overflow !== "visible" || cs.overflowX !== "visible") {
+      const r = el.getBoundingClientRect();
+      clipLeft = r.left;
+      clipRight = r.right;
+      break;
+    }
+  }
+  const space = {
+    left: clipRight - rect.left - 8,
+    right: rect.right - clipLeft - 8,
+  };
+  const other = prefer === "left" ? "right" : "left";
+  const alignment = space[prefer] >= min || space[prefer] >= space[other] ? prefer : other;
+  // 可用宽度是硬上限（空间不足 min 时宁可窄也不越界）
+  return { width: Math.max(0, Math.min(max, space[alignment])), alignment };
+}

@@ -1,6 +1,7 @@
 /**
  * MCP Server Settings Modal - 管理 MCP 服务器和工具
  */
+import { useModalDismiss } from "../utils/modal-dismiss";
 import {
   mcpStore,
   addMcpServer,
@@ -177,11 +178,12 @@ export default function McpServerSettingsModal({ isOpen, onClose }: Props) {
     setHeaderDrafts((prev) => ({ ...prev, [serverId]: formatHeadersJson(headers) }));
   };
 
+  const overlayDismiss = useModalDismiss(isOpen, onClose);
   if (!isOpen) return null;
 
   const servers = snap.servers;
 
-  return createElement("div", { style: overlay, onClick: onClose },
+  return createElement("div", { style: overlay, ...overlayDismiss },
     createElement("div", { style: modal, onClick: (e: any) => e.stopPropagation() },
       // ── 标题栏 ───────────────────────────────────────────────────────
       createElement("div", { style: titleStyle },

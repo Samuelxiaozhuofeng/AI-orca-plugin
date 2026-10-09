@@ -802,7 +802,7 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
             style: emojiInputStyle,
             maxLength: 2,
             onKeyDown: (e: any) => {
-              if (e.key === "Enter") handleCustomEmojiSubmit();
+              if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleCustomEmojiSubmit();
             },
           }),
           withTooltip(
@@ -921,7 +921,7 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
             },
             maxLength: 10,
             onKeyDown: (e: any) => {
-              if (e.key === "Enter" && tagEditorLabel.trim()) handleTagEditorSave();
+              if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && tagEditorLabel.trim()) handleTagEditorSave();
             },
           })
         ),

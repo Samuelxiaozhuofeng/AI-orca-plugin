@@ -247,7 +247,7 @@ export default function UserManagementCard({
           },
           autoFocus: true,
           onKeyDown: (e: any) => {
-            if (e.key === "Enter") handleConfirmEditUser();
+            if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleConfirmEditUser();
             if (e.key === "Escape") handleCancelEditUser();
           },
         }),
@@ -307,7 +307,7 @@ export default function UserManagementCard({
         },
         autoFocus: true,
         onKeyDown: (e: any) => {
-          if (e.key === "Enter") handleConfirmAddUser();
+          if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleConfirmAddUser();
           if (e.key === "Escape") handleCancelAddUser();
         },
       }),

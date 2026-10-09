@@ -9,6 +9,7 @@ import { getAiChatSettings, normalizeApiProtocol } from "../settings/ai-chat-set
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { multiModelStore, toggleModelSelection, clearModelSelection, toggleMultiModelMode, getModelKey } from "../store/multi-model-store";
 import { withTooltip } from "../utils/orca-tooltip";
+import { measureMenu } from "../views/chat-input/chat-input-styles";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -135,7 +136,7 @@ function ModelCheckItem({
   );
 }
 
-export default function MultiModelSelector({ settings, onClose }: MultiModelSelectorProps) {
+export default function MultiModelSelector({ settings, onClose, width = 320 }: MultiModelSelectorProps & { width?: number }) {
   const multiModelSnap = useSnapshot(multiModelStore);
   const [searchQuery, setSearchQuery] = useState("");
   const resolvedSettings = useMemo(() => {
@@ -218,7 +219,8 @@ export default function MultiModelSelector({ settings, onClose }: MultiModelSele
     "div",
     {
       style: {
-        width: "320px",
+        width,
+        boxSizing: "border-box",
         maxHeight: "400px",
         background: "var(--orca-color-bg-1)",
         borderRadius: "8px",
@@ -421,6 +423,7 @@ export function MultiModelToggleButton({
   settings: AiChatSettings;
 }) {
   const multiModelSnap = useSnapshot(multiModelStore);
+  const [menuLayout, setMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 320, alignment: "left" });
 
   const { ContextMenu } = orca.components || {};
 
@@ -429,13 +432,14 @@ export function MultiModelToggleButton({
     {
       defaultPlacement: "top",
       placement: "vertical",
-      alignment: "left",
+      alignment: menuLayout.alignment,
       allowBeyondContainer: true,
       offset: 8,
       menu: (close: () => void) =>
         createElement(MultiModelSelector, {
           settings,
           onClose: close,
+          width: menuLayout.width,
         }),
     },
     (openMenu: (e: any) => void) =>
@@ -447,6 +451,7 @@ export function MultiModelToggleButton({
           "button",
           {
             onClick: (e: any) => {
+              setMenuLayout(measureMenu(e.currentTarget, "left", 240, 320));
               if (!multiModelSnap.enabled) {
                 toggleMultiModelMode();
               }

@@ -22,6 +22,8 @@ const React = window.React as unknown as {
 };
 const { createElement, useState, useEffect, useRef, useCallback, Fragment } = React;
 
+const CLEAR_ALL = "__clear_all__";
+
 const { Button } = orca.components;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,6 +36,7 @@ const panelStyle: React.CSSProperties = {
   right: 0,
   marginTop: 4,
   width: 300,
+  maxWidth: "calc(100vw - 16px)",
   maxHeight: 480,
   background: "var(--orca-color-bg-1)",
   backdropFilter: "blur(10px)",
@@ -222,6 +225,19 @@ export default function ChatHistoryMenu({
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameCancelledRef = useRef(false);
+  // 删除二次确认：待确认的会话 id，或 CLEAR_ALL 表示「清空」
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) setPendingDelete(null);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => setPendingDelete(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -231,9 +247,17 @@ export default function ChatHistoryMenu({
         setRenamingId(null);
       }
     };
+    // Escape while renaming is handled by the rename input (cancel only)
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !renamingId) setIsOpen(false);
+    };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isOpen]);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen, renamingId]);
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -250,16 +274,23 @@ export default function ChatHistoryMenu({
 
   const handleDelete = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    if (pendingDelete !== sessionId) {
+      setPendingDelete(sessionId);
+      return;
+    }
+    setPendingDelete(null);
     onDeleteSession(sessionId);
-  }, [onDeleteSession]);
+  }, [pendingDelete, onDeleteSession]);
 
   const handleTogglePin = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    setPendingDelete(null);
     onTogglePin?.(sessionId);
   }, [onTogglePin]);
 
   const handleToggleFavorite = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    setPendingDelete(null);
     onToggleFavorite?.(sessionId);
   }, [onToggleFavorite]);
 
@@ -271,11 +302,14 @@ export default function ChatHistoryMenu({
 
   const handleStartRename = useCallback((e: React.MouseEvent, session: SavedSession) => {
     e.stopPropagation();
+    setPendingDelete(null);
+    renameCancelledRef.current = false;
     setRenamingId(session.id);
     setRenameValue(getDisplayTitle(session));
   }, []);
 
   const handleFinishRename = useCallback(() => {
+    if (renameCancelledRef.current) return;
     if (renamingId && renameValue.trim()) {
       onRename?.(renamingId, renameValue.trim());
     }
@@ -284,9 +318,10 @@ export default function ChatHistoryMenu({
   }, [renamingId, renameValue, onRename]);
 
   const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") {
       handleFinishRename();
     } else if (e.key === "Escape") {
+      renameCancelledRef.current = true;
       setRenamingId(null);
       setRenameValue("");
     }
@@ -294,9 +329,14 @@ export default function ChatHistoryMenu({
 
   const handleClearAll = useCallback(() => {
     if (sessions.length === 0) return;
+    if (pendingDelete !== CLEAR_ALL) {
+      setPendingDelete(CLEAR_ALL);
+      return;
+    }
+    setPendingDelete(null);
     onClearAll();
     setIsOpen(false);
-  }, [sessions.length, onClearAll]);
+  }, [sessions.length, pendingDelete, onClearAll]);
 
   const handleNewSession = useCallback(() => {
     onNewSession();
@@ -323,6 +363,10 @@ export default function ChatHistoryMenu({
   const nonFavoritedSessions = showFavoritesOnly
     ? sessions.filter((s) => s.favorited && !s.pinned)
     : sessions.filter((s) => !s.pinned && !s.favorited);
+
+  // 「清空」实际删除的是全部未收藏对话（含置顶），数量按这个算
+  const clearableSessions = sessions.filter((s) => !s.favorited);
+  const clearablePinnedCount = clearableSessions.filter((s) => s.pinned).length;
 
   const groupByTime = (list: SavedSession[]) => {
     const today: SavedSession[] = [];
@@ -475,7 +519,25 @@ export default function ChatHistoryMenu({
                 })
               )
             ),
-          withTooltip(
+          pendingDelete === session.id
+            ? createElement(
+                "button",
+                {
+                  style: {
+                    ...actionButtonStyle,
+                    width: "auto",
+                    padding: "0 6px",
+                    opacity: 1,
+                    fontSize: 11,
+                    whiteSpace: "nowrap",
+                    color: "var(--orca-color-text-inverse)",
+                    background: "var(--orca-color-danger, #dc3545)",
+                  },
+                  onClick: (e: any) => handleDelete(e, session.id),
+                },
+                "确认删除？"
+              )
+            : withTooltip(
             "删除",
             createElement(
               "button",
@@ -536,7 +598,10 @@ export default function ChatHistoryMenu({
               createElement(
                 "button",
                 {
-                  onClick: () => setShowFavoritesOnly(!showFavoritesOnly),
+                  onClick: () => {
+                    setPendingDelete(null);
+                    setShowFavoritesOnly(!showFavoritesOnly);
+                  },
                   style: {
                     ...newButtonStyle,
                     background: showFavoritesOnly ? "var(--orca-color-warning)" : "var(--orca-color-bg-3)",
@@ -638,7 +703,7 @@ export default function ChatHistoryMenu({
                 ),
               )
         ),
-        nonFavoritedSessions.length > 0 &&
+        !showFavoritesOnly && clearableSessions.length > 0 &&
           createElement(
             "div",
             { style: footerStyle },
@@ -646,19 +711,29 @@ export default function ChatHistoryMenu({
               "button",
               {
                 onClick: handleClearAll,
-                style: clearButtonStyle,
+                style: pendingDelete === CLEAR_ALL
+                  ? {
+                      ...clearButtonStyle,
+                      background: "var(--orca-color-danger, #dc3545)",
+                      color: "var(--orca-color-text-inverse)",
+                      borderColor: "var(--orca-color-danger, #dc3545)",
+                    }
+                  : clearButtonStyle,
                 onMouseOver: (e: any) => {
                   e.currentTarget.style.background = "var(--orca-color-danger, #dc3545)";
                   e.currentTarget.style.color = "var(--orca-color-text-inverse)";
                   e.currentTarget.style.borderColor = "var(--orca-color-danger, #dc3545)";
                 },
                 onMouseOut: (e: any) => {
+                  if (pendingDelete === CLEAR_ALL) return;
                   e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--orca-color-text-2)";
                   e.currentTarget.style.borderColor = "var(--orca-color-border)";
                 },
               },
-              `清空非收藏对话 (${nonFavoritedSessions.length})`
+              pendingDelete === CLEAR_ALL
+                ? `确认清空 ${clearableSessions.length} 条对话${clearablePinnedCount ? `（含 ${clearablePinnedCount} 条置顶）` : ""}？`
+                : `清空非收藏对话 (${clearableSessions.length})`
             )
           )
       )
