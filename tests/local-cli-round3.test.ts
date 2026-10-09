@@ -129,3 +129,18 @@ test("R4 面板逐块 trim 累加时模式行仍单独成段，中止残留也�
     n.restore();
   }
 });
+
+test("R5 模式行后首块是纯空白时，等可见正文再分段（中止前也不粘连）", async () => {
+  const m = mockBridge([[{ type: "session", id: "s", mode: "safe", model: "sonnet" }, { type: "text", delta: "\n" }, { type: "text", delta: "好的" }]]);
+  try {
+    let shown = "";
+    try {
+      for await (const c of streamLocalCli({ ...base, localCli: ctx("r5") }, [{ role: "user", content: "问" }] as any[])) {
+        if (c.type === "content") shown = (shown + c.content).trim();
+      }
+    } catch {}
+    assert(/安全模式\n\n好的$/.test(shown), JSON.stringify(shown));
+  } finally {
+    m.restore();
+  }
+});

@@ -268,8 +268,11 @@ export async function* streamLocalCli(
       if (chunk.type === "content") {
         content += chunk.content;
         // 面板对累加内容 trim，模式行后单独发的 "\n\n" 会被吃掉：流式时给第一段正文补上分段（最终 content 不重复）
-        if (bannerShown && !textAfterBanner) chunk = { ...chunk, content: `\n\n${chunk.content}` };
-        textAfterBanner = true;
+        // 纯空白块会被 trim 掉，等第一段可见正文再补分段
+        if (bannerShown && !textAfterBanner && chunk.content.trim()) {
+          chunk = { ...chunk, content: `\n\n${chunk.content}` };
+          textAfterBanner = true;
+        }
       }
       if (chunk.type === "reasoning") reasoning += chunk.reasoning;
       yield chunk;

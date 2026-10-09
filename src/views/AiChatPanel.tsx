@@ -1933,7 +1933,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // ─────────────────────────────────────────────────────────────────────────
       // Agentic RAG 模式：AI 自主规划检索策略，多轮迭代
       // ─────────────────────────────────────────────────────────────────────────
-      if (isAgenticRAGEnabled() && includeTools && !hasHighPriorityContext) {
+      // 本机 AI 自己检索（经 Orca MCP），不走插件的 Agentic RAG
+      if (isAgenticRAGEnabled() && includeTools && !hasHighPriorityContext && getModelApiConfig(settings, model).protocol !== "local-cli") {
         const ragConfig = getAgenticRAGConfig();
         const assistantId = nowId();
         const assistantCreatedAt = Date.now();
