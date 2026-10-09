@@ -1735,6 +1735,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             ? buildLocalCliContext(currentSession.id, {
                 contextText,
                 instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix, memoryText }),
+                workDir: currentSession.workDir,
                 isCurrent: req.isCurrent,
               })
             : undefined,
@@ -2645,6 +2646,11 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     }
   }, [pluginNameForUi]);
 
+  // 本机 AI 工作文件夹：写进当前会话，随会话自动保存
+  const handleWorkDirChange = useCallback((workDir: string | undefined) => {
+    setCurrentSession((prev) => ({ ...prev, workDir }));
+  }, []);
+
   // 兼容旧的 handleModelChange（用于 ChatInput）
   const handleModelChange = useCallback((nextModel: string) => {
     setCurrentSession((prev) => ({ ...prev, model: nextModel }));
@@ -3257,6 +3263,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       selectedModel,
       onModelSelect: handleModelSelect,
       onUpdateSettings: handleUpdateSettings,
+      workDir: currentSession.workDir,
+      onWorkDirChange: handleWorkDirChange,
       currency: settingsForUi.currency,
     }),
     // Skill Manager Modal

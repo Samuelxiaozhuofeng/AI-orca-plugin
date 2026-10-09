@@ -37,7 +37,8 @@ const SAFE_ARGS = [
   "--permission-prompt-tool", "stdio",
 ];
 // 完全放开：只由启动参数 --full-access 或 config.json 决定，请求体改不了（实测 init 报 permissionMode=bypassPermissions）
-const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", "default", "--strict-mcp-config"];
+// --setting-sources user：不加载所选文件夹里的项目级 Claude 设置（含 hooks），免得换个文件夹就不经确认跑别人的钩子
+const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", "default", "--strict-mcp-config", "--setting-sources", "user"];
 
 const expandHome = (p) => path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
 
@@ -199,11 +200,28 @@ function writeControl(child, requestId, response) {
   if (child.stdin.writable) child.stdin.write(JSON.stringify(msg) + "\n");
 }
 
+/** 请求体里的 workDir：缺省/空 → 默认 cwd；否则必须是已存在的绝对路径文件夹（返回 realpath），不合法返回 null。绝不建目录 */
+function resolveWorkDir(raw) {
+  if (raw == null || raw === "") return cwd;
+  if (typeof raw !== "string") return null;
+  const p = raw.trim();
+  if (!p) return cwd;
+  if (p.length > 4096 || p.includes("\0")) return null;
+  // 先判绝对路径再展开：expandHome 内部 path.resolve 会把相对路径补成绝对路径
+  if (!path.isAbsolute(p) && !/^~(?=$|\/)/.test(p)) return null;
+  try {
+    const real = fs.realpathSync(expandHome(p));
+    return fs.statSync(real).isDirectory() ? real : null;
+  } catch { return null; }
+}
+
 function handleChat(req, res, body) {
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt.trim()) return sendJson(res, 400, { error: "prompt 为空" });
   const model = body.model == null || body.model === "" ? "claude" : body.model;
   if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
+  const workDir = resolveWorkDir(body.workDir);
+  if (workDir === null) return sendJson(res, 400, { error: `文件夹 ${String(body.workDir)} 不存在或不是文件夹` });
 
   const args = [...BASE_ARGS, ...addDirArgs];
   let mcpDir = null;
@@ -231,7 +249,7 @@ function handleChat(req, res, body) {
     res.end();
   };
 
-  const child = spawn(CLAUDE_BIN, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(CLAUDE_BIN, args, { cwd: workDir, stdio: ["pipe", "pipe", "pipe"] });
   children.add(child);
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
@@ -283,7 +301,7 @@ function handleChat(req, res, body) {
         child.kill("SIGTERM");
         return;
       }
-      send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model });
+      send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model, cwd: workDir });
     } else if (m.type === "stream_event" && !m.parent_tool_use_id) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
       if (delta?.type === "text_delta") send({ type: "text", delta: delta.text });

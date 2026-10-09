@@ -31,6 +31,8 @@ export interface LocalCliContext {
   /** 用户的记忆、技能、本条消息的格式要求；放在 prompt 最前面 */
   instructions?: string;
   orcaMcp?: { url: string; token: string };
+  /** 本对话选的工作文件夹；空 = 中转默认文件夹 */
+  workDir?: string;
   confirm: LocalCliConfirm;
 }
 
@@ -46,6 +48,8 @@ export interface LocalCliStreamOptions {
 
 /** 已弹过完全放开提醒的插件对话 id（仅内存） */
 const fullAccessWarned = new Set<string>();
+/** 已提示过「中转是旧版、选的文件夹没生效」的插件对话 id（仅内存） */
+const staleBridgeWarned = new Set<string>();
 
 class BridgeError extends Error {}
 
@@ -84,14 +88,21 @@ function lastUserIndex(list: Array<{ role: string }>): number {
 }
 
 /** 回复正文开头的模式行（单独成段）；压缩历史时按 BANNER_RE 剥掉 */
-// 不依赖换行：面板累加时会 trim，模式行后面的换行可能被吃掉
-const BANNER_RE = /^本机 AI · 模型 [^\n]*? · (?:安全模式|⚠ 完全放开模式)\s*/;
+// 不依赖换行：面板累加时会 trim，模式行后面的换行可能被吃掉；文件夹段用「」包住以便定界（旧格式没有文件夹段）
+export const BANNER_RE = /^本机 AI · 模型 [^\n]*? · (?:安全模式|⚠ 完全放开模式)(?: · 文件夹「[^」\n]*」)?\s*/;
 
-/** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示 */
+/** 家目录前缀缩成 ~（渲染进程拿不到 homedir，按 macOS/Linux 的常见布局猜） */
+// ponytail: 只认 /Users/<名> 与 /home/<名>，家目录在别处时显示完整路径
+export function shortenHome(p: string): string {
+  return p.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, "~");
+}
+
+/** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示；带 cwd 才加文件夹段 */
 export function sessionBanner(ev: any): string | null {
   if (ev?.mode !== "safe" && ev?.mode !== "full") return null;
   const model = ev.model ? String(ev.model) : "claude";
-  return `本机 AI · 模型 ${model} · ${ev.mode === "full" ? "⚠ 完全放开模式" : "安全模式"}\n\n`;
+  const folder = typeof ev.cwd === "string" && ev.cwd ? ` · 文件夹「${shortenHome(ev.cwd)}」` : "";
+  return `本机 AI · 模型 ${model} · ${ev.mode === "full" ? "⚠ 完全放开模式" : "安全模式"}${folder}\n\n`;
 }
 
 /** 个人设定 + 可见历史（调用方已排除 localOnly）压成文字 + 用户上下文 + 最新一条用户消息；助手回复开头的模式行剥掉 */
@@ -250,9 +261,14 @@ export async function* streamLocalCli(
 
   try {
     let done = false;
-    const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions), model: options.model, orcaMcp: ctx.orcaMcp };
+    const workDir = ctx.workDir?.trim();
+    const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions), model: options.model, orcaMcp: ctx.orcaMcp, ...(workDir ? { workDir } : {}) };
     for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
       if (ev.type === "session") {
+        if (workDir && !ev.cwd && !staleBridgeWarned.has(ctx.conversationId)) {
+          staleBridgeWarned.add(ctx.conversationId);
+          orca.notify("warn", "中转程序是旧版，选的文件夹没生效，AI 仍在默认文件夹里运行；请退出中转后重新打开 Orca");
+        }
         const banner = bannerShown ? null : sessionBanner(ev);
         if (banner) {
           bannerShown = true;

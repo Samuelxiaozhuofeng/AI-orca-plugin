@@ -399,7 +399,7 @@ try {
 
   await check("V3 session 事件带 mode 与实际 model", async () => {
     const r = await chat({ prompt: "hi" });
-    assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default" });
+    assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default", cwd: path.join(tmp, "work") });
   });
   await check("H8 config.json 不存在 → 安全模式、不生成文件、工作目录 ~/OrcaAgent", async () => {
     const home = path.join(tmp, "fakehome-h8");
@@ -483,6 +483,47 @@ try {
     const cfg = path.join(tmp, "cfg-bad.json");
     fs.writeFileSync(cfg, JSON.stringify({ fullAccess: "yes" }));
     await assert.rejects(startBridge("cfgbad", [], { ORCA_BRIDGE_CONFIG: cfg }), /格式不对/);
+  });
+
+  await check("W1 选文件夹：不存在/是文件/相对路径/含 \\0/非字符串 → 400 不启动不建目录；合法目录 → cwd 为 realpath、session 带 cwd、--add-dir 照旧", async () => {
+    const before = readLog("args.log");
+    const missing = path.join(tmp, "no-such-dir");
+    const file = path.join(tmp, "a-file.txt");
+    fs.writeFileSync(file, "x");
+    for (const workDir of [missing, file, "relative/dir", "~nobody/x", `${tmp}\0x`, 5, "x".repeat(5000)]) {
+      const res = await fetch(`${base}/chat`, { method: "POST", headers: auth, body: JSON.stringify({ prompt: "hi", workDir }) });
+      assert.equal(res.status, 400, String(workDir).slice(0, 50));
+      if (typeof workDir === "string" && workDir.length < 100) assert.equal((await res.json()).error, `文件夹 ${workDir} 不存在或不是文件夹`);
+    }
+    assert.equal(readLog("args.log"), before, "非法 workDir 不应启动 claude");
+    assert.ok(!fs.existsSync(missing), "不应建目录");
+    const target = path.join(tmp, "picked");
+    fs.mkdirSync(target);
+    const link = path.join(tmp, "picked-link");
+    fs.symlinkSync(target, link);
+    const r = await chat({ prompt: "hi", workDir: `  ${link}  ` });
+    assert.equal(r.events[0].cwd, fs.realpathSync(target));
+    assert.equal(readLog("cwd.log").trim().split("\n").pop(), fs.realpathSync(target));
+    const r2 = await chat({ prompt: "hi", workDir: "" });
+    assert.equal(r2.events[0].cwd, path.join(tmp, "work"));
+    const home = path.join(tmp, "fakehome-w1");
+    fs.mkdirSync(path.join(home, "proj"), { recursive: true });
+    const cfg = path.join(tmp, "cfg-w1.json");
+    fs.writeFileSync(cfg, JSON.stringify({ fullAccess: true, dirs: ["~/main", "~/extra"] }));
+    const b = await startBridge("w1", [], { ORCA_BRIDGE_CONFIG: cfg, HOME: home }, false);
+    others.push(b.proc);
+    const r3 = await chat({ prompt: "hi", workDir: "~/proj" }, undefined, b.base);
+    assert.equal(r3.events[0].cwd, fs.realpathSync(path.join(home, "proj")));
+    assert.equal(r3.events[0].mode, "full");
+    const a = lastArgs();
+    assert.equal(a[a.indexOf("--add-dir") + 1], path.join(home, "extra"));
+    assert.equal(a[a.indexOf("--setting-sources") + 1], "user");
+    assert.equal(a[a.indexOf("--permission-mode") + 1], "bypassPermissions");
+  });
+
+  await check("W2 安全模式不带 --setting-sources", async () => {
+    await chat({ prompt: "hi" });
+    assert.ok(!lastArgs().includes("--setting-sources"));
   });
 } finally {
   bridge.kill();

@@ -148,6 +148,8 @@ export type SessionFileData = {
   id: string;
   title: string;
   model?: string;
+  /** 本机 AI 的工作文件夹；没有 = 中转默认文件夹 */
+  workDir?: string;
   messages: Message[];
   contexts: ContextRef[];
   createdAt: number;
@@ -164,6 +166,8 @@ export type SavedSession = {
   id: string;
   title: string;
   model?: string;
+  /** 本机 AI 的工作文件夹；没有 = 中转默认文件夹 */
+  workDir?: string;
   messages: Message[];
   contexts: ContextRef[];
   createdAt: number;
@@ -721,6 +725,7 @@ export async function loadFullSession(sessionId: string): Promise<SavedSession |
     id: fileData.id,
     title: fileData.title,
     model: fileData.model,
+    workDir: fileData.workDir,
     messages: fileData.messages,
     contexts: fileData.contexts,
     createdAt: fileData.createdAt,
@@ -749,6 +754,7 @@ export async function saveSession(session: SavedSession): Promise<void> {
     id: session.id,
     title: session.title || generateSessionTitle(filteredMessages),
     model: session.model,
+    workDir: session.workDir,
     messages: filteredMessages,
     contexts: session.contexts,
     createdAt: session.createdAt,
@@ -1002,6 +1008,7 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     id: session.id,
     title: title || "",
     model: session.model,
+    workDir: session.workDir,
     messages: filteredMessages,
     contexts: session.contexts,
     createdAt: session.createdAt,

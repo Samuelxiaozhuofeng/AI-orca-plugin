@@ -19,6 +19,7 @@ import "./local-cli-instructions.test";
 import "./chat-request-owner.test";
 import "./pending-save.test";
 import "./session-select-race.test";
+import "./workdir.test";
 import { run } from "./test-harness";
 
 await run();

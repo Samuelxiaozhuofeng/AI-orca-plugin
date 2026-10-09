@@ -5,6 +5,7 @@
 
 import type { DbId } from "../orca.d.ts";
 import type { AiChatSettings, CurrencyType } from "../settings/ai-chat-settings";
+import { getModelApiConfig } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
 import { buildContextForSend } from "../services/notes/context-builder";
 import { contextStore, contextKey, addBlockById, clearHighPriorityContexts } from "../store/context-store";
@@ -19,7 +20,7 @@ import {
 } from "../services/file-service";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
-import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton } from "./chat-input";
+import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton, WorkDirButton } from "./chat-input";
 import { loadFromStorage } from "../store/chat-mode-store";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
 import { MultiModelToggleButton } from "../components/MultiModelSelector";
@@ -136,6 +137,9 @@ type Props = {
   onUpdateSettings: (settings: AiChatSettings) => void;
   /** 币种设置 */
   currency?: CurrencyType;
+  /** 当前对话选的本机 AI 工作文件夹（空 = 默认文件夹） */
+  workDir?: string;
+  onWorkDirChange: (workDir: string | undefined) => void;
 };
 
 // Enhanced Styles
@@ -147,6 +151,7 @@ const inputContainerStyle: React.CSSProperties = {
 
 const TOOLBAR_HIDE_BREAKPOINTS = {
   token: 520,
+  workDir: 300,
   rag: 440,
   web: 400,
   multi: 360,
@@ -227,6 +232,8 @@ export default function ChatInput({
   onModelSelect,
   onUpdateSettings,
   currency = "USD",
+  workDir,
+  onWorkDirChange,
 }: Props) {
   const [text, setText] = useState("");
   const [overflowMenuLayout, setOverflowMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 360, alignment: "right" });
@@ -334,17 +341,21 @@ export default function ChatInput({
     return { inputTokens, outputTokens, cost };
   }, [text, selectedModelInfo]);
 
+  const isLocalCli = useMemo(() => getModelApiConfig(settings, selectedModel).protocol === "local-cli", [settings, selectedModel]);
+
   const overflowFlags = useMemo(() => {
     const width = toolbarWidth || 9999;
+    const hideWorkDir = isLocalCli && width < TOOLBAR_HIDE_BREAKPOINTS.workDir;
     const hideRag = width < TOOLBAR_HIDE_BREAKPOINTS.rag;
     const hideWeb = width < TOOLBAR_HIDE_BREAKPOINTS.web;
     const hideMulti = width < TOOLBAR_HIDE_BREAKPOINTS.multi;
     const hideInjection = width < TOOLBAR_HIDE_BREAKPOINTS.injection;
     const hideMode = width < TOOLBAR_HIDE_BREAKPOINTS.mode;
     const hideClear = width < TOOLBAR_HIDE_BREAKPOINTS.clear;
-    const hasOverflow = hideRag || hideWeb || hideMulti || hideInjection || hideMode || hideClear;
+    const hasOverflow = hideRag || hideWeb || hideMulti || hideInjection || hideMode || hideClear || hideWorkDir;
 
     return {
+      hideWorkDir,
       hideRag,
       hideWeb,
       hideMulti,
@@ -353,7 +364,7 @@ export default function ChatInput({
       hideClear,
       hasOverflow,
     };
-  }, [toolbarWidth]);
+  }, [toolbarWidth, isLocalCli]);
 
   const showModeSection = overflowFlags.hideMulti || overflowFlags.hideInjection || overflowFlags.hideMode;
   const showToolSection = overflowFlags.hideWeb || overflowFlags.hideRag;
@@ -1663,6 +1674,7 @@ export default function ChatInput({
             onSelect: onModelSelect,
             onUpdateSettings,
           }),
+          isLocalCli && !overflowFlags.hideWorkDir && createElement(WorkDirButton, { workDir, onChange: onWorkDirChange }),
           !overflowFlags.hideClear && withTooltip(
             clearContextPending ? "\u64a4\u9500\u6e05\u9664\u4e0a\u4e0b\u6587" : "\u6e05\u9664\u4e0a\u4e0b\u6587\uff08\u5f00\u59cb\u65b0\u5bf9\u8bdd\uff09",
             createElement(
@@ -1773,6 +1785,12 @@ export default function ChatInput({
                     },
                     createElement("span", { style: overflowItemLabelStyle }, clearContextPending ? "\u64a4\u9500\u6e05\u9664\u4e0a\u4e0b\u6587" : "\u6e05\u9664\u4e0a\u4e0b\u6587"),
                     createElement("i", { className: "ti ti-refresh", style: { fontSize: "14px" } })
+                  ),
+                  overflowFlags.hideWorkDir && createElement(
+                    "div",
+                    { style: overflowItemStyle },
+                    createElement("span", { style: overflowItemLabelStyle }, "工作文件夹"),
+                    createElement(WorkDirButton, { workDir, onChange: onWorkDirChange })
                   ),
                   showModeSection && createElement("div", { style: overflowSectionTitleStyle }, "\u6a21\u5f0f"),
                   overflowFlags.hideMulti && createElement(
