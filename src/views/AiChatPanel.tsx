@@ -706,6 +706,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     if (!session || seq !== switchSeqRef.current) return;
     // 等待期间输入框可用，这时发出的请求属于离开的对话，作废掉免得回复写进目标对话
     abandonCurrentRequest();
+    // 等待期间对离开的对话做的修改（如换文件夹）也补存，免得被下面的整体替换取消
+    void pendingSave.flush();
 
     setCurrentSession({
       ...session,

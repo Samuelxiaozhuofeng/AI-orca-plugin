@@ -19,6 +19,8 @@ function resolveClaudeBin(bin) {
   }
   return null;
 }
+// 子进程 PATH 只留绝对目录：否则 claude 的 #!/usr/bin/env node 等会按所选文件夹找到里面的同名程序
+const SAFE_ENV = { ...process.env, PATH: (process.env.PATH || "").split(path.delimiter).filter((d) => path.isAbsolute(d)).join(path.delimiter) };
 const CLAUDE_NAME = process.env.ORCA_BRIDGE_CLAUDE || "claude";
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
@@ -261,7 +263,7 @@ function handleChat(req, res, body) {
     res.end();
   };
 
-  const child = spawn(claudeBin, args, { cwd: workDir, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(claudeBin, args, { cwd: workDir, env: SAFE_ENV, stdio: ["pipe", "pipe", "pipe"] });
   children.add(child);
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
