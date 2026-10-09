@@ -19,6 +19,18 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 const log = (name, s) => fs.appendFileSync(${JSON.stringify(tmp)} + "/" + name, s + "\\n");
 const argv = process.argv.slice(2);
+if (argv.includes(JSON.stringify({ disableAllHooks: true }))) {
+  // 中转启动时查模型列表：ORCA_FAKE_MODELS=ok 回列表、junk 回乱码、其他不回
+  log("models.log", JSON.stringify({ pid: process.pid, argv, cwd: process.cwd() }));
+  const mode = process.env.ORCA_FAKE_MODELS;
+  process.stdin.on("data", (d) => {
+    if (!String(d).includes('"initialize"')) return;
+    if (mode === "ok") fs.writeSync(1, JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: "models", response: { models: [{ value: "default", displayName: "Default" }, { value: "opus", displayName: "Opus 9" }, { value: "claude-new-1", displayName: "New 1" }, { value: "opus" }, { value: "bad name" }] } } }) + "\\n");
+    if (mode === "junk") fs.writeSync(1, "not json\\n" + JSON.stringify({ type: "control_response", response: { subtype: "success", response: { models: "x" } } }) + "\\n");
+  });
+  process.stdin.on("end", () => process.exit(0));
+  setInterval(() => {}, 1000);
+} else {
 log("args.log", JSON.stringify(argv));
 log("cwd.log", process.cwd());
 const modelAt = argv.indexOf("--model");
@@ -103,6 +115,7 @@ function start(p) {
   if (p.includes("crash")) { process.stderr.write("boom"); process.exit(2); }
   if (p.includes("perm")) return out({ type: "control_request", request_id: "r1", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "touch x" }, permission_suggestions: [{ type: "addRules" }] } });
   finishOk();
+}
 }
 `, { mode: 0o755 });
 
@@ -775,6 +788,36 @@ try {
       assert.ok(!r.events.some((e) => e.type === "images"));
     }
   });
+  await check("M1 启动后查到本机模型列表：/models 保留 claude、加上新模型并带显示名，查询子进程不跑钩子并被结束", async () => {
+    const b = await startBridge("m1", [], { ORCA_FAKE_MODELS: "ok" });
+    others.push(b.proc);
+    let data;
+    for (let i = 0; i < 50; i++) {
+      data = (await (await fetch(`${b.base}/models`, { headers: auth })).json()).data;
+      if (data.length !== 5 || data[1].id !== "fable") break;
+      await sleep(100);
+    }
+    assert.deepEqual(data, [{ id: "claude", object: "model" }, { id: "opus", object: "model", label: "Opus 9" }, { id: "claude-new-1", object: "model", label: "New 1" }]);
+    const q = JSON.parse(readLog("models.log").trim().split("\n").pop());
+    assert.ok(q.argv.includes("--setting-sources") && q.argv[q.argv.indexOf("--setting-sources") + 1] === "");
+    assert.ok(q.argv.includes("--strict-mcp-config"));
+    assert.equal(q.cwd, fs.realpathSync(path.join(tmp, "work")));
+    await sleep(300);
+    assert.ok(!alive(q.pid), "查询子进程应已结束");
+  });
+  for (const [name, mode] of [["M2 回乱码", "junk"], ["M3 不回", "none"]]) {
+    await check(`${name}：/models 退回写死列表，查询子进程被结束，日志记原因`, async () => {
+      const b = await startBridge(name.slice(0, 2), [], { ORCA_FAKE_MODELS: mode, ORCA_BRIDGE_MODEL_QUERY_MS: "500" });
+      others.push(b.proc);
+      await sleep(300);
+      const q = JSON.parse(readLog("models.log").trim().split("\n").pop());
+      await sleep(700);
+      const data = (await (await fetch(`${b.base}/models`, { headers: auth })).json()).data;
+      assert.deepEqual(data.map((m) => m.id), ["claude", "fable", "opus", "sonnet", "haiku"]);
+      assert.ok(!alive(q.pid), "查询子进程应已结束");
+      assert.match(b.out, /查询模型列表失败（(超时|返回格式不对)）/);
+    });
+  }
 } finally {
   bridge.kill();
   for (const p of others) p.kill("SIGKILL");
