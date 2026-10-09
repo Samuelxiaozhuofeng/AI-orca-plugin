@@ -29,7 +29,7 @@ import { loadToolSettings, toolStore, toggleWebSearch, toggleAgenticRAG } from "
 import { getAllCommandsInfo } from "../services/commands-loader";
 import { listSkills } from "../services/ai/skills-manager";
 import type { SkillRef } from "../types/skills";
-import { measureMenuWidth } from "./chat-input/chat-input-styles";
+import { measureMenu } from "./chat-input/chat-input-styles";
 import { recommendSkills, type SkillRecommendation, getSkillSummary } from "../services/ai/skill-recommender";
 
 const React = window.React as unknown as {
@@ -229,7 +229,7 @@ export default function ChatInput({
   currency = "USD",
 }: Props) {
   const [text, setText] = useState("");
-  const [overflowMenuWidth, setOverflowMenuWidth] = useState(360);
+  const [overflowMenuLayout, setOverflowMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 360, alignment: "right" });
   const [pickerOpen, setPickerOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
@@ -1754,13 +1754,13 @@ export default function ChatInput({
             {
               defaultPlacement: "top",
               placement: "vertical",
-              alignment: "right",
+              alignment: overflowMenuLayout.alignment,
               allowBeyondContainer: true,
               offset: 8,
               menu: (close: () => void) =>
                 createElement(
                   "div",
-                  { style: { ...overflowMenuStyle, minWidth: Math.min(240, overflowMenuWidth), maxWidth: overflowMenuWidth } },
+                  { style: { ...overflowMenuStyle, minWidth: Math.min(240, overflowMenuLayout.width), maxWidth: overflowMenuLayout.width } },
                   overflowFlags.hideClear && createElement("div", { style: overflowSectionTitleStyle }, "\u5feb\u6377\u64cd\u4f5c"),
                   overflowFlags.hideClear && createElement(
                     "div",
@@ -1846,7 +1846,7 @@ export default function ChatInput({
                   {
                     variant: "plain",
                     onClick: (e: any) => {
-                      setOverflowMenuWidth(measureMenuWidth(e.currentTarget, "right", 160, 360));
+                      setOverflowMenuLayout(measureMenu(e.currentTarget, "right", 160, 360));
                       openMenu(e);
                     },
                     style: { padding: "4px" },

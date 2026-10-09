@@ -5,7 +5,7 @@
 
 import type { AiChatSettings } from "../../settings/ai-chat-settings";
 import { getSelectedProvider, getSelectedModel } from "../../settings/ai-chat-settings";
-import { modelButtonStyle, modelLabelStyle, measureMenuWidth } from "./chat-input-styles";
+import { modelButtonStyle, modelLabelStyle, measureMenu } from "./chat-input-styles";
 import ModelSelectorMenu from "./ModelSelectorMenu";
 import { withTooltip } from "../../utils/orca-tooltip";
 
@@ -29,7 +29,7 @@ export default function ModelSelectorButton({
   onSelect,
   onUpdateSettings,
 }: Props) {
-  const [menuWidth, setMenuWidth] = useState(360);
+  const [menuLayout, setMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 360, alignment: "left" });
   const displayInfo = useMemo(() => {
     const provider = getSelectedProvider(settings);
     const model = getSelectedModel(settings);
@@ -46,7 +46,7 @@ export default function ModelSelectorButton({
     {
       defaultPlacement: "top",
       placement: "vertical",
-      alignment: "left",
+      alignment: menuLayout.alignment,
       allowBeyondContainer: true,
       offset: 8,
       menu: (close: () => void) =>
@@ -57,7 +57,7 @@ export default function ModelSelectorButton({
           onSelect,
           onUpdateSettings,
           close,
-          width: menuWidth,
+          width: menuLayout.width,
         }),
     },
     (openMenu: (e: any) => void) =>
@@ -68,7 +68,7 @@ export default function ModelSelectorButton({
           {
             variant: "plain",
             onClick: (e: any) => {
-              setMenuWidth(measureMenuWidth(e.currentTarget, "left", 240, 420));
+              setMenuLayout(measureMenu(e.currentTarget, "left", 240, 420));
               openMenu(e);
             },
             style: {

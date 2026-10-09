@@ -9,7 +9,7 @@ import { getAiChatSettings, normalizeApiProtocol } from "../settings/ai-chat-set
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { multiModelStore, toggleModelSelection, clearModelSelection, toggleMultiModelMode, getModelKey } from "../store/multi-model-store";
 import { withTooltip } from "../utils/orca-tooltip";
-import { measureMenuWidth } from "../views/chat-input/chat-input-styles";
+import { measureMenu } from "../views/chat-input/chat-input-styles";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -423,7 +423,7 @@ export function MultiModelToggleButton({
   settings: AiChatSettings;
 }) {
   const multiModelSnap = useSnapshot(multiModelStore);
-  const [menuWidth, setMenuWidth] = useState(320);
+  const [menuLayout, setMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 320, alignment: "left" });
 
   const { ContextMenu } = orca.components || {};
 
@@ -432,14 +432,14 @@ export function MultiModelToggleButton({
     {
       defaultPlacement: "top",
       placement: "vertical",
-      alignment: "left",
+      alignment: menuLayout.alignment,
       allowBeyondContainer: true,
       offset: 8,
       menu: (close: () => void) =>
         createElement(MultiModelSelector, {
           settings,
           onClose: close,
-          width: menuWidth,
+          width: menuLayout.width,
         }),
     },
     (openMenu: (e: any) => void) =>
@@ -451,7 +451,7 @@ export function MultiModelToggleButton({
           "button",
           {
             onClick: (e: any) => {
-              setMenuWidth(measureMenuWidth(e.currentTarget, "left", 240, 320));
+              setMenuLayout(measureMenu(e.currentTarget, "left", 240, 320));
               if (!multiModelSnap.enabled) {
                 toggleMultiModelMode();
               }

@@ -138,20 +138,24 @@ export const addModelHintStyle = {
 };
 
 /**
- * Measure horizontal space available for a toolbar popup inside the clipping panel.
- * align "left": menu grows rightwards from the anchor's left edge; "right": grows leftwards.
+ * Measure where a toolbar popup fits inside the clipping panel.
+ * Popups are portaled to the panel, so the boundary is searched from outside any open popup
+ * (a menu opened from inside another menu is measured against the panel, not the outer menu).
+ * Prefers `prefer` side; flips to the other side when it has more room and `prefer` can't fit `min`.
+ * alignment "left" = grows rightwards from the anchor's left edge; "right" = grows leftwards.
  */
-export function measureMenuWidth(
+export function measureMenu(
   anchor: Element | null | undefined,
-  align: "left" | "right",
+  prefer: "left" | "right",
   min: number,
   max: number,
-): number {
-  if (!anchor) return Math.max(min, Math.min(360, max));
+): { width: number; alignment: "left" | "right" } {
+  if (!anchor) return { width: Math.max(min, Math.min(360, max)), alignment: prefer };
   const rect = anchor.getBoundingClientRect();
   let clipLeft = 0;
   let clipRight = window.innerWidth;
-  for (let el = anchor.parentElement; el; el = el.parentElement) {
+  const start = anchor.closest(".orca-popup")?.parentElement ?? anchor.parentElement;
+  for (let el = start; el; el = el.parentElement) {
     const cs = getComputedStyle(el);
     if (cs.overflow !== "visible" || cs.overflowX !== "visible") {
       const r = el.getBoundingClientRect();
@@ -160,7 +164,12 @@ export function measureMenuWidth(
       break;
     }
   }
-  const available = align === "left" ? clipRight - rect.left - 8 : rect.right - clipLeft - 8;
+  const space = {
+    left: clipRight - rect.left - 8,
+    right: rect.right - clipLeft - 8,
+  };
+  const other = prefer === "left" ? "right" : "left";
+  const alignment = space[prefer] >= min || space[prefer] >= space[other] ? prefer : other;
   // 可用宽度是硬上限（空间不足 min 时宁可窄也不越界）
-  return Math.max(0, Math.min(max, available));
+  return { width: Math.max(0, Math.min(max, space[alignment])), alignment };
 }
