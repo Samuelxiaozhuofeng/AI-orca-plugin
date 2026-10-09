@@ -27,10 +27,10 @@ src/views/
 - 发送：`Enter` 发送、`Shift+Enter` 换行（输入法组词时 Enter 不发送）。只有上下文没有文字时发送「请基于我提供的上下文回答。」；发送成功后清空文本和文件，并清掉拖入的高优先级上下文。
 - 输入框高度随内容增长，最高 360px；占位文字 `Ask AI...`（有待发送文件时为「描述文件或直接发送...」）。
 - `@`：在行首或空格 / 换行之后输入 `@` 打开 `ContextPicker`；工具栏也有 `Add Context (@)` 按钮。
-- 斜杠命令菜单：文本以 `/` 开头且没有空格时弹出，模糊匹配；内置 11 个格式 / 风格命令（`/table /timeline /compare /list /steps /brief /detail /summary /eli5 /formal /diagram`，分「格式 / 回答风格 / 可视化」）加上 `Commands/` 目录里的自定义命令（分类「命令」，来自 `getAllCommandsInfo()`）；支持上下键、Tab / Enter 选中、Esc 关闭，并记录最近使用的命令。
-- 文件：点回形针按钮选择（`isSupportedFile` 判断类型）、粘贴图片、拖入文件；上传由 `file-service.ts` 的 `uploadFile` 处理。视频文件可选「完整识别（画面+音频）」或「仅音频识别」（`videoMode`）。
+- 斜杠命令菜单：只有 `/clear`。文本以 `/` 开头、没有空格且是 `/clear` 的前缀时弹出；Tab / Enter 或点击把 `/clear ` 填入输入框，Esc 关闭。提交内容 trim 后恰好是 `/clear` 时调用 `onClearChat`（清空当前对话）并清空输入框，不调用 `onSend`。
+- 文件：点回形针按钮选择（`isSupportedFile` 判断类型）、粘贴图片、拖入文件；上传由 `file-service.ts` 的 `uploadFile` 处理。视频文件按完整识别（画面+音频）处理。
 - 拖入 Orca 块：识别 `orca/` 开头的拖拽数据或文本里的块 id，以 `addBlockById(id, 1)` 加为高优先级上下文，不插入文本。
-- Token 预估：输入框右下角显示 `~N`（`estimateTokens`），悬停提示预估输入 / 输出 token 与费用（按所选模型的价格和币种）。
+- Token 预估：输入框右下角显示 `~N`（`estimateTokens`），悬停提示预估输入 / 输出 token。
 - 本机 AI（`protocol === "local-cli"`）时：显示 `WorkDirButton`；若中转在完全放开模式下运行，显示红色「⚠ 完全放开」标签。工具栏过窄时工作文件夹按钮收进「更多操作」（`ti-dots`）菜单。
 - 生成中（`disabled`）时发送按钮变为停止按钮，调用 `onStop`。
 
@@ -41,7 +41,7 @@ src/views/
 ### ModelSelectorMenu
 
 - 顶部搜索框「搜索模型...」，按平台分组、可展开；已停用的平台不显示。
-- 点模型选中；可「设为默认」（写入全局默认平台 / 模型）；每个模型可编辑：显示名称、输入 / 输出价格、temperature、maxTokens、工具轮数（默认继承全局、不限制）、模型能力标签。
+- 点模型选中；可「设为默认」（写入全局默认平台 / 模型）；每个模型可编辑：显示名称、temperature、maxTokens、工具轮数（默认继承全局、不限制）、模型能力标签。
 - 平台配置面板：平台名称、API 地址、协议（OpenAI 兼容 / Anthropic 兼容 / 本机 AI（Claude Code），选后者时地址自动填 bridge 默认地址）、Anthropic 请求路径、API 密钥、模型列表；可从 API 「获取模型」、手动添加模型、删除平台（内置平台不可删）；底部「新建平台」。
 - 所有修改通过 `onUpdateSettings` 写回设置（见 `module-docs/03-settings.md`）。
 
@@ -58,6 +58,7 @@ src/views/
 ```typescript
 type Props = {
   onSend: (message: string, files?: FileRef[]) => void | Promise<void>;
+  onClearChat: () => void;            // 提交 /clear 时调用（等同 Clear Chat）
   onStop?: () => void;
   disabled?: boolean;                 // 生成中：显示停止按钮，不可发送
   currentPageId: DbId | null;
@@ -66,7 +67,6 @@ type Props = {
   selectedModel: string;              // 当前对话选的模型 id（可能与全局默认不同）
   onModelSelect: (providerId: string, modelId: string) => void;
   onUpdateSettings: (settings: AiChatSettings) => void;
-  currency?: CurrencyType;
   workDir?: string;                   // 本机 AI 工作文件夹，空 = bridge 默认文件夹
   onWorkDirChange: (workDir: string | undefined) => void;
   localCliFullAccess?: boolean;       // bridge 在完全放开模式

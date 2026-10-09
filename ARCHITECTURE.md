@@ -10,7 +10,7 @@
 - **MCP 工具** - 笔记和外部工具都经 MCP 服务器接入
 - **会话管理** - 自动保存、分支、收藏、置顶、重命名、导出 Markdown、保存到日记
 - **多文件支持** - 图片、视频、音频、PDF、Word、Excel、代码、数据文件
-- **斜杠命令** - 输入 `/` 选用 `Commands/` 目录里的提示词模板
+- **斜杠命令** - 只有 `/clear`，清空当前对话
 - **流式输出** - SSE 实时流式响应
 - **Markdown 增强** - 代码块、表格等
 
@@ -54,9 +54,7 @@ AI-orca-plugin/
 │   │   ├── session-service.ts     # 会话持久化
 │   │   ├── branch-service.ts      # 对话分支
 │   │   ├── export-service.ts      # 导出 Markdown / 保存到日记
-│   │   ├── file-service.ts        # 文件类型、上传、内容提取
-│   │   ├── commands-loader.ts     # 斜杠命令加载
-│   │   └── commands-defaults.ts   # 默认命令模板
+│   │   └── file-service.ts        # 文件类型、上传、内容提取
 │   ├── store/                     # Valtio 状态：context / session / ui / tool / mcp / display-settings
 │   ├── settings/ai-chat-settings.ts # 设置 schema、平台与模型配置
 │   ├── utils/                     # Markdown 渲染、token 估算（含 tokenizer/）、面板树、延迟保存等
@@ -79,8 +77,7 @@ AI-orca-plugin/
 2. 若设置里有本机 AI 平台，非阻塞地探测并按需拉起中转（`autostartLocalCli`）
 3. 注册 UI（面板、侧边工具、右键菜单）和块渲染器
 4. 注册命令 `openAiChatPanel`，默认快捷键 macOS `meta+shift+k`、其他系统 `ctrl+shift+k`（已被占用则不分配）
-5. 初始化 `Commands/` 目录的默认模板
-6. 读取 MCP 设置，补上默认 MCP 服务器，非阻塞地连接各服务器
+5. 读取 MCP 设置，补上默认 MCP 服务器，非阻塞地连接各服务器
 
 `unload`：清掉快捷键、命令、UI 和渲染器注册。
 
@@ -152,7 +149,7 @@ AI-orca-plugin/
 
 ### 斜杠命令
 
-`commands-loader.ts` 从插件目录 `Commands/<name>.md` 读取命令；文件被删会用 `commands-defaults.ts` 里的默认模板（`orcanote`、`debug`、`review`、`refactor`）重建，用户改过的不会被覆盖。输入框输入 `/` 弹出命令菜单；`AiChatPanel.tsx` 另有一组内置的回答格式指令（如 `/brief`、`/table`、`/summary`）。
+只有 `/clear`：输入框输入 `/` 弹出只含 `/clear` 的菜单；提交内容恰好是 `/clear` 时清空当前对话（与 Clear Chat 同一处理函数），不发给 AI。
 
 ---
 
@@ -165,12 +162,11 @@ AI-orca-plugin/
 | 当前平台 / 模型 | `openai` / `gpt-4o-mini` |
 | `temperature` | 0.7 |
 | `maxTokens` | 4096 |
-| `currency` | `USD`（可选 USD / CNY / EUR / JPY） |
 | `maxHistoryMessages` | 0（不限制，改用动态压缩） |
 | `maxToolResultChars` | 8000（0 = 不限制） |
 | `maxContextChars` | 60000 |
 
-平台（`AiProvider`）含 `apiUrl`、`apiKey`、`protocol`、`models`、`enabled`；模型（`ProviderModel`）可单独覆盖温度、最大输出、`maxToolRounds`、`contextLength`，并可标注能力（vision / web / reasoning / tools / rerank / embedding）。显示设置（字号、紧凑模式、时间戳）在 `store/display-settings-store.ts`。
+平台（`AiProvider`）含 `apiUrl`、`apiKey`、`protocol`、`models`、`enabled`；模型（`ProviderModel`）可单独覆盖温度、最大输出、`maxToolRounds`、`contextLength`，并可标注能力（vision / reasoning / tools）。显示设置（字号、紧凑模式、时间戳）在 `store/display-settings-store.ts`。
 
 ---
 

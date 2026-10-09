@@ -19,7 +19,7 @@
 
 - `providers: AiProvider[]`：平台列表。每个平台有 `id`、`name`、`apiUrl`、`apiKey`、`protocol`（`openai` / `anthropic` / `local-cli`，默认 `openai`）、`anthropicApiPath`（可选，留空则自动拼 `/v1/messages` 并回退 `/messages`）、`models`、`enabled`、`isBuiltin`。
 - 内置平台：OpenAI（`https://api.openai.com/v1`，gpt-4o、gpt-4o-mini、o1、o1-mini）、DeepSeek（`https://api.deepseek.com/v1`，deepseek-chat、deepseek-reasoner）；内置平台不可删除。
-- `ProviderModel`：`id`、`label`、`inputPrice` / `outputPrice`（$/M tokens）、`capabilities`（视觉 / 联网 / 推理 / 工具 / 重排 / 嵌入）、`temperature`、`maxTokens`、`maxToolRounds` + `maxToolRoundsOverride`、`currency`、`contextLength`。
+- `ProviderModel`：`id`、`label`、`capabilities`（视觉 / 推理 / 工具）、`temperature`、`maxTokens`、`maxToolRounds` + `maxToolRoundsOverride`、`contextLength`。
 - 全局默认（模型没设时使用）：
 
 | 字段 | 默认值 | 说明 |
@@ -27,12 +27,11 @@
 | `selectedProviderId` / `selectedModelId` | `openai` / `gpt-4o-mini` | 默认选中的平台与模型 |
 | `temperature` | `0.7` | 限制在 0–2 |
 | `maxTokens` | `4096` | 至少 1 |
-| `currency` | `USD` | `USD` / `CNY` / `EUR` / `JPY` |
 | `maxHistoryMessages` | `0` | 最大历史消息数，0 = 不限制（靠上下文压缩） |
 | `maxToolResultChars` | `8000` | 工具结果最大字符数，0 = 不限制 |
 | `maxContextChars` | `60000` | 上下文最大字符数，下限 5000 |
 
-后三项和 `currency` 目前没有界面入口，只能用默认值（或改存储）。
+后三项目前没有界面入口，只能用默认值（或改存储）。
 - 工具轮数：`getModelRuntimeConfig` 只有当模型 `maxToolRoundsOverride === true` 时才用该模型的 `maxToolRounds`，否则为 0（不限制）；数值范围 0–100。
 
 ## 存储
