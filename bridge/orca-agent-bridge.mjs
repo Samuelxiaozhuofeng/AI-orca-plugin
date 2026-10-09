@@ -249,8 +249,9 @@ function readProjectRules(dir) {
   let fd;
   try {
     // 符号链接只认指向文件夹内的（别人的仓库可能把 CLAUDE.md 链到 ~/.ssh 之类）；O_NONBLOCK + fstat：读前被换成 FIFO 也不卡住中转
-    const real = fs.realpathSync(path.join(dir, "CLAUDE.md"));
-    if (!real.startsWith(dir + path.sep)) return null;
+    const root = fs.realpathSync(dir); // 默认工作目录没转真实路径（如 /tmp → /private/tmp），不转会误判成文件夹外
+    const real = fs.realpathSync(path.join(root, "CLAUDE.md"));
+    if (!real.startsWith(root + path.sep)) return null;
     fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     const st = fs.fstatSync(fd);
     if (!st.isFile()) return null;

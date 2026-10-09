@@ -649,6 +649,12 @@ try {
     assert.ok(lastArgs().includes("--settings"), "安全模式也要排除全局 CLAUDE.md");
   });
   await check("W2b 所选文件夹有 CLAUDE.md → 正文交给 AI；没有就不带", async () => {
+    // 默认工作目录（tmp 在 macOS 是 /var → /private/var 的链接路径）不传 workDir 也要读到
+    assert.notEqual(fs.realpathSync(tmp), tmp, "此项需要 tmp 是符号链接路径");
+    fs.writeFileSync(path.join(tmp, "work", "CLAUDE.md"), "默认目录规则");
+    await chat({ prompt: "hi" });
+    fs.rmSync(path.join(tmp, "work", "CLAUDE.md"));
+    assert.ok((lastArgs()[lastArgs().indexOf("--append-system-prompt") + 1] || "").includes("默认目录规则"));
     const d = fs.mkdtempSync(path.join(tmp, "rules-"));
     await chat({ prompt: "hi", workDir: d });
     assert.ok(!lastArgs().includes("--append-system-prompt"));
