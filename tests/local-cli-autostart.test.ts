@@ -1,4 +1,4 @@
-import { test, assertEqual, assertDeepEqual } from "./test-harness";
+import { test, assert, assertEqual, assertDeepEqual } from "./test-harness";
 import { autostartLocalCli, BRIDGE_APP_PATH } from "../src/services/ai/local-cli-autostart";
 
 // 插件加载时探测 / 拉起本机 AI 中转：orca 与 fetch 打桩，只记调用
@@ -18,7 +18,7 @@ function stub(okAfter: number) {
 
 const local = { id: "l", name: "本机", apiUrl: "http://127.0.0.1:18673/", apiKey: "t", protocol: "local-cli", models: [], enabled: true } as any;
 const openai = { ...local, id: "o", protocol: "openai" };
-const fast = { intervalMs: 1, maxMs: 10 };
+const fast = { intervalMs: 1, maxMs: 30 };
 
 test("autostart：没有 local-cli 平台 → 不探测、不拉起", async () => {
   const s = stub(Infinity);
@@ -34,7 +34,7 @@ test("autostart：一直连不上 → 只 shell-open 一次，重试到上限后
   try {
     assertEqual(await autostartLocalCli([openai, local], fast), false);
     assertDeepEqual(s.calls.open, [["shell-open", BRIDGE_APP_PATH]]);
-    assertEqual(s.calls.fetch, 1 + 10);
+    assert(s.calls.fetch >= 2, `只探测了 ${s.calls.fetch} 次`);
   } finally { s.restore(); }
 });
 
@@ -53,4 +53,29 @@ test("autostart：一开始就通 → 不拉起", async () => {
     assertEqual(await autostartLocalCli([local], fast), true);
     assertEqual(s.calls.open.length, 0);
   } finally { s.restore(); }
+});
+
+test("H6 probe 一直挂住（连上不回包）→ 每次按超时中止，总用时不超过截止时间", async () => {
+  const calls = { fetch: 0, open: 0 };
+  const origFetch = globalThis.fetch;
+  const origOrca = (globalThis as any).orca;
+  // 不回包，只在被中止时失败
+  globalThis.fetch = ((_url: any, init?: any) => {
+    calls.fetch++;
+    return new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    });
+  }) as typeof fetch;
+  (globalThis as any).orca = { invokeBackend: async () => { calls.open++; } };
+  const t0 = Date.now();
+  try {
+    assertEqual(await autostartLocalCli([local], { intervalMs: 20, maxMs: 300, probeMs: 100 }), false);
+    const ms = Date.now() - t0;
+    assert(ms < 450, `用时 ${ms}ms，超过截止时间`);
+    assertEqual(calls.open, 1, "首次 probe 挂住也应超时后去拉起");
+    assert(calls.fetch >= 2, `只探测了 ${calls.fetch} 次`);
+  } finally {
+    globalThis.fetch = origFetch;
+    (globalThis as any).orca = origOrca;
+  }
 });

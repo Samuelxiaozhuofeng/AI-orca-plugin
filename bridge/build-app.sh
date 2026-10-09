@@ -23,13 +23,20 @@ SH
 cat >> "$WORK/launch.sh" <<'SH'
 EXTRA="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.volta/bin:$HOME/.bun/bin:$HOME/.claude/local"
 for d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$d" ] && EXTRA="$EXTRA:$d"; done
-export PATH="$EXTRA:$(dirname "$NODE"):${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+# 本 App 用的 node 所在目录放最前，claude 等脚本的 #!/usr/bin/env node 才会用到同一个 node
+export PATH="$(dirname "$NODE"):$EXTRA:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
 HOME_DIR="${ORCA_BRIDGE_HOME:-$HOME/.orca-agent-bridge}"
 PORT="${ORCA_BRIDGE_PORT:-18673}"
 # 已在监听就不再起第二个
 /usr/bin/nc -z 127.0.0.1 "$PORT" 2>/dev/null && exit 0
 umask 077
 mkdir -p "$HOME_DIR"
+# 首次运行写默认配置：完全放开 + ~/OrcaAgent（umask 077 → 0600）；已有就不动。bridge 自己没有配置时按安全模式
+CONFIG="${ORCA_BRIDGE_CONFIG:-$HOME_DIR/config.json}"
+if [ ! -e "$CONFIG" ]; then
+  mkdir -p "$(dirname "$CONFIG")"
+  (set -C; printf '{\n  "fullAccess": true,\n  "dirs": ["~/OrcaAgent"]\n}\n' > "$CONFIG") 2>/dev/null || true
+fi
 LOG="$HOME_DIR/bridge.log"
 touch "$LOG" && chmod 600 "$LOG"
 # 前台运行，App 一直陪着 bridge；bridge 被 pkill 或端口被占退出时不弹错误框

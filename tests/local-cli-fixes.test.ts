@@ -1,7 +1,6 @@
 import { test, assert, assertEqual } from "./test-harness";
 import {
   buildLocalCliPrompt,
-  finishLocalCliRound,
   streamLocalCli,
   LOCAL_CLI_ABORT_NOTE,
   type LocalCliContext,
@@ -47,13 +46,11 @@ const msgs = [
   { role: "assistant", content: "第一答" },
   { role: "user", content: "第二问" },
 ] as any[];
-const H1 = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "u2", role: "user" }];
-const H2 = [...H1, { id: "a2", role: "assistant" }, { id: "u3", role: "user" }];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const never = () => new Promise<void>(() => {});
 
 function ctx(conversationId: string, extra: Partial<LocalCliContext> = {}): LocalCliContext {
-  return { conversationId, history: H1, confirm: async () => false, ...extra };
+  return { conversationId, confirm: async () => false, ...extra };
 }
 
 async function collect(gen: AsyncGenerator<any>) {
@@ -155,20 +152,13 @@ test("F5 /permission 网络失败 → 明确报错并终止本次生成", async 
   }
 });
 
-// F6 续接指纹已按第二轮 G2 改为「本轮结束后的全部可见消息 id 序列」，检查见 local-cli-round2.test.ts
-
-test("F9 用户上下文每轮都拼进 prompt（含续接），插件 system 说明不带", async () => {
-  assert(buildLocalCliPrompt(msgs, true, "笔记甲").includes("笔记甲"), "续接时应带上下文");
-  const m = mockBridge([
-    [{ type: "session", id: "s-f9" }, { type: "done" }],
-    [{ type: "done" }],
-  ]);
+test("F9 用户上下文每轮都拼进 prompt，插件 system 说明不带", async () => {
+  assert(buildLocalCliPrompt(msgs, "笔记甲").includes("笔记甲"), "应带上下文");
+  const m = mockBridge([[{ type: "done" }], [{ type: "done" }]]);
   try {
     await collect(streamLocalCli({ ...base, localCli: ctx("f9", { contextText: "笔记甲正文" }) }, msgs));
-    finishLocalCliRound("f9", H2.slice(0, 4));
-    await collect(streamLocalCli({ ...base, localCli: ctx("f9", { history: H2, contextText: "笔记乙正文" }) }, msgs));
+    await collect(streamLocalCli({ ...base, localCli: ctx("f9", { contextText: "笔记乙正文" }) }, msgs));
     assert(m.calls[0].body.prompt.includes("笔记甲正文"), "首轮应带上下文");
-    assertEqual(m.calls[1].body.sessionId, "s-f9");
     assert(m.calls[1].body.prompt.includes("笔记乙正文") && m.calls[1].body.prompt.endsWith("第二问"), m.calls[1].body.prompt);
     assert(!m.calls[0].body.prompt.includes("插件工具说明"), "不应带插件 system 说明");
   } finally {

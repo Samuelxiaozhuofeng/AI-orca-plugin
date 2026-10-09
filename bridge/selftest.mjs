@@ -1,6 +1,7 @@
-// bridge 自检：用假 claude 子进程验证令牌 401、同会话 409、断开杀子进程、心跳、权限回包、
+// bridge 自检：用假 claude 子进程验证令牌 401、断开杀子进程、心跳、权限回包、
 // 跨块汉字、断开后权限作废、exit 早于 stdout 读完、启动输出无令牌、/models、MCP 令牌不进环境变量；
-// 第二轮：退出/中止删临时目录、启动清扫、result 即释放、exit 后强制结束、受管配置警告、完全放开模式、选模型。
+// 第二轮：退出/中止删临时目录、启动清扫、exit 后强制结束、受管配置警告、完全放开模式、选模型；
+// 第三轮：不续接、旧命名残留清扫、配置权限、无配置安全模式、App 的 launch.sh 写默认配置与 PATH 顺序。
 // 运行：node bridge/selftest.mjs（不需要真 claude，不碰 ~/.orca-agent-bridge）
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -62,11 +63,6 @@ function start(p) {
     const code = "setTimeout(() => process.stdout.write(" + JSON.stringify(late.map((m) => JSON.stringify(m) + "\\n").join("")) + "), 300)";
     spawn(process.execPath, ["-e", code], { stdio: ["ignore", "inherit", "inherit"] });
     return process.exit(0);
-  }
-  if (p.includes("slowexit")) {
-    // 正常给出 result，但 1.5 秒后才退出
-    out({ type: "result", subtype: "success", is_error: false });
-    return setTimeout(() => process.exit(0), 1500);
   }
   if (p.includes("linger")) {
     // 孙进程继承 stdout 且一直不写也不退出，自己不给 result 就退出：close 迟迟不来
@@ -186,25 +182,19 @@ try {
     assert.match(r.events.at(-1).message, /boom/);
   });
 
-  await check("同会话 409、心跳、断开杀子进程", async () => {
+  await check("心跳、断开杀子进程", async () => {
     fs.rmSync(path.join(tmp, "pid.log"), { force: true });
     const ac = new AbortController();
     let sawPing = false;
-    const first = chat({ prompt: "hang", sessionId: "S1", signal: ac.signal }, async (raw) => {
+    await chat({ prompt: "hang", signal: ac.signal }, async (raw) => {
       if (raw.includes(": ping")) { sawPing = true; return "stop"; }
     }).catch((e) => e);
-    await sleep(100);
-    const second = await chat({ prompt: "again", sessionId: "S1" });
-    assert.equal(second.status, 409);
-    await first;
     assert.ok(sawPing, "没收到心跳");
     const pid = Number(readLog("pid.log").trim());
     assert.ok(pid > 0);
     ac.abort();
     await sleep(500);
     assert.throws(() => process.kill(pid, 0), "子进程未被杀");
-    const third = await chat({ prompt: "hi", sessionId: "S1" });
-    assert.equal(third.status, 200, "断开后应可再次使用该会话");
   });
 
   await check("F1 跨块汉字：权限入参与允许回包都无乱码", async () => {
@@ -223,11 +213,11 @@ try {
     assert.ok(!JSON.stringify(resp).includes("\uFFFD"));
   });
 
-  await check("F4 断开后：会话立即释放、/permission 410 且不写 stdin", async () => {
+  await check("F4 断开后：/permission 410 且不写 stdin", async () => {
     fs.rmSync(path.join(tmp, "pid.log"), { force: true });
     const before = readLog("resp.log");
     const ac = new AbortController();
-    await chat({ prompt: "permhang", sessionId: "S2", signal: ac.signal }, async (raw) => (raw.includes('"permission"') ? "stop" : undefined));
+    await chat({ prompt: "permhang", signal: ac.signal }, async (raw) => (raw.includes('"permission"') ? "stop" : undefined));
     ac.abort();
     await sleep(200);
     const pid = Number(readLog("pid.log").trim());
@@ -238,8 +228,6 @@ try {
       assert.equal(p.status, 410);
       await sleep(200);
       assert.equal(readLog("resp.log"), before, "不应写 stdin");
-      const again = await chat({ prompt: "hi", sessionId: "S2" });
-      assert.equal(again.status, 200, "断开后应立即可再发");
     } finally {
       process.kill(pid, "SIGKILL");
     }
@@ -282,7 +270,7 @@ try {
   await check("G1 客户端中止：子进程还没退，临时目录已删", async () => {
     fs.rmSync(path.join(tmp, "pid.log"), { force: true });
     const ac = new AbortController();
-    await chat({ prompt: "permhang", sessionId: "S4", signal: ac.signal, orcaMcp: { url: "http://127.0.0.1:9/mcp", token: "t" } }, async (raw) => (raw.includes('"permission"') ? "stop" : undefined));
+    await chat({ prompt: "permhang", signal: ac.signal, orcaMcp: { url: "http://127.0.0.1:9/mcp", token: "t" } }, async (raw) => (raw.includes('"permission"') ? "stop" : undefined));
     const dir = path.dirname(JSON.parse(readLog("mcp.log").trim().split("\n").pop()).file);
     ac.abort();
     await sleep(200);
@@ -315,25 +303,27 @@ try {
     assert.ok(!alive(pid), "子进程未被杀");
   });
 
-  await check("G1 启动清扫：删 pid 已不在的 orca-bridge-* 残留，不动在跑的", async () => {
+  await check("G1/H5 启动清扫：删 pid 已不在的残留与旧命名的过期残留，不动在跑的、新的、多文件的", async () => {
     const tmpdir = path.join(tmp, "tmp-sweep");
     const dead = spawn(process.execPath, ["-e", ""]);
     await new Promise((r) => dead.on("exit", r));
     const stale = path.join(tmpdir, `orca-bridge-${dead.pid}-abc`);
     const live = path.join(tmpdir, `orca-bridge-${process.pid}-def`);
     const unrelated = path.join(tmpdir, "orca-bridge-test-xyz");
-    for (const d of [stale, live, unrelated]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, "mcp.json"), "{}"); }
+    const legacyOld = path.join(tmpdir, "orca-bridge-Ab12Cd");
+    const legacyNew = path.join(tmpdir, "orca-bridge-Ef34Gh");
+    const legacyMore = path.join(tmpdir, "orca-bridge-Ij56Kl");
+    for (const d of [stale, live, unrelated, legacyOld, legacyNew, legacyMore]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, "mcp.json"), "{}"); }
+    fs.writeFileSync(path.join(legacyMore, "other.txt"), "x");
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    for (const d of [legacyOld, legacyMore]) fs.utimesSync(d, old, old);
     const b = await startBridge("sweep");
     others.push(b.proc);
     assert.ok(!fs.existsSync(stale), "残留未清扫");
+    assert.ok(!fs.existsSync(legacyOld), "旧命名的过期残留未清扫");
     assert.ok(fs.existsSync(live) && fs.existsSync(unrelated), "误删了在跑的或无关目录");
-  });
-
-  await check("G4 正常结束后立刻再发同会话不 409（子进程还没退）", async () => {
-    const r = await chat({ prompt: "slowexit", sessionId: "S5" });
-    assert.equal(r.events.at(-1).type, "done");
-    const again = await chat({ prompt: "hi", sessionId: "S5" });
-    assert.equal(again.status, 200);
+    assert.ok(fs.existsSync(legacyNew), "误删了 10 分钟内的旧命名目录");
+    assert.ok(fs.existsSync(legacyMore), "误删了不止 mcp.json 的旧命名目录");
   });
 
   await check("G4 exit 后 3 秒仍未 close → 强制结束", async () => {
@@ -384,7 +374,7 @@ try {
     assert.equal(bad.events.at(-1).type, "error");
   });
 
-  await check("V2 选模型：非法 400 不启动、claude 不传 --model、opus 传、续接也带", async () => {
+  await check("V2/H1 选模型：非法 400 不启动、claude 不传 --model、opus 传；请求带 sessionId 也不 --resume", async () => {
     const before = readLog("args.log");
     for (const model of ["a b", "-x", "../x", 5, "x".repeat(101)]) {
       assert.equal((await chat({ prompt: "hi", model })).status, 400, String(model));
@@ -398,22 +388,70 @@ try {
     await chat({ prompt: "hi", model: "claude-sonnet-4-5[1m]", sessionId: "S6" });
     const a = lastArgs();
     assert.equal(a[a.indexOf("--model") + 1], "claude-sonnet-4-5[1m]");
-    assert.equal(a[a.indexOf("--resume") + 1], "S6");
+    assert.ok(!a.includes("--resume"), "不应续接");
+    const ac = new AbortController();
+    const hanging = chat({ prompt: "hang", sessionId: "S6", signal: ac.signal }).catch(() => null);
+    await sleep(100);
+    const c = await chat({ prompt: "hi", sessionId: "S6" });
+    ac.abort();
+    await hanging;
+    assert.equal(c.status, 200, "同一 sessionId 在跑时也不应 409");
   });
 
   await check("V3 session 事件带 mode 与实际 model", async () => {
     const r = await chat({ prompt: "hi" });
     assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default" });
   });
-  await check("C1 config.json 不存在 → 生成 0600、默认完全放开 + ~/OrcaAgent", async () => {
+  await check("H8 config.json 不存在 → 安全模式、不生成文件、工作目录 ~/OrcaAgent", async () => {
+    const home = path.join(tmp, "fakehome-h8");
     const cfg = path.join(tmp, "cfg-new", "config.json");
-    const b = await startBridge("cfgnew", [], { ORCA_BRIDGE_CONFIG: cfg });
+    const b = await startBridge("cfgnew", [], { ORCA_BRIDGE_CONFIG: cfg, HOME: home }, false);
     others.push(b.proc);
+    assert.ok(!fs.existsSync(cfg) && !fs.existsSync(path.dirname(cfg)), "不应生成配置");
+    assert.doesNotMatch(b.out, /完全放开模式/);
+    const r = await chat({ prompt: "hi" }, undefined, b.base);
+    assert.equal(r.events[0].mode, "safe");
+    assert.ok(lastArgs().includes("--restricted"));
+    assert.equal(readLog("cwd.log").trim().split("\n").pop(), fs.realpathSync(path.join(home, "OrcaAgent")));
+  });
+
+  await check("H7 config.json group/other 可写 → 拒绝启动并说明", async () => {
+    for (const mode of [0o664, 0o646]) {
+      const cfg = path.join(tmp, `cfg-perm-${mode.toString(8)}.json`);
+      fs.writeFileSync(cfg, JSON.stringify({ fullAccess: true, dirs: [] }));
+      fs.chmodSync(cfg, mode);
+      await assert.rejects(startBridge(`cfgperm${mode}`, [], { ORCA_BRIDGE_CONFIG: cfg }), /权限不安全/);
+    }
+  });
+
+  await check("H8/H9 App 的 launch.sh：无配置时写默认 0600、已有不覆盖；PATH 里 node 所在目录在最前", async () => {
+    const nodeDir = path.join(tmp, "fake-node-bin");
+    fs.mkdirSync(nodeDir, { recursive: true });
+    // 假 node：记下拿到的 PATH 就退出（不真起 bridge）
+    fs.writeFileSync(path.join(nodeDir, "node"), `#!/bin/bash\necho "$PATH" > ${JSON.stringify(path.join(tmp, "launch-path.log"))}\n`, { mode: 0o755 });
+    const appDir = path.join(tmp, "app-out");
+    const buildApp = fileURLToPath(new URL("./build-app.sh", import.meta.url));
+    const run = (cmd, args, env) => new Promise((resolve, reject) => {
+      const p = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      p.stdout.on("data", (d) => { out += d; });
+      p.stderr.on("data", (d) => { out += d; });
+      p.on("exit", (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} 退出码 ${code}：${out}`))));
+    });
+    await run("bash", [buildApp, "--out", appDir], { PATH: `${nodeDir}:${process.env.PATH}` });
+    const launch = path.join(appDir, "Orca Agent Bridge.app", "Contents", "Resources", "launch.sh");
+    const home = path.join(tmp, "launch-home");
+    const env = { HOME: home, ORCA_BRIDGE_HOME: path.join(home, ".orca-agent-bridge"), ORCA_BRIDGE_PORT: "1", PATH: "/usr/bin:/bin" };
+    await run("bash", [launch], env);
+    const cfg = path.join(home, ".orca-agent-bridge", "config.json");
     assert.equal((fs.statSync(cfg).mode & 0o777).toString(8), "600");
     assert.deepEqual(JSON.parse(fs.readFileSync(cfg, "utf8")), { fullAccess: true, dirs: ["~/OrcaAgent"] });
-    assert.match(b.out, /完全放开模式/);
-    const r = await chat({ prompt: "hi" }, undefined, b.base);
-    assert.equal(r.events[0].mode, "full");
+    const dirs = fs.readFileSync(path.join(tmp, "launch-path.log"), "utf8").trim().split(":");
+    assert.equal(dirs[0], nodeDir, `PATH 首位：${dirs[0]}`);
+    assert.equal(dirs[1], "/opt/homebrew/bin");
+    fs.writeFileSync(cfg, JSON.stringify({ fullAccess: false, dirs: [] }));
+    await run("bash", [launch], env);
+    assert.equal(JSON.parse(fs.readFileSync(cfg, "utf8")).fullAccess, false, "已有配置被覆盖");
   });
 
   await check("C2 config fullAccess:false + dirs（~ 展开）：安全模式，第一个作 cwd，其余 --add-dir", async () => {

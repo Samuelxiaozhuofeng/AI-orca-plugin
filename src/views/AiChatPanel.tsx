@@ -73,8 +73,8 @@ import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
-import { LOCAL_CLI_ABORT_NOTE, finishLocalCliRound } from "../services/ai/local-cli-client";
-import { createChatRequestOwner, settlePendingConfirms } from "../utils/chat-request-owner";
+import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
+import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -977,14 +977,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
     if (!content && (!files || files.length === 0)) return;
-    // 归属登记：换对话后，本次请求的界面写入一律丢弃，中止器生来即中止、不登记进 abortRef
-    const req = chatOwnerRef.current.begin();
-    const setMessages = req.guard(setMessagesUnguarded);
-    const setLastError = req.guard(setLastErrorUnguarded);
-    const setSending = req.guard(setSendingUnguarded);
-    const setStreamingMessageId = req.guard(setStreamingMessageIdUnguarded);
-    const setMultiModelResponses = req.guard(setMultiModelResponsesUnguarded);
-    const updateMessage = req.guard(updateMessageUnguarded);
     
     // ─────────────────────────────────────────────────────────────────────
     // Todoist 命令拦截（不发送给 AI，直接执行）
@@ -1025,9 +1017,20 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       enableTodoistTools = true;
     }
     
-    // 如果正在生成，先停止当前生成
+    // 归属登记（Todoist 命令不算发送）：作废并中止上一请求；被接替或换对话后，本次请求的界面写入一律丢弃，
+    // 中止器生来即中止、不登记进 abortRef
+    const req = chatOwnerRef.current.begin();
+    const setMessages = req.guard(setMessagesUnguarded);
+    const setLastError = req.guard(setLastErrorUnguarded);
+    const setSending = req.guard(setSendingUnguarded);
+    const setStreamingMessageId = req.guard(setStreamingMessageIdUnguarded);
+    const setMultiModelResponses = req.guard(setMultiModelResponsesUnguarded);
+    const updateMessage = req.guard(updateMessageUnguarded);
+
+    // 如果正在生成：上一请求已在 begin() 中止，它的收尾作废，由本次请求接管生成状态
     if (sending) {
-      if (abortRef.current) abortRef.current.abort();
+      setSending(false);
+      setStreamingMessageId(null);
       // 等待一小段时间让 abort 生效
       await new Promise(resolve => setTimeout(resolve, 100));
       if (!req.isCurrent()) return;
@@ -1423,6 +1426,10 @@ graph TD
 	        .replace(/生成闪卡/g, "")
 	        .trim();
 	      
+	      // 闪卡界面状态也只在仍是当前请求时写入
+	      const setPendingFlashcardsGuarded = req.guard(setPendingFlashcards);
+	      const setFlashcardModeGuarded = req.guard(setFlashcardMode);
+
 	      // 添加用户消息
 	      const userMsg: Message = { 
 	        id: nowId(), 
@@ -1543,15 +1550,15 @@ graph TD
 	        // 检查工具调用结果
 	        if (toolCallResult && toolCallResult.success && toolCallResult.cards) {
 	          // 工具调用成功，进入闪卡界面
-	          setPendingFlashcards(toolCallResult.cards);
-	          setFlashcardMode(true);
+	          setPendingFlashcardsGuarded(toolCallResult.cards);
+	          setFlashcardModeGuarded(true);
 	        } else if (textContent) {
 	          // 没有工具调用，尝试从文本解析（兼容不支持工具的模型）
 	          const { parseFlashcards } = await import("../services/flashcard-service");
 	          const cards = parseFlashcards(textContent);
 	          if (cards.length > 0) {
-	            setPendingFlashcards(cards);
-	            setFlashcardMode(true);
+	            setPendingFlashcardsGuarded(cards);
+	            setFlashcardModeGuarded(true);
 	          } else {
 	            // 显示 AI 的文本回复
 	            const assistantMsg: Message = {
@@ -1573,6 +1580,8 @@ graph TD
 	          setMessages((prev) => [...prev, assistantMsg]);
 	        }
 	      } catch (err: any) {
+	        // 中止或已被接替 / 换对话：不报错
+	        if (!shouldReportFailure(req.isCurrent, err)) return;
 	        const msg = String(err?.message ?? err ?? "生成闪卡失败");
 	        orca.notify("error", msg);
 	        const assistantMsg: Message = {
@@ -2072,7 +2081,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           timeoutMs: settings.streamTimeout,
           maxContextTokens: modelContextLength,
           localCli: apiConfig.protocol === "local-cli"
-            ? buildLocalCliContext(currentSession.id, { history: conversation, contextText, isCurrent: req.isCurrent })
+            ? buildLocalCliContext(currentSession.id, { contextText, isCurrent: req.isCurrent })
             : undefined,
         },
         apiMessages,
@@ -2763,10 +2772,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       });
     } finally {
       if (abortRef.current === aborter) abortRef.current = null;
-      // 本机 AI：记下本轮结束后的可见消息 id 序列，下次据此判断能否续接（setMessages 已校验归属）
-      if (getModelApiConfig(settings, model).protocol === "local-cli") {
-        setMessages((prev) => { finishLocalCliRound(currentSession.id, prev); return prev; });
-      }
       setSending(false);
       setStreamingMessageId(null);
       queueMicrotask(scrollToBottom);

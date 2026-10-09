@@ -41,12 +41,16 @@ const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--
 
 const expandHome = (p) => path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
 
-/** 读 config.json（0600）；不存在则生成默认：完全放开 + ~/OrcaAgent。格式不对直接报错退出，不猜 */
+/**
+ * 读 config.json；不存在按安全模式、不生成（默认配置由 App 的 launch.sh 首次写入）。
+ * 不归当前用户或 group/other 可写 → 拒绝启动（别人能改它就能把模式改成完全放开）。格式不对直接报错退出，不猜
+ */
 function loadConfig() {
   const file = process.env.ORCA_BRIDGE_CONFIG || path.join(BRIDGE_HOME, "config.json");
-  if (!fs.existsSync(file)) {
-    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, JSON.stringify({ fullAccess: true, dirs: ["~/OrcaAgent"] }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+  if (!fs.existsSync(file)) return { fullAccess: false, dirs: [] };
+  const st = fs.statSync(file);
+  if (st.uid !== process.getuid() || (st.mode & 0o022) !== 0) {
+    throw new Error(`${file} 权限不安全：须归当前用户所有且其他人不可写，请运行 chmod 600 ${JSON.stringify(file)} 后再启动`);
   }
   const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
   const dirs = cfg.dirs ?? [];
@@ -98,11 +102,11 @@ const addDirArgs = dirs.slice(1).flatMap((d) => ["--add-dir", d]);
 const { token, file: tokenFile, created } = loadToken();
 const expectedAuth = Buffer.from(`Bearer ${token}`);
 
-const running = new Map(); // claude sessionId -> child
 const children = new Set(); // 所有在跑的 claude 子进程（bridge 退出时一并杀掉）
 const mcpDirs = new Set(); // 所有临时 MCP 配置目录（内含令牌，结束即删）
 // 临时目录名带 bridge pid，启动时只清扫 pid 已不在的残留，不误删另一个在跑的 bridge 的
 const MCP_DIR_PREFIX = `orca-bridge-${process.pid}-`;
+const LEGACY_STALE_MS = 10 * 60 * 1000;
 
 function removeMcpDir(dir) {
   if (!dir || !mcpDirs.has(dir)) return;
@@ -110,12 +114,23 @@ function removeMcpDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+/** 旧版命名 orca-bridge-<随机>（不含 pid）：超过 10 分钟没动、目录里只有 mcp.json 才算残留 */
+function isLegacyLeftover(dir) {
+  try {
+    const st = fs.lstatSync(dir);
+    if (!st.isDirectory() || Date.now() - st.mtimeMs <= LEGACY_STALE_MS) return false;
+    const names = fs.readdirSync(dir);
+    return names.length === 1 && names[0] === "mcp.json";
+  } catch { return false; }
+}
+
 function sweepStaleMcpDirs() {
   const tmp = os.tmpdir();
   for (const name of fs.readdirSync(tmp)) {
     const m = /^orca-bridge-(\d+)-/.exec(name);
-    if (!m) continue;
-    try { process.kill(Number(m[1]), 0); continue; } catch (err) { if (err.code === "EPERM") continue; }
+    if (m) {
+      try { process.kill(Number(m[1]), 0); continue; } catch (err) { if (err.code === "EPERM") continue; }
+    } else if (!/^orca-bridge-[A-Za-z0-9]+$/.test(name) || !isLegacyLeftover(path.join(tmp, name))) continue;
     fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
   }
 }
@@ -186,8 +201,6 @@ function handleChat(req, res, body) {
   if (!prompt.trim()) return sendJson(res, 400, { error: "prompt 为空" });
   const model = body.model == null || body.model === "" ? "claude" : body.model;
   if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
-  const resume = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
-  if (resume && running.has(resume)) return sendJson(res, 409, { error: "该对话上一条还在进行" });
 
   const args = [...BASE_ARGS, ...addDirArgs];
   let mcpDir = null;
@@ -202,7 +215,6 @@ function handleChat(req, res, body) {
     args.push("--mcp-config", mcpFile);
   }
   if (model !== "claude") args.push("--model", model);
-  if (resume) args.push("--resume", resume);
 
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
@@ -221,20 +233,14 @@ function handleChat(req, res, body) {
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
-  const sessionIds = new Set();
-  if (resume) { sessionIds.add(resume); running.set(resume, child); }
   const toolNames = new Map();
   let stderrTail = "";
 
   child.stdin.on("error", () => {});
   child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
   child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-2000); });
-  const releaseSessions = () => {
-    for (const id of sessionIds) if (running.get(id) === child) running.delete(id);
-  };
   const cleanup = () => {
     for (const [id, p] of pending) if (p.child === child) pending.delete(id);
-    releaseSessions();
     children.delete(child);
     removeMcpDir(mcpDir);
   };
@@ -256,11 +262,10 @@ function handleChat(req, res, body) {
   child.on("close", (code, signal) => { exitStatus ??= code ?? signal; ended(); });
   res.on("close", () => {
     if (finished) return;
-    // 客户端断开：先标记终止、释放会话、撤销未决权限（之后的 /permission 一律 410、不写 stdin），再杀子进程
+    // 客户端断开：先标记终止、撤销未决权限（之后的 /permission 一律 410、不写 stdin），再杀子进程
     finished = true;
     clearInterval(heartbeat);
     child.orcaTerminated = true;
-    releaseSessions();
     removeMcpDir(mcpDir);
     child.kill("SIGTERM");
   });
@@ -275,7 +280,6 @@ function handleChat(req, res, body) {
         child.kill("SIGTERM");
         return;
       }
-      if (m.session_id) { sessionIds.add(m.session_id); running.set(m.session_id, child); }
       send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model });
     } else if (m.type === "stream_event" && !m.parent_tool_use_id) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
@@ -313,8 +317,6 @@ function handleChat(req, res, body) {
       } else {
         finish({ type: "done" });
       }
-      // 正常结束即释放会话，紧接着再发不会 409（子进程退出慢也不影响）
-      releaseSessions();
       child.stdin.end();
     }
   });

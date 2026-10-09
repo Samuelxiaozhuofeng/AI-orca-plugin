@@ -1,7 +1,6 @@
 import { test, assert, assertEqual, assertDeepEqual } from "./test-harness";
 import {
   buildLocalCliPrompt,
-  finishLocalCliRound,
   mapBridgeEvent,
   streamLocalCli,
   type LocalCliContext,
@@ -38,12 +37,8 @@ function mockBridge(rounds: Array<Array<any | (() => Promise<void>)>>, permissio
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-/** 第一轮 / 第二轮发出时的可见历史（id 序列） */
-const H1 = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "u2", role: "user" }];
-const H2 = [...H1, { id: "a2", role: "assistant" }, { id: "u3", role: "user" }];
-
-function ctx(conversationId: string, confirm?: LocalCliContext["confirm"], history = H1): LocalCliContext {
-  return { conversationId, history, confirm: confirm ?? (async () => false) };
+function ctx(conversationId: string, confirm?: LocalCliContext["confirm"]): LocalCliContext {
+  return { conversationId, confirm: confirm ?? (async () => false) };
 }
 
 const base = { apiUrl: "http://127.0.0.1:18673/", apiKey: "t" };
@@ -69,74 +64,42 @@ test("mapBridgeEvent：text/thinking/tool/tool_result 映射", () => {
   assertEqual(mapBridgeEvent({ type: "done" }), null);
 });
 
-test("buildLocalCliPrompt：无会话时带历史，续接时只发最新一条", () => {
-  assertEqual(buildLocalCliPrompt(msgs, true), "第二问");
-  const full = buildLocalCliPrompt(msgs, false);
+test("buildLocalCliPrompt：历史压成文字 + 最新一条", () => {
+  assertEqual(buildLocalCliPrompt(msgs.slice(0, 2)), "第一问");
+  const full = buildLocalCliPrompt(msgs);
   assert(full.includes("用户：第一问") && full.includes("助手：第一答") && full.endsWith("第二问"), full);
   assert(!full.includes("sys"), "不应包含系统提示");
 });
 
-test("local-cli：正常流 → content/done，无 tool_calls，记住会话", async () => {
-  const m = mockBridge([
-    [{ type: "session", id: "s-1" }, { type: "text", delta: "你好" }, { type: "done" }],
-    [{ type: "text", delta: "再见" }, { type: "done" }],
-  ]);
+test("local-cli：正常流 → content/done，无 tool_calls", async () => {
+  const m = mockBridge([[{ type: "session", id: "s-1" }, { type: "text", delta: "你好" }, { type: "done" }]]);
   try {
     const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-a") }, msgs));
-    finishLocalCliRound("conv-a", H2.slice(0, 4));
     assertDeepEqual(out[0], { type: "content", content: "你好" });
     const done = out[out.length - 1];
     assertEqual(done.type, "done");
     assertEqual(done.result.content, "你好");
     assertEqual(done.result.toolCalls.length, 0);
     assertEqual(m.calls[0].url, "http://127.0.0.1:18673/chat");
-    assertEqual(m.calls[0].body.sessionId, undefined);
-
-    await collect(streamLocalCli({ ...base, localCli: ctx("conv-a", undefined, H2) }, msgs));
-    assertEqual(m.calls[1].body.sessionId, "s-1");
-    assertEqual(m.calls[1].body.prompt, "第二问");
   } finally {
     m.restore();
   }
 });
 
-test("local-cli：已收到内容后失败不重试，直接报错", async () => {
+test("local-cli：已收到内容后出错 → 直接报错，不重发", async () => {
   const m = mockBridge([
-    [{ type: "session", id: "s-2" }, { type: "text", delta: "a" }, { type: "done" }],
     [{ type: "text", delta: "部分" }, { type: "error", message: "boom" }],
     [{ type: "text", delta: "不该到这" }, { type: "done" }],
   ]);
   try {
-    await collect(streamLocalCli({ ...base, localCli: ctx("conv-b") }, msgs));
-    finishLocalCliRound("conv-b", H2.slice(0, 4));
     let error: any = null;
     try {
-      await collect(streamLocalCli({ ...base, localCli: ctx("conv-b", undefined, H2) }, msgs));
+      await collect(streamLocalCli({ ...base, localCli: ctx("conv-b") }, msgs));
     } catch (err) {
       error = err;
     }
     assert(error && String(error.message).includes("boom"), "应报错");
-    assertEqual(m.calls.length, 2, "不应重试");
-  } finally {
-    m.restore();
-  }
-});
-
-test("local-cli：续接会话且尚无内容时失败 → 丢 sessionId 重试一次", async () => {
-  const m = mockBridge([
-    [{ type: "session", id: "s-3" }, { type: "done" }],
-    [{ type: "error", message: "resume 失败" }],
-    [{ type: "session", id: "s-4" }, { type: "text", delta: "ok" }, { type: "done" }],
-  ]);
-  try {
-    await collect(streamLocalCli({ ...base, localCli: ctx("conv-c") }, msgs));
-    finishLocalCliRound("conv-c", H2.slice(0, 4));
-    const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-c", undefined, H2) }, msgs));
-    assertEqual(m.calls.length, 3);
-    assertEqual(m.calls[1].body.sessionId, "s-3");
-    assertEqual(m.calls[2].body.sessionId, undefined);
-    assert(m.calls[2].body.prompt.includes("用户：第一问"), "重试应带压缩历史");
-    assertEqual(out[out.length - 1].result.content, "ok");
+    assertEqual(m.calls.length, 1, "不应重发");
   } finally {
     m.restore();
   }

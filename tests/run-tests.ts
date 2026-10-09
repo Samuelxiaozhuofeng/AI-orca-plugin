@@ -13,6 +13,7 @@ import "./mcp-tool-names.test";
 import "./local-cli-client.test";
 import "./local-cli-fixes.test";
 import "./local-cli-round2.test";
+import "./local-cli-round3.test";
 import "./local-cli-autostart.test";
 import "./chat-request-owner.test";
 import { run } from "./test-harness";
