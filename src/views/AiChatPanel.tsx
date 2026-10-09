@@ -654,6 +654,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   // 自动保存的防抖（1 秒）；离开对话前 flush，免得最后一条回复还没存就被取消
   const [pendingSave] = useState(() => createPendingSave(1000));
+  // 新建 / 切换对话的序号：切换中途等待时又点了别的，只认最后一次
+  const switchSeqRef = useRef(0);
 
   // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
   // 清掉生成状态和多模型面板；旧请求之后的界面写入一律丢弃
@@ -673,6 +675,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
+    switchSeqRef.current++;
     abandonCurrentRequest();
     // 立即补存离开的对话（快照此刻同步拍下；写入串行，先于新对话的保存落地）
     void pendingSave.flush();
@@ -704,6 +707,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
+    const seq = ++switchSeqRef.current;
     // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
     if (sessionId !== currentSession.id) {
       abandonCurrentRequest();
@@ -724,7 +728,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     // 加载完整会话数据（包含消息）
     const session = await loadFullSession(sessionId);
-    if (!session) return;
+    if (!session || seq !== switchSeqRef.current) return;
+    // 等待期间输入框可用，这时发出的请求属于离开的对话，作废掉免得回复写进目标对话
+    if (sessionId !== currentSession.id) abandonCurrentRequest();
 
     setCurrentSession({
       ...session,
