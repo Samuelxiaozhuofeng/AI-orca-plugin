@@ -132,9 +132,7 @@ const lastArgs = () => JSON.parse(readLog("args.log").trim().split("\n").pop());
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const others = [];
 const checkTools = (args) => {
-  const tools = args[args.indexOf("--tools") + 1].split(",");
-  assert.ok(tools.includes("Bash") && tools.includes("Task") && tools.includes("WebFetch"), "缺常用工具");
-  for (const t of ["SendMessage", "ListAgents", "CronCreate", "ScheduleWakeup"]) assert.ok(!tools.includes(t), t);
+  assert.equal(args[args.indexOf("--tools") + 1], "Task,Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Workflow,Write");
   assert.ok(args.includes("--chrome"), "--chrome");
 };
 const results = [];
