@@ -52,11 +52,6 @@ export const chatAnimations = `
     0%, 50% { opacity: 1; }
     51%, 100% { opacity: 0; }
 }
-@keyframes loadingDots {
-    0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
-    40% { transform: scale(1); opacity: 1; }
-}
-
 /* ─────────────────────────────────────────────────────────────────────────────
    Typing Indicator Animation (Bouncing Dots)
    Three dots with sequential bouncing pattern, 200ms delay between dots
@@ -247,36 +242,6 @@ export const chatAnimations = `
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Ripple Effect Animation (按钮涟漪效果)
-   Material Design inspired ripple animation
-   ─────────────────────────────────────────────────────────────────────────── */
-
-@keyframes ripple {
-    0% {
-        transform: scale(0);
-        opacity: 0.5;
-    }
-    100% {
-        transform: scale(4);
-        opacity: 0;
-    }
-}
-
-.ripple-container {
-    position: relative;
-    overflow: hidden;
-}
-
-.ripple-effect {
-    position: absolute;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.3;
-    pointer-events: none;
-    animation: ripple 0.6s ease-out forwards;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
    Send Button Animations (发送按钮动效)
    - Sending: rotation animation
    - Success: checkmark pop animation
@@ -306,42 +271,12 @@ export const chatAnimations = `
     }
 }
 
-@keyframes sendIconExit {
-    0% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-    }
-    100% {
-        transform: translateY(-10px) scale(0.5);
-        opacity: 0;
-    }
-}
-
-@keyframes sendIconEnter {
-    0% {
-        transform: translateY(10px) scale(0.5);
-        opacity: 0;
-    }
-    100% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-    }
-}
-
 .send-btn-sending {
     animation: sendPulse 1s ease-in-out infinite;
 }
 
 .send-btn-success {
     animation: sendSuccess 0.4s ease-out forwards;
-}
-
-.send-icon-exit {
-    animation: sendIconExit 0.2s ease-in forwards;
-}
-
-.send-icon-enter {
-    animation: sendIconEnter 0.2s ease-out forwards;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -365,17 +300,6 @@ export const chatAnimations = `
     }
 }
 
-@keyframes scrollBtnBounceOut {
-    0% {
-        transform: translateX(-50%) translateY(0) scale(1);
-        opacity: 1;
-    }
-    100% {
-        transform: translateX(-50%) translateY(20px) scale(0.8);
-        opacity: 0;
-    }
-}
-
 @keyframes scrollBtnFloat {
     0%, 100% {
         transform: translateX(-50%) translateY(0);
@@ -396,10 +320,6 @@ export const chatAnimations = `
 
 .scroll-btn-enter {
     animation: scrollBtnBounceIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-}
-
-.scroll-btn-exit {
-    animation: scrollBtnBounceOut 0.3s ease-in forwards;
 }
 
 .scroll-btn-float {
@@ -426,23 +346,8 @@ export const chatAnimations = `
     }
 }
 
-@keyframes actionBarSlideOut {
-    0% {
-        transform: translateY(0) scale(1);
-        opacity: 1;
-    }
-    100% {
-        transform: translateY(8px) scale(0.95);
-        opacity: 0;
-    }
-}
-
 .action-bar-enter {
     animation: actionBarSlideIn 0.2s ease-out forwards;
-}
-
-.action-bar-exit {
-    animation: actionBarSlideOut 0.15s ease-in forwards;
 }
 
 /* Action bar button hover effect */

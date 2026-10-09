@@ -111,17 +111,6 @@ export const cursorStyle: React.CSSProperties = {
   animation: "blink 1s step-end infinite",
 };
 
-export const toolCallStyle: React.CSSProperties = {
-  marginTop: 8,
-  padding: "10px 12px",
-  background: "var(--orca-color-bg-3)",
-  borderRadius: 6,
-  fontSize: "0.85em",
-  opacity: 0.9,
-  fontFamily: "var(--orca-fontfamily-code)",
-  borderLeft: "3px solid var(--orca-color-primary)",
-};
-
 export const loadingContainerStyle: React.CSSProperties = {
   width: "100%",
   display: "flex",
@@ -266,20 +255,6 @@ export const boldStyle: React.CSSProperties = {
   padding: "0 2px",
 };
 
-export const listStyle: React.CSSProperties = {
-  marginTop: "12px",
-  marginBottom: "12px",
-  paddingLeft: "24px",
-};
-
-export const listItemStyle: React.CSSProperties = {
-  marginTop: "6px",
-  // Gemini UX Review: Reduced line-height (1.6)
-  lineHeight: "1.6",
-  color: "inherit",
-  userSelect: "text", // Allow selection/copy of Markdown content
-};
-
 export const paragraphStyle: React.CSSProperties = {
   marginTop: "8px",
   marginBottom: "8px",
@@ -336,38 +311,6 @@ export const actionButtonStyle: React.CSSProperties = {
   borderRadius: "2px",
   display: "flex",
   alignItems: "center",
-};
-
-export const toolCardStyle: React.CSSProperties = {
-  marginTop: "8px",
-  border: "1px solid var(--orca-color-border)",
-  borderRadius: "var(--orca-radius-md)",
-  overflow: "hidden",
-  background: "var(--orca-color-bg-2)",
-  fontSize: "0.9em",
-};
-
-export const toolHeaderStyle: React.CSSProperties = {
-  padding: "8px 12px",
-  background: "var(--orca-color-bg-3)",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  userSelect: "none",
-  color: "var(--orca-color-text-1)",
-};
-
-export const toolBodyStyle: React.CSSProperties = {
-  padding: "12px",
-  borderTop: "1px solid var(--orca-color-border)",
-  fontFamily: "var(--orca-fontfamily-code)",
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-all",
-  maxHeight: "300px",
-  overflowY: "auto",
-  background: "var(--orca-color-bg-1)",
-  color: "var(--orca-color-text-1)",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -582,40 +525,3 @@ export const messageTimeStyle = (role: string): React.CSSProperties => ({
 // ─────────────────────────────────────────────────────────────────────────────
 // Design Token Constants
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Border radius tokens (matches CSS variables --orca-radius-*) */
-export const Radius = {
-  sm: "var(--orca-radius-sm)",     // 4px
-  md: "var(--orca-radius-md)",     // 8px
-  lg: "var(--orca-radius-lg)",     // 12px
-  xl: "var(--orca-radius-xl)",     // 16px
-  "2xl": "var(--orca-radius-2xl)", // 18px
-  full: "var(--orca-radius-full)", // 9999px
-} as const;
-
-/** Box shadow tokens (matches CSS variables --orca-shadow-*) */
-export const Shadow = {
-  xs: "var(--orca-shadow-xs)",
-  sm: "var(--orca-shadow-sm)",
-  md: "var(--orca-shadow-md)",
-  lg: "var(--orca-shadow-lg)",
-  xl: "var(--orca-shadow-xl)",
-  primaryGlow: "var(--orca-shadow-primary-glow)",
-} as const;
-
-/** Spacing tokens (matches CSS variables --orca-space-*) */
-export const Space = {
-  1: "var(--orca-space-1)",  // 4px
-  2: "var(--orca-space-2)",  // 8px
-  3: "var(--orca-space-3)",  // 12px
-  4: "var(--orca-space-4)",  // 16px
-  5: "var(--orca-space-5)",  // 20px
-  6: "var(--orca-space-6)",  // 24px
-} as const;
-
-/** Transition tokens (matches CSS variables --orca-transition-*) */
-export const Transition = {
-  fast: "var(--orca-transition-fast)",     // 0.15s ease
-  normal: "var(--orca-transition-normal)",  // 0.2s ease
-  slow: "var(--orca-transition-slow)",      // 0.3s ease
-} as const;

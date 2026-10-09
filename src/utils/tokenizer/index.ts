@@ -291,13 +291,6 @@ export function estimateTokensDetailed(text: string, modelName?: string): TokenE
 }
 
 /**
- * 批量估算（优化性能）
- */
-export function estimateTokensBatch(texts: string[], modelName?: string): number[] {
-  return texts.map(text => estimateTokens(text, modelName));
-}
-
-/**
  * 获取校准统计
  */
 export function getCalibrationStats(): Record<string, {

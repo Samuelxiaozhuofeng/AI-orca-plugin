@@ -67,13 +67,6 @@ function generatePadding(
   }
 }
 
-/**
- * 估算填充内容的实际 token 数
- */
-function estimatePaddingTokens(padding: string): number {
-  return estimateTokens(padding);
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 主要导出
 // ═══════════════════════════════════════════════════════════════════════════
@@ -118,24 +111,6 @@ export function alignToTokenBoundary(
   const normalizedText = text.trimEnd();
   
   return `${normalizedText}\n${padding}\n`;
-}
-
-/**
- * 计算对齐后的 token 数
- */
-export function getAlignedTokenCount(
-  text: string,
-  alignUnit: number,
-  modelName?: string,
-): number {
-  const tokens = estimateTokens(text, modelName);
-  const remainder = tokens % alignUnit;
-  
-  if (remainder === 0) {
-    return tokens;
-  }
-  
-  return tokens + (alignUnit - remainder);
 }
 
 /**

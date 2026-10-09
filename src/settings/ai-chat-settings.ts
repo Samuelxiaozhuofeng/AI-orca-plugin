@@ -160,18 +160,6 @@ function toNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
-function toString(value: unknown, fallback: string): string {
-  if (typeof value === "string") return value;
-  return fallback;
-}
-
-function toCurrency(value: unknown, fallback: CurrencyType): CurrencyType {
-  if (value === "USD" || value === "CNY" || value === "EUR" || value === "JPY") {
-    return value;
-  }
-  return fallback;
-}
-
 function isCurrency(value: unknown): value is CurrencyType {
   return value === "USD" || value === "CNY" || value === "EUR" || value === "JPY";
 }
@@ -682,9 +670,4 @@ export function getModelApiConfig(
   // 回退到当前选中的平台
   const current = getCurrentApiConfig(settings);
   return { apiUrl: current.apiUrl, apiKey: current.apiKey, protocol: current.protocol, anthropicApiPath: current.anthropicApiPath };
-}
-
-/** @deprecated */
-export function resolveAiModel(settings: AiChatSettings): string {
-  return settings.selectedModelId;
 }

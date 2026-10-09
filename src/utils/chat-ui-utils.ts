@@ -260,23 +260,6 @@ export function fuzzyMatch(query: string, target: string): boolean {
   return false;
 }
 
-/**
- * 使用模糊匹配过滤命令列表
- * 
- * @param commands - 命令列表
- * @param query - 查询字符串
- * @returns 匹配的命令列表
- */
-export function filterCommandsByFuzzyMatch(
-  commands: SlashCommand[],
-  query: string
-): SlashCommand[] {
-  if (!query) {
-    return commands;
-  }
-  return commands.filter((cmd) => fuzzyMatch(query, cmd.command));
-}
-
 
 // ============================================================================
 // Recent Commands Management
@@ -356,17 +339,6 @@ export function addRecentCommandPure(
   return [command, ...deduped].slice(0, Math.max(0, maxItems));
 }
 
-/**
- * 清除最近使用的命令列表
- */
-export function clearRecentCommands(): void {
-  try {
-    localStorage.removeItem(RECENT_COMMANDS_KEY);
-  } catch {
-    // Ignore storage errors
-  }
-}
-
 // ============================================================================
 // Context Chips Token Utilities
 // 上下文芯片 Token 工具函数
@@ -394,18 +366,6 @@ export interface EnhancedContextChip {
  */
 export function calculateTotalContextTokens(chips: EnhancedContextChip[]): number {
   return chips.reduce((sum, chip) => sum + chip.tokenCount, 0);
-}
-
-/**
- * 格式化 Token 数量显示（简短格式）
- * 
- * @param tokens - Token 数量
- * @returns 格式化后的字符串
- */
-export function formatTokenCountShort(tokens: number): string {
-  if (tokens < 1000) return tokens.toString();
-  if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}k`;
-  return `${Math.round(tokens / 1000)}k`;
 }
 
 /**

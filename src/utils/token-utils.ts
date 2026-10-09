@@ -7,13 +7,7 @@
 
 import type { CurrencyType } from "../settings/ai-chat-settings";
 import { CURRENCY_SYMBOLS } from "../settings/ai-chat-settings";
-import { 
-  estimateTokens as tokenizerEstimate,
-  estimateTokensDetailed,
-  recordCalibrationSample,
-  setTokenizerConfig,
-  getTokenizerConfig,
-} from "./tokenizer";
+import { estimateTokens as tokenizerEstimate } from "./tokenizer";
 
 // 重新导出 tokenizer 功能
 export { 
@@ -51,25 +45,6 @@ export function formatTokenSpeed(content: string, reasoning: string | undefined,
   const tokens = estimateTokens(content + (reasoning || ""));
   if (tokens <= 0) return null;
   return `${Math.round(tokens / (durationMs / 1000))} tok/s`;
-}
-
-/**
- * 简单估算（不使用校准，用于快速计算）
- * 保留原有的简单启发式方法，用于向后兼容
- */
-export function estimateTokensSimple(text: string): number {
-  if (!text) return 0;
-  
-  // 分离中文和非中文字符
-  const chineseChars = text.match(/[\u4e00-\u9fff]/g) || [];
-  const otherChars = text.replace(/[\u4e00-\u9fff]/g, "");
-  
-  // 中文字符：约 1.5 字符 = 1 token
-  const chineseTokens = Math.ceil(chineseChars.length / 1.5);
-  // 其他字符：约 4 字符 = 1 token
-  const otherTokens = Math.ceil(otherChars.length / 4);
-  
-  return chineseTokens + otherTokens;
 }
 
 /**
