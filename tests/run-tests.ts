@@ -20,6 +20,7 @@ import "./chat-request-owner.test";
 import "./pending-save.test";
 import "./session-select-race.test";
 import "./workdir.test";
+import "./local-image-paths.test";
 import { run } from "./test-harness";
 
 await run();

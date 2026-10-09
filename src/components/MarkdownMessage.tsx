@@ -1,5 +1,6 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import { journalExportDataCache } from "../services/ai/ai-tools";
+import { appendLocalImagePreviews, toFileUrl } from "../utils/local-image-paths";
 import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
 import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -26,6 +27,7 @@ const { createElement, useMemo, useState } = React;
 
 // 图片路径处理工具函数
 function resolveImageSrc(src: string): string {
+  if (src.startsWith("/")) return toFileUrl(src); // 本机绝对路径（本机 AI 截图/生成的图）
   if (src.startsWith("./") || src.startsWith("../")) {
     const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
     const repoDir = orca.state.repoDir;
@@ -47,6 +49,8 @@ function resolveImageSrc(src: string): string {
 }
 
 function resolveImageFilePath(src: string): string {
+  if (src.startsWith("file://")) return decodeURIComponent(src.slice("file://".length));
+  if (src.startsWith("/")) return src;
   if (src.startsWith("./") || src.startsWith("../")) {
     const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
     const repoDir = orca.state.repoDir;
@@ -1611,9 +1615,12 @@ export default function MarkdownMessage({
     
     // 清理中文圆括号引用标注：（引用）
     text = text.replace(/（([^）]+)）/g, '$1');
-    
+
+    // 回复里的本机图片路径：段落下方补图片预览
+    if (role === "assistant") text = appendLocalImagePreviews(text);
+
     return text;
-  }, [content]);
+  }, [content, role]);
   
   const nodes = useMemo(() => parseMarkdown(cleanedContent), [cleanedContent]);
   const rawNodes = useMemo(() => parseMarkdown(content), [content]);
