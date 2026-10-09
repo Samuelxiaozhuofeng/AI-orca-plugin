@@ -98,6 +98,7 @@ export function createBranch(
       return {
         ...m,
         branches: newBranches,
+        activeBranchId: branchId,
       };
     }
     return m;
@@ -135,8 +136,10 @@ export function switchBranch(
     throw new Error(`Branch not found: ${branchId}`);
   }
 
-  // 获取分支点之前的消息（包括分支点）
-  const messagesBefore = messages.slice(0, messageIndex + 1);
+  // 获取分支点之前的消息（包括分支点），记下分支点现在显示的是目标分支
+  const messagesBefore = messages
+    .slice(0, messageIndex + 1)
+    .map((m, i) => (i === messageIndex ? { ...m, activeBranchId: branchId } : m));
 
   // 将分支消息追加到后面
   const branchMessages = targetBranch.messages.map(m => ({
@@ -204,27 +207,25 @@ export function saveBranchMessages(
 
 /**
  * 离开分支点前，把当前所在分支的内容存回它的分支数据（切换 / 新建分支都会把分支点之后的消息换掉）。
- * 当前分支按：界面记的当前分支 → 分支点后第一条消息出自哪个分支 → 唯一一个还空着的分支（刚建、没离开过）。
- * 分支点后有内容却认不出属于哪个分支时返回 null，调用方别切，免得丢消息。
+ * 当前分支按分支点记的 activeBranchId；旧数据没记的，按分支点后第一条消息出自哪个分支认。
+ * 都认不出（旧版本在新分支里聊的内容）就另存成一个「找回的消息」分支，不丢也不卡住。
  */
-export function stashCurrentBranch(
-  messages: Message[],
-  branchPointId: string,
-  currentBranchId: string | null
-): Message[] | null {
+export function stashCurrentBranch(messages: Message[], branchPointId: string): Message[] {
   const index = messages.findIndex(m => m.id === branchPointId);
-  const branches = messages[index]?.branches;
+  const point = messages[index];
+  const branches = point?.branches;
   if (!branches || branches.length === 0) return messages;
 
   const after = messages[index + 1];
-  const empty = branches.filter(b => b.messages.length === 0);
   const leaving =
-    branches.find(b => b.id === currentBranchId) ??
-    (after && branches.find(b => b.messages.some(m => m.id === after.id))) ??
-    (after && empty.length === 1 ? empty[0] : undefined);
-
+    branches.find(b => b.id === point.activeBranchId) ??
+    (after && branches.find(b => b.messages.some(m => m.id === after.id)));
   if (leaving) return saveBranchMessages(messages, branchPointId, leaving.id);
-  return after ? null : messages;
+  if (!after) return messages;
+
+  const recovered: MessageBranch = { id: generateBranchId(), name: "找回的消息", createdAt: Date.now(), messages: [] };
+  const withRecovered = messages.map((m, i) => (i === index ? { ...m, branches: [...branches, recovered] } : m));
+  return saveBranchMessages(withRecovered, branchPointId, recovered.id);
 }
 
 /**

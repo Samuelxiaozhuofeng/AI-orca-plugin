@@ -385,8 +385,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
 
-  // Branch management state (对话分支功能)
-  const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
 
 
   // Scroll to bottom button state
@@ -2289,7 +2287,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
 
   function clear() {
-    if (abortRef.current) abortRef.current.abort();
+    // 作废进行中的请求（含还在准备、没开始生成的），免得它之后又把回复写进清空后的对话
+    abandonCurrentRequest();
     invalidateCcHead();
     setMessages([]);
     setLastError(null);
@@ -2363,12 +2362,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       console.log("[Branch] Creating branch at message:", messageId);
       console.log("[Branch] Current messages:", messages.length);
       // createBranch(messages, messageId, branchName?) -> { messages: Message[]; branchId: string }
-      const stashed = stashCurrentBranch(messages, messageId, currentBranchId);
-      if (!stashed) {
-        orca.notify("error", "认不出当前在哪个分支，为免丢消息先不新建分支");
-        return;
-      }
-      const result = createBranch(stashed, messageId);
+      // 已在某个分支里：先把它的内容存回去，再开新分支
+      const result = createBranch(stashCurrentBranch(messages, messageId), messageId);
       console.log("[Branch] Result:", {
         branchId: result.branchId,
         messagesCount: result.messages.length,
@@ -2376,48 +2371,42 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         hasBranches: result.messages[result.messages.length - 1]?.branches?.length,
       });
       invalidateCcHead();
-      setCurrentBranchId(result.branchId);
       setMessages(result.messages);
       orca.notify("success", `已创建新分支，当前在分支: ${result.branchId.slice(0, 10)}...`);
     } catch (err: any) {
       console.error("[Branch] Create failed:", err);
       orca.notify("error", err?.message || "创建分支失败");
     }
-  }, [messages, currentBranchId]);
+  }, [messages]);
 
   const handleSwitchBranch = useCallback((messageId: string, branchId: string) => {
     try {
       // 先把离开的分支存回去，再换成目标分支的内容
-      const stashed = stashCurrentBranch(messages, messageId, currentBranchId);
-      if (!stashed) {
-        orca.notify("error", "认不出当前在哪个分支，为免丢消息先不切换");
-        return;
-      }
-      const updatedMessages = switchBranch(stashed, messageId, branchId);
+      const updatedMessages = switchBranch(stashCurrentBranch(messages, messageId), messageId, branchId);
       invalidateCcHead();
       setMessages(updatedMessages);
-      setCurrentBranchId(branchId);
       orca.notify("success", "已切换分支");
     } catch (err: any) {
       orca.notify("error", err?.message || "切换分支失败");
     }
-  }, [messages, currentBranchId]);
+  }, [messages]);
 
   const handleDeleteBranch = useCallback((messageId: string, branchId: string) => {
     try {
       // deleteBranch(messages, branchPointId, branchId) -> Message[]
-      const updatedMessages = deleteBranch(messages, messageId, branchId);
+      let updatedMessages = deleteBranch(messages, messageId, branchId);
+      // 删的是正显示的分支：改显示剩下的第一个分支（删掉的内容不再存回）
+      const point = updatedMessages.find((m) => m.id === messageId);
+      if (point?.activeBranchId === branchId && point.branches?.length && point.branches.every((b) => b.id !== branchId)) {
+        updatedMessages = switchBranch(updatedMessages, messageId, point.branches[0].id);
+      }
       invalidateCcHead();
       setMessages(updatedMessages);
-      // 如果删除的是当前分支，重置分支 ID
-      if (currentBranchId === branchId) {
-        setCurrentBranchId(null);
-      }
       orca.notify("success", "已删除分支");
     } catch (err: any) {
       orca.notify("error", err?.message || "删除分支失败");
     }
-  }, [messages, currentBranchId]);
+  }, [messages]);
 
   const handleRenameBranch = useCallback((messageId: string, branchId: string, newName: string) => {
     try {
@@ -2757,7 +2746,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           tokenStats: tokenStatsMap.get(m.id),
           onSkillConfirmAction: m.skillConfirm ? handleSkillConfirmAction : undefined,
           // Branch management (对话分支功能)
-          currentBranchId,
           onCreateBranch: handleCreateBranch,
           onSwitchBranch: handleSwitchBranch,
           onDeleteBranch: handleDeleteBranch,

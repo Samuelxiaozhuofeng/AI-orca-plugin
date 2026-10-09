@@ -79,6 +79,7 @@ export type Message = {
   branchId?: string;           // 分支 ID（主分支为 undefined）
   parentMessageId?: string;    // 父消息 ID（分支点）
   branches?: MessageBranch[];  // 此消息的其他分支
+  activeBranchId?: string;     // 分支点：分支点之后正显示的是哪个分支（离开前按它把内容存回去）
   /** 本机 AI：这轮回复在 Claude Code 侧的会话 id 与最后一条 assistant uuid；被停止 / 出错为 partial */
   cc?: { sid: string; uuid?: string; partial?: true };
 };

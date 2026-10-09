@@ -787,7 +787,6 @@ interface MessageItemProps {
     isLastMessage?: boolean;    // 是否是最后一条消息
   };
   // Branch management (对话分支功能)
-  currentBranchId?: string | null;
   onCreateBranch?: (messageId: string) => void;
   onSwitchBranch?: (messageId: string, branchId: string) => void;
   onDeleteBranch?: (messageId: string, branchId: string) => void;
@@ -1144,7 +1143,6 @@ export default function MessageItem({
   onSkillDraftAction,
   tokenStats,
   // Branch management
-  currentBranchId,
   onCreateBranch,
   onSwitchBranch,
   onDeleteBranch,
@@ -1963,18 +1961,18 @@ export default function MessageItem({
                 style: {
                   padding: "4px 10px",
                   borderRadius: "4px",
-                  border: currentBranchId === branch.id 
+                  border: message.activeBranchId === branch.id 
                     ? "1px solid var(--orca-color-primary)"
                     : "1px solid var(--orca-color-border)",
-                  background: currentBranchId === branch.id
+                  background: message.activeBranchId === branch.id
                     ? "color-mix(in srgb, var(--orca-color-primary) 15%, transparent)"
                     : "var(--orca-color-bg-2)",
-                  color: currentBranchId === branch.id
+                  color: message.activeBranchId === branch.id
                     ? "var(--orca-color-primary)"
                     : "var(--orca-color-text-2)",
                   cursor: "pointer",
                   fontSize: "11px",
-                  fontWeight: currentBranchId === branch.id ? 600 : 400,
+                  fontWeight: message.activeBranchId === branch.id ? 600 : 400,
                   transition: "all 0.2s ease",
                 },
               },
