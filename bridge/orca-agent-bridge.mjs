@@ -43,9 +43,9 @@ const COMMON_ARGS = [
 // 故意不给：后台/定时类（ScheduleWakeup、CronCreate/Delete/List、Monitor、RemoteTrigger，会在本轮结束后让进程无人值守地继续跑）、
 // 跨会话类（SendMessage、ListAgents，不经确认就能碰到用户其他 Claude 会话）、PushNotification、
 // Artifact*/DesignSync/ReportFindings（对外发布或用不上）、EnterWorktree/ExitWorktree（安全模式下不经确认就建分支、删目录）、AskUserQuestion/EnterPlanMode/ExitPlanMode（要交互回答，bridge 接不住）
-// Workflow 两种模式都不给（后台多代理，跑不到本轮结束）；Task 只给完全放开：实测安全模式下子代理带 isolation:"worktree" 不经确认就建 worktree
-const SAFE_TOOLS = "Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Write";
-const FULL_TOOLS = `Task,${SAFE_TOOLS}`;
+// Workflow 两种模式都不给（后台多代理，跑不到本轮结束）；Task、Skill 只给完全放开：实测安全模式下子代理带 isolation:"worktree" 不经确认就建 worktree，内置技能（如 batch）可能借 fork 走同一条路
+const SAFE_TOOLS = "Bash,Edit,Glob,Grep,NotebookEdit,Read,TaskStop,ToolSearch,WebFetch,WebSearch,Write";
+const FULL_TOOLS = `Task,Skill,${SAFE_TOOLS}`;
 const SAFE_ARGS = [
   ...COMMON_ARGS,
   "--restricted",

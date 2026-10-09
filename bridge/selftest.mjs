@@ -132,7 +132,7 @@ const lastArgs = () => JSON.parse(readLog("args.log").trim().split("\n").pop());
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const others = [];
 const checkTools = (args, full = false) => {
-  assert.equal(args[args.indexOf("--tools") + 1], (full ? "Task," : "") + "Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Write");
+  assert.equal(args[args.indexOf("--tools") + 1], (full ? "Task,Skill," : "") + "Bash,Edit,Glob,Grep,NotebookEdit,Read,TaskStop,ToolSearch,WebFetch,WebSearch,Write");
   assert.ok(args.includes("--chrome"), "--chrome");
 };
 const results = [];
