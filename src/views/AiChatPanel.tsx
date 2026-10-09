@@ -395,8 +395,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // 删过消息就 +1：本机 AI 一轮进行中被删过，收尾时不再把它记为续接点
-  const ccDeleteGenRef = useRef(0);
+  // 删消息 / 回档 / 分支变动就 +1：本机 AI 一轮准备或进行中历史被改过，不续接、收尾也不记续接点
+  const ccHistoryGenRef = useRef(0);
   // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态）
   const chatOwnerRef = useRef(createChatRequestOwner());
   // 对话选择的归属：只有最后一次选择 / 新建的加载结果才上屏
@@ -925,6 +925,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // ─────────────────────────────────────────────────────────────────────────
 
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
+    const ccHistoryGenAtSend = ccHistoryGenRef.current;
     if (!content && (!files || files.length === 0)) return;
     
     const trimmedContent = content.trim();
@@ -1318,7 +1319,6 @@ graph TD
     let ccAssistantId: string | null = null;
     let ccPartial = false;
     let ccErrored = false;
-    const ccDeleteGen = ccDeleteGenRef.current;
 
     try {
       // Build context (now returns text + assets)
@@ -1505,6 +1505,12 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // 获取模型的上下文长度限制
       const modelContextLength = getModelContextLength(settings, model);
 
+      // 历史在准备期间被改过就不续接；决定续接后先撤掉旧续接点，只由本请求正常 / 停止收尾写回新的
+      const ccResume = apiConfig.protocol === "local-cli" && ccHistoryGenRef.current === ccHistoryGenAtSend
+        ? pickLocalCliResume(baseMessages, currentSession.ccHead)
+        : undefined;
+      if (ccResume) setCurrentSession((prev) => ({ ...prev, ccHead: undefined }));
+
       for await (const chunk of streamChatWithRetry(
         {
           apiUrl: apiConfig.apiUrl,
@@ -1523,7 +1529,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 contextText,
                 instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix, memoryText }),
                 workDir: currentSession.workDir,
-                resume: pickLocalCliResume(baseMessages, currentSession.ccHead),
+                resume: ccResume,
                 run: ccRun,
                 isCurrent: req.isCurrent,
               })
@@ -2208,7 +2214,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       const ccSid = ccRun.sid;
       const ccMsgId = ccAssistantId;
       // 出错（非停止）或本轮进行中删过消息：不记续接点，下次整段新开
-      const ccHeadOk = !ccErrored && ccDeleteGenRef.current === ccDeleteGen;
+      const ccHeadOk = !ccErrored && ccHistoryGenRef.current === ccHistoryGenAtSend;
       if (ccSid && ccMsgId) {
         updateMessage(ccMsgId, { cc: { sid: ccSid, ...(ccRun.uuid ? { uuid: ccRun.uuid } : {}), ...(ccPartial ? { partial: true as const } : {}) } });
         setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: ccHeadOk ? { sid: ccSid, msgId: ccMsgId } : undefined }));
@@ -2282,14 +2288,19 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     if (abortRef.current) abortRef.current.abort();
   }
 
+  // 历史被删 / 回档 / 换分支：本机 AI 下次不直接续接，整段新开；进行中的那轮收尾也不再记续接点
+  const invalidateCcHead = useCallback(() => {
+    ccHistoryGenRef.current++;
+    setCurrentSession((prev) => (prev.ccHead ? { ...prev, ccHead: undefined } : prev));
+  }, []);
+
   // 删除单条消息
   const handleDeleteMessage = useCallback((messageId: string) => {
     const target = messages.find((m) => m.id === messageId);
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
     // 删了 AI 看过的内容：下次本机 AI 不直接续接，整段新开
-    if (target && !target.localOnly) ccDeleteGenRef.current++;
-    if (target && !target.localOnly) setCurrentSession((prev) => (prev.ccHead ? { ...prev, ccHead: undefined } : prev));
-  }, [messages]);
+    if (target && !target.localOnly) invalidateCcHead();
+  }, [messages, invalidateCcHead]);
 
   // 提取出的记忆写进记忆管理（点按钮时的用户），与记忆管理里手动添加同一条路
   const handleExtractMemory = useCallback((memories: ExtractedMemory[], userId?: string) => {
@@ -2313,12 +2324,13 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
   // 回档到指定消息（删除该消息及之后的所有消息）
   const handleRollbackToMessage = useCallback((messageId: string) => {
+    invalidateCcHead();
     setMessages((prev) => {
       const index = prev.findIndex((m) => m.id === messageId);
       if (index <= 0) return prev; // 不能回档到第一条消息之前
       return prev.slice(0, index);
     });
-  }, []);
+  }, [invalidateCcHead]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Branch Management Callbacks (对话分支功能)
@@ -2336,6 +2348,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         lastMessage: result.messages[result.messages.length - 1],
         hasBranches: result.messages[result.messages.length - 1]?.branches?.length,
       });
+      invalidateCcHead();
       setCurrentBranchId(result.branchId);
       setMessages(result.messages);
       orca.notify("success", `已创建新分支，当前在分支: ${result.branchId.slice(0, 10)}...`);
@@ -2349,6 +2362,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     try {
       // switchBranch(messages, messageId, branchId) -> Message[]
       const updatedMessages = switchBranch(messages, messageId, branchId);
+      invalidateCcHead();
       setMessages(updatedMessages);
       setCurrentBranchId(branchId);
       orca.notify("success", "已切换分支");
@@ -2361,6 +2375,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     try {
       // deleteBranch(messages, branchPointId, branchId) -> Message[]
       const updatedMessages = deleteBranch(messages, messageId, branchId);
+      invalidateCcHead();
       setMessages(updatedMessages);
       // 如果删除的是当前分支，重置分支 ID
       if (currentBranchId === branchId) {

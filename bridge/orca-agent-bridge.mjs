@@ -262,7 +262,10 @@ async function handleChat(req, res, body) {
   if (!claudeBin) return sendJson(res, 500, { error: `找不到 claude 命令（${CLAUDE_NAME}），请先安装 Claude Code` });
   if (resume) {
     // 同一会话还有进程在跑（如刚停止的上一轮还没退）：先结束它再续接，免得两个进程同时写同一会话
-    for (let old; (old = bySid.get(resume.sid)); ) await stopChild(old);
+    for (let old; (old = bySid.get(resume.sid)); ) {
+      await stopChild(old);
+      if (bySid.get(resume.sid) === old) bySid.delete(resume.sid); // 已退出的不再挡路，免得空转
+    }
     if (req.socket.destroyed) return; // 等待期间客户端已断开
   }
 
@@ -351,7 +354,7 @@ async function handleChat(req, res, body) {
         child.kill("SIGTERM");
         return;
       }
-      if (typeof m.session_id === "string" && m.session_id) bySid.set(m.session_id, child);
+      if (typeof m.session_id === "string" && m.session_id && child.exitCode === null && child.signalCode === null) bySid.set(m.session_id, child);
       send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model, cwd: workDir, resumed: Boolean(resume) });
     } else if (m.type === "stream_event" && !m.parent_tool_use_id) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
