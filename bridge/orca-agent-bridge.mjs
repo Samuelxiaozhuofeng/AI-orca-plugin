@@ -49,8 +49,11 @@ function loadConfig() {
   const file = process.env.ORCA_BRIDGE_CONFIG || path.join(BRIDGE_HOME, "config.json");
   if (!fs.existsSync(file)) return { fullAccess: false, dirs: [] };
   const st = fs.statSync(file);
-  if (st.uid !== process.getuid() || (st.mode & 0o022) !== 0) {
-    throw new Error(`${file} 权限不安全：须归当前用户所有且其他人不可写，请运行 chmod 600 ${JSON.stringify(file)} 后再启动`);
+  if (st.uid !== process.getuid()) {
+    throw new Error(`${file} 权限不安全：不归当前用户所有，请运行 sudo chown "$USER" ${JSON.stringify(file)} && chmod 600 ${JSON.stringify(file)} 后再启动`);
+  }
+  if ((st.mode & 0o022) !== 0) {
+    throw new Error(`${file} 权限不安全：其他人可写，请运行 chmod 600 ${JSON.stringify(file)} 后再启动`);
   }
   const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
   const dirs = cfg.dirs ?? [];
@@ -357,6 +360,14 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
+// 安全模式承诺「每次确认」：受管配置的 allow 规则会在确认前放行，所以直接拒绝启动
+const managedRules = managedAllowRules();
+if (!fullAccess && managedRules.length) {
+  console.error(`启动失败：受管配置里的允许规则会让这些操作跳过确认，安全模式无法保证每次确认（${MANAGED_SETTINGS}）：`);
+  for (const r of managedRules) console.error(`  - ${r}`);
+  process.exit(1);
+}
+
 sweepStaleMcpDirs();
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
@@ -373,9 +384,5 @@ server.listen(port, HOST, () => {
   } else {
     console.log("安全模式：改文件、跑命令、改笔记前都会在插件里弹确认。");
   }
-  const rules = managedAllowRules();
-  if (rules.length) {
-    console.warn(`\n⚠ 受管配置里的允许规则会让这些操作跳过确认（${MANAGED_SETTINGS}）：`);
-    for (const r of rules) console.warn(`  - ${r}`);
-  }
+
 });

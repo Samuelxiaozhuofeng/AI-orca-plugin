@@ -338,14 +338,13 @@ try {
     }
   });
 
-  await check("G6 受管配置有 allow 规则 → 启动时醒目警告并列出规则", async () => {
+  await check("G6 安全模式遇受管 allow 规则 → 拒绝启动并列出规则；完全放开不受影响", async () => {
     const managed = path.join(tmp, "managed.json");
     fs.writeFileSync(managed, JSON.stringify({ permissions: { allow: ["Write", "mcp__orca-note__*"] } }));
-    const b = await startBridge("managed", [], { ORCA_BRIDGE_MANAGED_SETTINGS: managed });
+    await assert.rejects(startBridge("managed", [], { ORCA_BRIDGE_MANAGED_SETTINGS: managed }), /跳过确认[\s\S]*Write[\s\S]*mcp__orca-note__\*/);
+    const b = await startBridge("managed-full", ["--full-access"], { ORCA_BRIDGE_MANAGED_SETTINGS: managed });
     others.push(b.proc);
-    assert.match(b.out, /受管配置里的允许规则会让这些操作跳过确认/);
-    assert.ok(b.out.includes("Write") && b.out.includes("mcp__orca-note__*"), b.out);
-    assert.ok(!bridgeOut.includes("受管配置"), "没有受管配置时不应警告");
+    assert.ok(!bridgeOut.includes("受管配置"), "没有受管配置时不应提示");
   });
 
   await check("V1 默认安全模式：请求体塞 fullAccess/mode 也不改变模式", async () => {
@@ -420,7 +419,7 @@ try {
       const cfg = path.join(tmp, `cfg-perm-${mode.toString(8)}.json`);
       fs.writeFileSync(cfg, JSON.stringify({ fullAccess: true, dirs: [] }));
       fs.chmodSync(cfg, mode);
-      await assert.rejects(startBridge(`cfgperm${mode}`, [], { ORCA_BRIDGE_CONFIG: cfg }), /权限不安全/);
+      await assert.rejects(startBridge(`cfgperm${mode}`, [], { ORCA_BRIDGE_CONFIG: cfg }), /其他人可写.*chmod 600/);
     }
   });
 

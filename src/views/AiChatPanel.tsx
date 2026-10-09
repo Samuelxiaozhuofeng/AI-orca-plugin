@@ -2056,10 +2056,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         // Agentic RAG 完成，跳过普通工具调用流程
         setSending(false);
         if (abortRef.current === aborter) abortRef.current = null;
-        
-        // 自动缓存会话
-        autoCacheSession(currentSession);
-        
+        // 不在这里额外缓存：currentSession 是发送时的旧快照，会覆盖已保存的新消息；messages 变化后的防抖自动保存会存最新状态
         return; // 不走普通流程
       }
       // ─────────────────────────────────────────────────────────────────────────
