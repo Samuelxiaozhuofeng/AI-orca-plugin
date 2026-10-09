@@ -46,3 +46,25 @@ test("切换对话：没有后续选择时 B 照常显示", async () => {
   await select(async () => "B");
   assertEqual(panel.shown, "B");
 });
+
+// 照 AiChatPanel 首次加载：读列表之前就登记归属，读完再恢复上次的活动对话
+test("首次加载：列表还没读完就新建对话 B，最终显示 B（不被旧活动对话 A 盖掉）", async () => {
+  const { panel, select, newSession } = makePanel();
+  panel.shown = "空白";
+  const list = deferred<string>();
+  const initial = select(async () => { const activeId = await list.promise; return activeId; });
+  newSession("B");
+  list.resolve("A");
+  await initial;
+  assertEqual(panel.shown, "B", "首次加载拿到的旧对话 A 顶掉了新建的 B");
+});
+
+test("首次加载：列表还没读完就切到 D，最终显示 D", async () => {
+  const { panel, select } = makePanel();
+  const list = deferred<string>();
+  const initial = select(async () => list.promise);
+  await select(async () => "D");
+  list.resolve("A");
+  await initial;
+  assertEqual(panel.shown, "D", "首次加载拿到的旧对话 A 顶掉了用户选的 D");
+});

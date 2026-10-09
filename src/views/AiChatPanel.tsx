@@ -594,37 +594,37 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
-    loadSessions().then(async (data) => {
+    // 读列表之前就登记归属：读的途中用户已新建 / 切换对话，就不再恢复上次的活动对话，免得盖掉用户的选择
+    loadIfLatest(selectionOwnerRef.current, async () => {
+      const data = await loadSessions();
       setSessions(data.sessions);
-      if (data.activeSessionId) {
-        // 加载完整会话数据（包含消息）
-        const activeId = data.activeSessionId;
-        const active = await loadIfLatest(selectionOwnerRef.current, () => loadFullSession(activeId));
-        if (active) {
-          // 恢复会话
-          setCurrentSession({
-            ...active,
-            model: (active.model || "").trim() || defaultModel,
-          });
-          if (active.messages.length > 0) {
-            setMessages(active.messages);
-          }
-          if (active.contexts && active.contexts.length > 0) {
-            contextStore.selected = active.contexts;
-          }
-          // 恢复滚动位置
-          // 使用 setTimeout 确保 DOM 渲染完成后再滚动
-          setTimeout(() => {
-            if (listRef.current) {
-              if (active.scrollPosition !== undefined && active.scrollPosition > 0) {
-                listRef.current.scrollTop = active.scrollPosition;
-              } else {
-                // 没有保存位置或位置为0，滚动到底部显示最新消息
-                listRef.current.scrollTop = listRef.current.scrollHeight;
-              }
-            }
-          }, 50);
+      // 加载完整会话数据（包含消息）
+      return data.activeSessionId ? loadFullSession(data.activeSessionId) : null;
+    }).then((active) => {
+      if (active) {
+        // 恢复会话
+        setCurrentSession({
+          ...active,
+          model: (active.model || "").trim() || defaultModel,
+        });
+        if (active.messages.length > 0) {
+          setMessages(active.messages);
         }
+        if (active.contexts && active.contexts.length > 0) {
+          contextStore.selected = active.contexts;
+        }
+        // 恢复滚动位置
+        // 使用 setTimeout 确保 DOM 渲染完成后再滚动
+        setTimeout(() => {
+          if (listRef.current) {
+            if (active.scrollPosition !== undefined && active.scrollPosition > 0) {
+              listRef.current.scrollTop = active.scrollPosition;
+            } else {
+              // 没有保存位置或位置为0，滚动到底部显示最新消息
+              listRef.current.scrollTop = listRef.current.scrollHeight;
+            }
+          }
+        }, 50);
       }
       setSessionsLoaded(true);
     });
