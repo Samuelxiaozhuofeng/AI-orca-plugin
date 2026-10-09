@@ -1,6 +1,6 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import { appendLocalImagePreviews } from "../utils/local-image-paths";
-import { resolveAssetPath, resolveAssetUrl } from "../utils/asset-path";
+import { openImageInSystem, resolveAssetPath, resolveAssetUrl } from "../utils/asset-path";
 import { toBody } from "../utils/modal-dismiss";
 import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -566,7 +566,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
   const [viewMode, setViewMode] = useState("grid" as "grid" | "masonry" | "list");
   
   const openInSystem = (src: string) => {
-    orca.invokeBackend("shell-open", resolveImageFilePath(src));
+    openImageInSystem(resolveImageFilePath(src));
   };
   
   const closeLightbox = () => setSelectedIndex(-1);

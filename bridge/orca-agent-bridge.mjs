@@ -515,10 +515,10 @@ function queryModels() {
     if (why) console.warn(`查询模型列表失败（${why}），用默认列表`);
     if (child.exitCode !== null || child.signalCode !== null) return;
     child.kill("SIGTERM");
-    setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, EXIT_GRACE_MS);
+    setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, EXIT_GRACE_MS).unref();
   };
   const timer = setTimeout(() => end("超时"), MODEL_QUERY_MS);
-  child.on("error", (err) => end(err.message));
+  child.on("error", (err) => { children.delete(child); end(err.message); });
   child.on("exit", (code) => { children.delete(child); end(`claude 提前退出（${code}）`); });
   child.stdin.on("error", () => {});
   child.stdout.setEncoding("utf8");

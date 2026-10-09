@@ -4,6 +4,7 @@
  */
 
 import { subscribeToPreview, closeImagePreview, getCurrentPreviewImage, type ImagePreviewItem } from "../services/external/image-preview-service";
+import { openImageInSystem } from "../utils/asset-path";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {
@@ -41,8 +42,8 @@ export default function GlobalImagePreview() {
 
   const handleSystemOpen = useCallback((url: string) => {
     // 尝试使用orca的系统打开功能
-    if (typeof orca !== 'undefined' && orca.invokeBackend) {
-      orca.invokeBackend("shell-open", url);
+    if (typeof orca !== 'undefined') {
+      openImageInSystem(url);
     } else {
       // 降级到浏览器打开
       window.open(url, '_blank', 'noopener,noreferrer');

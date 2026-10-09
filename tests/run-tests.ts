@@ -23,6 +23,7 @@ import "./token-speed.test";
 import "./local-cli-tool-summary.test";
 import "./local-cli-review4.test";
 import "./asset-path.test";
+import "./review5.test";
 import { run } from "./test-harness";
 
 await run();

@@ -9,7 +9,7 @@
 import type { OpenAIChatMessage } from "./openai-client";
 import type { StreamChunk } from "./chat-stream-handler";
 import { summarizeToolCall, summarizeToolResult } from "./local-cli-tool-summary";
-import { collectLocalCliImages, IMAGE_NOTES_RE, imageNotesText } from "./local-cli-images";
+import { collectLocalCliImages, imageNotesText, stripImageNotes } from "./local-cli-images";
 import { autostartLocalCli, fetchWithReconnect, NotDeliveredError, probe } from "./local-cli-autostart";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
@@ -163,7 +163,7 @@ function buildConversationPrompt(messages: OpenAIChatMessage[], contextText?: st
   const context = contextText?.trim() ? `以下是用户提供的上下文：\n\n${contextText.trim()}\n\n---\n` : "";
   const history = convo
     .slice(0, Math.max(lastUser, 0))
-    .map((m) => ({ role: m.role, text: (m.role === "assistant" ? messageText(m).replace(BANNER_RE, "").replace(IMAGE_NOTES_RE, "") : messageText(m)).trim() }))
+    .map((m) => ({ role: m.role, text: (m.role === "assistant" ? stripImageNotes(messageText(m).replace(BANNER_RE, "")) : messageText(m)).trim() }))
     .filter((m) => m.text)
     .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.text}`);
   if (history.length === 0) return context ? `${context}当前问题：\n${current}` : current;
@@ -197,17 +197,19 @@ async function* readBridge(
   try {
     arm();
     let res: Response;
+    const json = JSON.stringify(body);
     try {
       res = await fetchWithReconnect(
         () => fetch(`${base}/chat`, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: json,
           signal: ctrl.signal,
         }),
         () => autostartLocalCli([{ apiUrl: base, apiKey, protocol: "local-cli" } as any], { signal: ctrl.signal }),
         ctrl.signal,
         () => probe({ apiUrl: base, apiKey } as any, 2000, ctrl.signal),
+        !body.images && json.length < 1_000_000,
       );
     } catch (err) {
       throw failure(new BridgeError(err instanceof NotDeliveredError ? err.message : NOT_CONNECTED));

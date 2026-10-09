@@ -78,7 +78,8 @@ export const NOT_DELIVERED = "请求没送到中转：可能图片太大，或�
 export class NotDeliveredError extends Error {}
 
 /**
- * 发 /chat：连接层失败（fetch 抛错、没拿到任何 HTTP 响应）时先探测：中转本来在跑 → 不重发，抛 NotDeliveredError；
+ * 发 /chat：连接层失败（fetch 抛错、没拿到任何 HTTP 响应）时先探测：中转本来在跑 → 小请求体
+ * （allowResendWhenRunning，如 Orca 刚启动中转刚起来）重发一次，大请求体不重发、抛 NotDeliveredError；
  * 本来没在跑 → 拉起，通了就重发同一请求一次。
  * 拿到响应后的任何失败都不经过这里，不会重发；已中止（停止 / 切换对话 / 超时）就不重连、不重发。
  */
@@ -87,12 +88,17 @@ export async function fetchWithReconnect(
   reconnect: () => Promise<boolean>,
   signal?: AbortSignal,
   isRunning: () => Promise<boolean> = async () => false,
+  allowResendWhenRunning = false,
 ): Promise<Response> {
   try {
     return await doFetch();
   } catch (err) {
     if (signal?.aborted) throw err;
-    if (await isRunning().catch(() => false)) throw new NotDeliveredError(NOT_DELIVERED);
+    if (await isRunning().catch(() => false)) {
+      if (!allowResendWhenRunning) throw new NotDeliveredError(NOT_DELIVERED);
+      if (signal?.aborted) throw err;
+      return await doFetch();
+    }
     if (signal?.aborted) throw err;
     const ok = await reconnect().catch(() => false);
     if (!ok || signal?.aborted) throw err;

@@ -68,10 +68,22 @@ export async function collectLocalCliImages(m: OpenAIChatMessage | undefined): P
   return { images, notes };
 }
 
-/** 没发出去的图片 / 文件写进回复末尾的提示；固定前缀，构建历史时按 IMAGE_NOTES_RE 剥掉 */
+/** 没发出去的图片 / 文件写进回复末尾的提示；固定前缀，构建历史时按 stripImageNotes 剥掉 */
 export function imageNotesText(notes: string[]): string {
   return notes.map((r) => `\n\n> 没能发给本机 AI：${r}`).join("");
 }
 
-/** 回复末尾插件写的说明段（含旧版「这张图片没能发给本机 AI：」），只认末尾，不动正文中间 */
-export const IMAGE_NOTES_RE = /(?:\s*\n> (?:这张图片)?没能发给本机 AI：[^\n]*)+\s*$/;
+const IMAGE_NOTE_LINE_RE = /^> (?:这张图片)?没能发给本机 AI：/;
+
+/** 剥掉回复末尾插件写的说明段（含旧版「这张图片没能发给本机 AI：」），只认末尾，不动正文中间；从末尾逐行扫，无回溯 */
+export function stripImageNotes(text: string): string {
+  let rest = text.trimEnd();
+  let stripped = false;
+  for (;;) {
+    const nl = rest.lastIndexOf("\n");
+    if (nl < 0 || !IMAGE_NOTE_LINE_RE.test(rest.slice(nl + 1))) break;
+    rest = rest.slice(0, nl).trimEnd();
+    stripped = true;
+  }
+  return stripped ? rest : text;
+}

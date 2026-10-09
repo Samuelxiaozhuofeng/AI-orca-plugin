@@ -806,7 +806,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Chat Send Logic
   // ─────────────────────────────────────────────────────────────────────────
 
-  async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
+  async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[], onAccepted?: () => void) {
     const ccHistoryGenAtSend = ccHistoryGenRef.current;
     if (!content && (!files || files.length === 0)) return;
 
@@ -945,6 +945,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       } catch (err: any) {
         orca.notify("warn", `Context build failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
+      // 本条消息用到的 contextStore.selected 已全部读完，通知输入框清空（之后不再读 selected）
+      onAccepted?.();
 
       // Maintain an in-memory conversation so multi-round tool calls include prior tool results.
       // Use historyOverride if available to build conversation
@@ -2291,7 +2293,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     }),
     // Chat Input
     createElement(ChatInput, {
-      onSend: (text: string, files?: FileRef[]) => handleSend(text, files),
+      onSend: (text: string, files?: FileRef[], onAccepted?: () => void) => handleSend(text, files, undefined, onAccepted),
       onClearChat: clear,
       onStop: stop,
       disabled: sending, // 生成时显示停止按钮
