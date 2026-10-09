@@ -33,8 +33,10 @@ const SID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const BAD_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk"];
 // Orca MCP 只读工具白名单（自动放行）；实测 tools/list 后再填，先为空 = 一律弹确认
 const AUTO_ALLOW_MCP_TOOLS = [];
+// 不读用户级全局 ~/.claude/CLAUDE.md：插件对话只按所选工作文件夹自己的 CLAUDE.md 办事（终端里直接用 Claude Code 不受影响）
 const COMMON_ARGS = [
   "-p",
+  "--settings", JSON.stringify({ claudeMdExcludes: [path.join(os.homedir(), ".claude", "CLAUDE.md")] }),
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
@@ -237,6 +239,19 @@ function resolveWorkDir(raw) {
   } catch { return null; }
 }
 
+// 项目级设置不加载（完全放开靠 --setting-sources user，安全模式靠 --restricted），所选文件夹的 CLAUDE.md 也跟着读不到：
+// 这里只把那一份正文交给 AI，钩子和设置照旧不加载。不跟 @引用、子目录 CLAUDE.md、.claude/rules
+const MAX_RULES_BYTES = 256 * 1024;
+function readProjectRules(dir) {
+  const file = path.join(dir, "CLAUDE.md");
+  try {
+    if (!fs.statSync(file).isFile()) return null;
+    if (fs.statSync(file).size > MAX_RULES_BYTES) { console.warn(`${file} 超过 256KB，未读给 AI`); return null; }
+    const text = fs.readFileSync(file, "utf8").replace(/\0/g, "").trim();
+    return text ? `# 工作文件夹的项目规则（${file}）\n\n${text}` : null;
+  } catch { return null; }
+}
+
 /** SIGTERM 并等它退出；3 秒还没退就 SIGKILL */
 function stopChild(child) {
   return new Promise((resolve) => {
@@ -281,6 +296,8 @@ async function handleChat(req, res, body) {
     fs.writeFileSync(mcpFile, JSON.stringify(config), { mode: 0o600 });
     args.push("--mcp-config", mcpFile);
   }
+  const rules = readProjectRules(workDir);
+  if (rules) args.push("--append-system-prompt", rules);
   if (model !== "claude") args.push("--model", model);
   if (resume) args.push("--resume", resume.sid);
 

@@ -639,12 +639,23 @@ try {
     const a = lastArgs();
     assert.equal(a[a.indexOf("--add-dir") + 1], path.join(home, "extra"));
     assert.equal(a[a.indexOf("--setting-sources") + 1], "user");
+    assert.deepEqual(JSON.parse(a[a.indexOf("--settings") + 1]).claudeMdExcludes, [path.join(home, ".claude", "CLAUDE.md")]);
     assert.equal(a[a.indexOf("--permission-mode") + 1], "bypassPermissions");
   });
 
   await check("W2 安全模式不带 --setting-sources", async () => {
     await chat({ prompt: "hi" });
     assert.ok(!lastArgs().includes("--setting-sources"));
+    assert.ok(lastArgs().includes("--settings"), "安全模式也要排除全局 CLAUDE.md");
+  });
+  await check("W2b 所选文件夹有 CLAUDE.md → 正文交给 AI；没有就不带", async () => {
+    const d = fs.mkdtempSync(path.join(tmp, "rules-"));
+    await chat({ prompt: "hi", workDir: d });
+    assert.ok(!lastArgs().includes("--append-system-prompt"));
+    fs.writeFileSync(path.join(d, "CLAUDE.md"), "暗号 BANANA\n");
+    await chat({ prompt: "hi", workDir: d });
+    const a = lastArgs();
+    assert.ok(a[a.indexOf("--append-system-prompt") + 1].includes("暗号 BANANA"));
   });
   await check("W3 PATH 含相对项时，所选文件夹里的同名 claude / node 不会被启动", async () => {
     const bin = path.join(tmp, "bin-w3");
