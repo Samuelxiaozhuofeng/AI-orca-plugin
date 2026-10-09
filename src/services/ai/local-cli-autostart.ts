@@ -28,7 +28,7 @@ export async function autostartLocalCli(
   providers: AiProvider[],
   opts: { intervalMs?: number; maxMs?: number; probeMs?: number } = {},
 ): Promise<boolean> {
-  const provider = providers.find((p) => p.protocol === "local-cli");
+  const provider = providers.find((p) => p.protocol === "local-cli" && p.enabled !== false); // 停用了就不探测、不拉起
   if (!provider) return false;
   const intervalMs = opts.intervalMs ?? 1000;
   const probeMs = opts.probeMs ?? 2000;

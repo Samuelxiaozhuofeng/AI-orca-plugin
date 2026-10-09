@@ -79,3 +79,12 @@ test("H6 probe 一直挂住（连上不回包）→ 每次按超时中止，总�
     (globalThis as any).orca = origOrca;
   }
 });
+
+test("autostart：本机 AI 平台已停用 → 不探测、不拉起", async () => {
+  const s = stub(Infinity);
+  try {
+    assertEqual(await autostartLocalCli([{ ...local, enabled: false }], fast), false);
+    assertEqual(s.calls.fetch, 0);
+    assertEqual(s.calls.open.length, 0);
+  } finally { s.restore(); }
+});
