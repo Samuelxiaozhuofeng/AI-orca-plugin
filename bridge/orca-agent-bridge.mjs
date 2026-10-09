@@ -36,13 +36,32 @@ const SAFE_ARGS = [
   "--permission-prompts", "host",
   "--permission-prompt-tool", "stdio",
 ];
-// 完全放开：只由启动参数 --full-access 决定（实测 init 报 permissionMode=bypassPermissions）
+// 完全放开：只由启动参数 --full-access 或 config.json 决定，请求体改不了（实测 init 报 permissionMode=bypassPermissions）
 const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", "default", "--strict-mcp-config"];
 
+const expandHome = (p) => path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
+
+/** 读 config.json（0600）；不存在则生成默认：完全放开 + ~/OrcaAgent。格式不对直接报错退出，不猜 */
+function loadConfig() {
+  const file = process.env.ORCA_BRIDGE_CONFIG || path.join(BRIDGE_HOME, "config.json");
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, JSON.stringify({ fullAccess: true, dirs: ["~/OrcaAgent"] }, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+  }
+  const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+  const dirs = cfg.dirs ?? [];
+  if (typeof cfg.fullAccess !== "boolean" || !Array.isArray(dirs) || !dirs.every((d) => typeof d === "string" && d)) {
+    throw new Error(`${file} 格式不对：应为 {"fullAccess": true/false, "dirs": ["~/OrcaAgent"]}`);
+  }
+  return { fullAccess: cfg.fullAccess, dirs: dirs.map(expandHome) };
+}
+
+/** 命令行参数优先于 config.json：--full-access 打开完全放开，有 --dir 就不用配置里的 dirs */
 function parseArgs(argv) {
+  const cfg = loadConfig();
   const dirs = [];
-  let port = 18673;
-  let fullAccess = false;
+  let port = Number(process.env.ORCA_BRIDGE_PORT) || 18673;
+  let fullAccess = cfg.fullAccess;
   for (let i = 0; i < argv.length; i++) {
     const value = argv[i + 1];
     if (argv[i] === "--full-access") fullAccess = true;
@@ -53,6 +72,7 @@ function parseArgs(argv) {
       i++;
     }
   }
+  if (dirs.length === 0) dirs.push(...cfg.dirs);
   if (dirs.length === 0) dirs.push(path.join(os.homedir(), "OrcaAgent"));
   return { dirs, port, fullAccess };
 }
@@ -345,7 +365,7 @@ server.listen(port, HOST, () => {
   // 不打印令牌本身（它等于以你身份执行命令的凭证）
   console.log(`${created ? "已生成新令牌" : "令牌"}保存在：${tokenFile}（复制：pbcopy < ${tokenFile}，填到插件「API 密钥」）`);
   if (fullAccess) {
-    console.warn("\n⚠⚠⚠ 完全放开模式（--full-access）⚠⚠⚠");
+    console.warn("\n⚠⚠⚠ 完全放开模式（--full-access 或 config.json 的 fullAccess）⚠⚠⚠");
     console.warn("AI 将不经任何确认直接改文件、跑命令、改笔记。");
     console.warn("令牌泄露 = 任何人都能以你的身份在本机执行命令。不用时请关掉本进程。\n");
   } else {

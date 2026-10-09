@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 const log = (name, s) => fs.appendFileSync(${JSON.stringify(tmp)} + "/" + name, s + "\\n");
 const argv = process.argv.slice(2);
 log("args.log", JSON.stringify(argv));
+log("cwd.log", process.cwd());
 const modelAt = argv.indexOf("--model");
 const mcpAt = process.argv.indexOf("--mcp-config");
 if (mcpAt > 0) {
@@ -81,10 +82,11 @@ function start(p) {
 `, { mode: 0o755 });
 
 /** 起一个 bridge 实例；TMPDIR 指到自检目录下，不碰系统临时目录；受管配置默认指向不存在的文件，不读真 /Library */
-async function startBridge(name, extraArgs = [], extraEnv = {}) {
+async function startBridge(name, extraArgs = [], extraEnv = {}, withDir = true) {
   const tmpdir = path.join(tmp, `tmp-${name}`);
   fs.mkdirSync(tmpdir, { recursive: true });
-  const proc = spawn(process.execPath, [bridgePath, "--port", "0", "--dir", path.join(tmp, "work"), ...extraArgs], {
+  const dirArgs = withDir ? ["--dir", path.join(tmp, "work")] : [];
+  const proc = spawn(process.execPath, [bridgePath, "--port", "0", ...dirArgs, ...extraArgs], {
     env: { ...process.env, TMPDIR: tmpdir, ORCA_BRIDGE_HOME: path.join(tmp, "home"), ORCA_BRIDGE_CLAUDE: fake, ORCA_BRIDGE_HEARTBEAT_MS: "200", ORCA_BRIDGE_MANAGED_SETTINGS: path.join(tmp, "no-managed.json"), ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -101,6 +103,9 @@ async function startBridge(name, extraArgs = [], extraEnv = {}) {
   });
   return inst;
 }
+// 默认配置（首次生成）是完全放开；主实例显式写安全模式配置，下面的老检查都按安全模式
+fs.mkdirSync(path.join(tmp, "home"), { recursive: true });
+fs.writeFileSync(path.join(tmp, "home", "config.json"), JSON.stringify({ fullAccess: false, dirs: [] }));
 const main = await startBridge("main");
 const bridge = main.proc;
 const base = main.base;
@@ -399,6 +404,48 @@ try {
   await check("V3 session 事件带 mode 与实际 model", async () => {
     const r = await chat({ prompt: "hi" });
     assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default" });
+  });
+  await check("C1 config.json 不存在 → 生成 0600、默认完全放开 + ~/OrcaAgent", async () => {
+    const cfg = path.join(tmp, "cfg-new", "config.json");
+    const b = await startBridge("cfgnew", [], { ORCA_BRIDGE_CONFIG: cfg });
+    others.push(b.proc);
+    assert.equal((fs.statSync(cfg).mode & 0o777).toString(8), "600");
+    assert.deepEqual(JSON.parse(fs.readFileSync(cfg, "utf8")), { fullAccess: true, dirs: ["~/OrcaAgent"] });
+    assert.match(b.out, /完全放开模式/);
+    const r = await chat({ prompt: "hi" }, undefined, b.base);
+    assert.equal(r.events[0].mode, "full");
+  });
+
+  await check("C2 config fullAccess:false + dirs（~ 展开）：安全模式，第一个作 cwd，其余 --add-dir", async () => {
+    const home = path.join(tmp, "fakehome");
+    const cfg = path.join(tmp, "cfg-safe.json");
+    fs.writeFileSync(cfg, JSON.stringify({ fullAccess: false, dirs: ["~/a", "~/b"] }));
+    const b = await startBridge("cfgsafe", [], { ORCA_BRIDGE_CONFIG: cfg, HOME: home }, false);
+    others.push(b.proc);
+    const r = await chat({ prompt: "hi" }, undefined, b.base);
+    assert.equal(r.events[0].mode, "safe");
+    assert.ok(lastArgs().includes("--restricted"));
+    assert.equal(readLog("cwd.log").trim().split("\n").pop(), fs.realpathSync(path.join(home, "a")));
+    const a = lastArgs();
+    assert.equal(a[a.indexOf("--add-dir") + 1], path.join(home, "b"));
+  });
+
+  await check("C3 config fullAccess:true：请求体改不回安全；--dir 覆盖配置 dirs", async () => {
+    const cfg = path.join(tmp, "cfg-full.json");
+    fs.writeFileSync(cfg, JSON.stringify({ fullAccess: true, dirs: [path.join(tmp, "elsewhere")] }));
+    const b = await startBridge("cfgfull", [], { ORCA_BRIDGE_CONFIG: cfg });
+    others.push(b.proc);
+    const r = await chat({ prompt: "hi", fullAccess: false, mode: "safe", permissionMode: "manual" }, undefined, b.base);
+    assert.equal(r.events[0].mode, "full");
+    assert.equal(lastArgs()[lastArgs().indexOf("--permission-mode") + 1], "bypassPermissions");
+    assert.equal(readLog("cwd.log").trim().split("\n").pop(), fs.realpathSync(path.join(tmp, "work")));
+    assert.ok(!lastArgs().includes("--add-dir"));
+  });
+
+  await check("C4 命令行 --full-access 覆盖 config fullAccess:false（主实例配置即 false，见 V1）；config 格式不对 → 拒绝启动", async () => {
+    const cfg = path.join(tmp, "cfg-bad.json");
+    fs.writeFileSync(cfg, JSON.stringify({ fullAccess: "yes" }));
+    await assert.rejects(startBridge("cfgbad", [], { ORCA_BRIDGE_CONFIG: cfg }), /格式不对/);
   });
 } finally {
   bridge.kill();

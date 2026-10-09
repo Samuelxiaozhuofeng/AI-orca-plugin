@@ -1,4 +1,5 @@
-import { registerAiChatSettingsSchema, initAiChatSettings } from "./settings/ai-chat-settings";
+import { registerAiChatSettingsSchema, initAiChatSettings, getAiChatSettings } from "./settings/ai-chat-settings";
+import { autostartLocalCli } from "./services/ai/local-cli-autostart";
 import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-chat-ui";
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
 import { loadMemoryStore } from "./store/memory-store";
@@ -107,6 +108,8 @@ export async function load(_name: string) {
   await registerAiChatSettingsSchema(pluginName);
   // 加载存储的 provider 配置
   await initAiChatSettings(pluginName);
+  // 有本机 AI 平台时探测并按需拉起中转（非阻塞）
+  autostartLocalCli(getAiChatSettings(pluginName).providers).catch((err) => console.warn("[local-cli] 自动启动出错:", err));
   
   // 先注册 UI，这样 window.getAiChatPluginName 才能被设置
   registerAiChatUI(pluginName);
