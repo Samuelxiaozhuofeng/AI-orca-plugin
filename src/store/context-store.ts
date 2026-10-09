@@ -102,10 +102,6 @@ export function removeContext(key: string): void {
   contextStore.selected = contextStore.selected.filter((c) => contextKey(c) !== key);
 }
 
-export function clearContexts(): void {
-  contextStore.selected = [];
-}
-
 /**
  * Clear high priority contexts (dragged blocks)
  * Called after sending a message to remove temporary context

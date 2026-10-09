@@ -7,7 +7,6 @@ import {
   registerAiChatContextMenus,
   unregisterAiChatContextMenus,
 } from "./ai-chat-context-menu";
-import { getAiChatSettings } from "../settings/ai-chat-settings";
 import { saveSession, type SavedSession } from "../services/session-service";
 
 let pluginName = "";

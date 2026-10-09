@@ -1,7 +1,7 @@
 import type { PanelProps } from "../orca.d.ts";
 
 import { buildContextForSend } from "../services/notes/context-builder";
-import { contextKey, contextStore, type ContextRef } from "../store/context-store";
+import { contextKey, contextStore } from "../store/context-store";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { findViewPanelById } from "../utils/panel-tree";
@@ -9,7 +9,6 @@ import { estimateTokens, formatTokenCount } from "../utils/token-utils";
 import { isSameDay, formatDateSeparator, getTimeGreeting } from "../utils/chat-ui-utils";
 import { withTooltip } from "../utils/orca-tooltip";
 import ChatInput from "./ChatInput";
-import MarkdownMessage from "../components/MarkdownMessage";
 import MessageItem from "./MessageItem";
 import DateSeparator from "../components/DateSeparator";
 import ScrollToBottomButton from "../components/ScrollToBottomButton";
@@ -26,8 +25,6 @@ import { injectChatStyles } from "../styles/chat-animations";
 import {
   getAiChatSettings,
   getModelApiConfig,
-  getCurrentApiConfig,
-  getSelectedProvider,
   updateAiChatSettings,
   validateCurrentConfig,
   modelSupportsTools,
@@ -52,7 +49,7 @@ import {
   type FileRef,
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
-import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
+import { updateSessionStore, clearSessionStore } from "../store/session-store";
 import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults } from "../services/ai/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
@@ -60,9 +57,8 @@ import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stre
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE, BANNER_RE, bannerOf, getLastLocalCliMode, type LocalCliRun } from "../services/ai/local-cli-client";
 import { pickLocalCliResume } from "../services/ai/local-cli-resume";
-import { createChatRequestOwner, loadIfLatest, shouldReportFailure } from "../utils/chat-request-owner";
+import { createChatRequestOwner, loadIfLatest } from "../utils/chat-request-owner";
 import { createPendingSave } from "../utils/pending-save";
-import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
   createSyntheticToolErrorMessage,
@@ -86,7 +82,6 @@ import {
   stashCurrentBranch,
   deleteBranch,
   renameBranch,
-  getActiveBranchId,
 } from "../services/branch-service";
 
 const React = window.React as unknown as {
@@ -201,15 +196,6 @@ function smoothScrollToBottom(
 
 const AUTO_SCROLL_INTERVAL_MS = 150;
 const AUTO_SCROLL_DURATION_MS = 150;
-
-function restoreScrollPosition(el: HTMLDivElement | null, savedPosition?: number) {
-  if (!el) return;
-  if (savedPosition !== undefined) {
-    el.scrollTop = savedPosition;
-  } else {
-    el.scrollTop = el.scrollHeight;
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EditableTitle Component - 可编辑的会话标题
@@ -844,8 +830,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
     const ccHistoryGenAtSend = ccHistoryGenRef.current;
     if (!content && (!files || files.length === 0)) return;
-    
-    const trimmedContent = content.trim();
 
     // 归属登记：作废并中止上一请求；被接替或换对话后，本次请求的界面写入一律丢弃，
     // 中止器生来即中止、不登记进 abortRef
