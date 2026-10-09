@@ -203,6 +203,31 @@ export function saveBranchMessages(
 }
 
 /**
+ * 离开分支点前，把当前所在分支的内容存回它的分支数据（切换 / 新建分支都会把分支点之后的消息换掉）。
+ * 当前分支按：界面记的当前分支 → 分支点后第一条消息出自哪个分支 → 唯一一个还空着的分支（刚建、没离开过）。
+ * 分支点后有内容却认不出属于哪个分支时返回 null，调用方别切，免得丢消息。
+ */
+export function stashCurrentBranch(
+  messages: Message[],
+  branchPointId: string,
+  currentBranchId: string | null
+): Message[] | null {
+  const index = messages.findIndex(m => m.id === branchPointId);
+  const branches = messages[index]?.branches;
+  if (!branches || branches.length === 0) return messages;
+
+  const after = messages[index + 1];
+  const empty = branches.filter(b => b.messages.length === 0);
+  const leaving =
+    branches.find(b => b.id === currentBranchId) ??
+    (after && branches.find(b => b.messages.some(m => m.id === after.id))) ??
+    (after && empty.length === 1 ? empty[0] : undefined);
+
+  if (leaving) return saveBranchMessages(messages, branchPointId, leaving.id);
+  return after ? null : messages;
+}
+
+/**
  * 删除分支
  * @param messages 消息列表
  * @param branchPointId 分支点消息 ID

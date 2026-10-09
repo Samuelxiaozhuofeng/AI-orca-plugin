@@ -222,20 +222,15 @@ export default function AiChatBlockRenderer({
       // 导入 session-service 和 ui 模块
       const { createNewSession } = await import("../services/session-service");
       const { openAiChatPanel } = await import("../ui/ai-chat-ui");
-      const { updateSessionStore } = await import("../store/session-store");
-      
-      // 创建新会话并加载消息
-      const newSession = {
+      const { uiStore } = await import("../store/ui-store");
+
+      // 新建一份副本交给面板载入（不带本机 AI 续接点），面板没开就先打开
+      uiStore.pendingChatSession = {
         ...createNewSession(),
         title,
-        model: model || undefined,
+        model: model || "",
         messages: [...messages],
       };
-      
-      // 更新 session store
-      updateSessionStore(newSession, messages, []);
-      
-      // 打开 AI 面板
       openAiChatPanel();
       
       orca.notify("success", "已加载对话，可以继续聊天");

@@ -19,6 +19,7 @@ import "./local-cli-instructions.test";
 import "./local-cli-resume.test";
 import "./chat-request-owner.test";
 import "./pending-save.test";
+import "./branch-switch.test";
 import "./session-select-race.test";
 import "./workdir.test";
 import "./local-image-paths.test";

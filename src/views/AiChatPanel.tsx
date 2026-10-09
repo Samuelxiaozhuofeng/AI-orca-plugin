@@ -93,6 +93,7 @@ import {
 import {
   createBranch,
   switchBranch,
+  stashCurrentBranch,
   deleteBranch,
   renameBranch,
   getActiveBranchId,
@@ -663,7 +664,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setLastError(null);
   }, [currentSession.id]);
 
-  const handleSelectSession = useCallback(async (sessionId: string) => {
+  // preloaded：已在手的对话（如笔记里聊天块的副本），不从存档读
+  const handleSelectSession = useCallback(async (sessionId: string, preloaded?: SavedSession) => {
     const seq = ++switchSeqRef.current;
     // 点的就是界面上正显示的对话：界面已是最新，不重读（重读可能拿到旧缓存盖掉新消息）；
     // 序号已自增，切走途中又点回来时，那次还没完成的切换会作废
@@ -685,7 +687,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
 
     // 加载完整会话数据（包含消息）
-    const session = await loadIfLatest(selectionOwnerRef.current, () => loadFullSession(sessionId));
+    const session = await loadIfLatest(selectionOwnerRef.current, async () => preloaded ?? loadFullSession(sessionId));
     // 没加载到，或期间又选了别的 / 新建了对话
     if (!session || seq !== switchSeqRef.current) return;
     // 等待期间输入框可用，这时发出的请求属于离开的对话，作废掉免得回复写进目标对话
@@ -800,6 +802,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     return () => pendingSave.cancel();
   }, [messages, currentSession, sessionsLoaded, contextSnap.selected]);
+
+  // 笔记里聊天块点「继续对话」：按切换对话的流程载入那份副本（面板已开或刚打开都走这里）
+  useEffect(() => {
+    const copy = uiStore.pendingChatSession;
+    if (!copy) return;
+    uiStore.pendingChatSession = null;
+    void handleSelectSession(copy.id, JSON.parse(JSON.stringify(copy)));
+  }, [uiSnap.pendingChatSession]);
 
   // Sync state to session store for auto-save on close
   useEffect(() => {
@@ -2283,6 +2293,17 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     invalidateCcHead();
     setMessages([]);
     setLastError(null);
+    // 空状态立刻同步进关闭补存和存档：不然关面板时会把清空前的快照写回去，再打开旧内容复活
+    const emptied: SavedSession = { ...currentSession, ccHead: undefined, messages: [], contexts: [...contextSnap.selected] };
+    updateSessionStore(emptied, [], emptied.contexts);
+    pendingSave.schedule(() => async () => {
+      // 从没存过的对话不必留一条空记录
+      const data = await loadSessions();
+      if (!data.sessions.some((s) => s.id === emptied.id)) return;
+      await autoCacheSession(emptied);
+      setSessions((await loadSessions()).sessions);
+    });
+    void pendingSave.flush();
   }
 
   function stop() {
@@ -2342,7 +2363,12 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       console.log("[Branch] Creating branch at message:", messageId);
       console.log("[Branch] Current messages:", messages.length);
       // createBranch(messages, messageId, branchName?) -> { messages: Message[]; branchId: string }
-      const result = createBranch(messages, messageId);
+      const stashed = stashCurrentBranch(messages, messageId, currentBranchId);
+      if (!stashed) {
+        orca.notify("error", "认不出当前在哪个分支，为免丢消息先不新建分支");
+        return;
+      }
+      const result = createBranch(stashed, messageId);
       console.log("[Branch] Result:", {
         branchId: result.branchId,
         messagesCount: result.messages.length,
@@ -2357,12 +2383,17 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       console.error("[Branch] Create failed:", err);
       orca.notify("error", err?.message || "创建分支失败");
     }
-  }, [messages]);
+  }, [messages, currentBranchId]);
 
   const handleSwitchBranch = useCallback((messageId: string, branchId: string) => {
     try {
-      // switchBranch(messages, messageId, branchId) -> Message[]
-      const updatedMessages = switchBranch(messages, messageId, branchId);
+      // 先把离开的分支存回去，再换成目标分支的内容
+      const stashed = stashCurrentBranch(messages, messageId, currentBranchId);
+      if (!stashed) {
+        orca.notify("error", "认不出当前在哪个分支，为免丢消息先不切换");
+        return;
+      }
+      const updatedMessages = switchBranch(stashed, messageId, branchId);
       invalidateCcHead();
       setMessages(updatedMessages);
       setCurrentBranchId(branchId);
@@ -2370,7 +2401,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     } catch (err: any) {
       orca.notify("error", err?.message || "切换分支失败");
     }
-  }, [messages]);
+  }, [messages, currentBranchId]);
 
   const handleDeleteBranch = useCallback((messageId: string, branchId: string) => {
     try {
