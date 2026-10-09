@@ -67,7 +67,7 @@ import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
-import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
+import { LOCAL_CLI_ABORT_NOTE, BANNER_RE, bannerOf, getLastLocalCliMode } from "../services/ai/local-cli-client";
 import { createChatRequestOwner, loadIfLatest, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
 import { createPendingSave } from "../utils/pending-save";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
@@ -2623,7 +2623,15 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       );
     }
 
+    // 本机 AI 模式行：和上一条回复的一样就不显示（只在首条和模型/模式/文件夹变了时显示）
+    let prevBanner: string | null = null;
     messages.forEach((m, i) => {
+      let shown = m;
+      if (m.role === "assistant") {
+        const banner = bannerOf(m.content);
+        if (banner && banner === prevBanner) shown = { ...m, content: m.content.replace(BANNER_RE, "") };
+        if (banner) prevBanner = banner;
+      }
       // 跳过普通 tool 消息，它们会被合并到 assistant 消息的工具调用区域
       // 但保留包含 journal-export 的 tool 消息，需要单独渲染导出按钮
       if (m.role === "tool" && !m.content.includes("```journal-export")) return;
@@ -2652,7 +2660,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       messageElements.push(
         createElement(MessageItem, {
           key: m.id,
-          message: m,
+          message: shown,
           messageIndex: i,
           isLastAiMessage: isLastAi,
           isStreaming: streamingMessageId === m.id,
@@ -2927,6 +2935,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       onUpdateSettings: handleUpdateSettings,
       workDir: currentSession.workDir,
       onWorkDirChange: handleWorkDirChange,
+      // 中转是全局一个模式：先看本次运行中转报告的，没有再看本对话最近一条模式行
+      localCliFullAccess: (getLastLocalCliMode() ?? ([...messages].reverse().map((m) => m.role === "assistant" ? bannerOf(m.content) : null).find(Boolean)?.includes("完全放开") ? "full" : null)) === "full",
       currency: settingsForUi.currency,
     }),
     // Skill Manager Modal

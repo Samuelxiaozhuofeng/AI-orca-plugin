@@ -135,6 +135,8 @@ type Props = {
   /** 当前对话选的本机 AI 工作文件夹（空 = 默认文件夹） */
   workDir?: string;
   onWorkDirChange: (workDir: string | undefined) => void;
+  /** 本机 AI 中转在完全放开模式下运行：输入框旁常亮红色标签 */
+  localCliFullAccess?: boolean;
 };
 
 // Enhanced Styles
@@ -212,6 +214,7 @@ export default function ChatInput({
   currency = "USD",
   workDir,
   onWorkDirChange,
+  localCliFullAccess,
 }: Props) {
   const [text, setText] = useState("");
   const [overflowMenuLayout, setOverflowMenuLayout] = useState<{ width: number; alignment: "left" | "right" }>({ width: 360, alignment: "right" });
@@ -1591,6 +1594,10 @@ export default function ChatInput({
             onUpdateSettings,
           }),
           isLocalCli && !overflowFlags.hideWorkDir && createElement(WorkDirButton, { workDir, onChange: onWorkDirChange }),
+          isLocalCli && localCliFullAccess && createElement("span", {
+            title: "本机 AI 在完全放开模式下运行：会不经确认直接改文件、跑命令、改笔记",
+            style: { flexShrink: 0, padding: "1px 6px", borderRadius: 4, fontSize: 11, whiteSpace: "nowrap", color: "var(--orca-color-danger)", border: "1px solid var(--orca-color-danger)" },
+          }, "⚠ 完全放开"),
         ),
 
         createElement(

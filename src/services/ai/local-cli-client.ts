@@ -91,6 +91,18 @@ function lastUserIndex(list: Array<{ role: string }>): number {
 // 不依赖换行：面板累加时会 trim，模式行后面的换行可能被吃掉；文件夹段用「」包住以便定界（旧格式没有文件夹段）
 export const BANNER_RE = /^本机 AI · 模型 [^\n]*? · (?:安全模式|⚠ 完全放开模式)(?: · 文件夹「[^」\n]*」)?\s*/;
 
+/** 回复开头的模式行（去尾部空白）；没有返回 null。面板据此只在首条/有变化时显示 */
+export function bannerOf(content: string): string | null {
+  const m = BANNER_RE.exec(content || "");
+  return m ? m[0].trim() : null;
+}
+
+/** 最近一次中转报告的运行模式（仅内存；中转是全局一个模式，输入框据此常亮「完全放开」标签） */
+let lastMode: "safe" | "full" | null = null;
+export function getLastLocalCliMode(): "safe" | "full" | null {
+  return lastMode;
+}
+
 /** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示；带 cwd 才加文件夹段（完整路径；」和换行换掉，保证 BANNER_RE 能定界） */
 export function sessionBanner(ev: any): string | null {
   if (ev?.mode !== "safe" && ev?.mode !== "full") return null;
@@ -259,6 +271,7 @@ export async function* streamLocalCli(
     const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions), model: options.model, orcaMcp: ctx.orcaMcp, ...(workDir ? { workDir } : {}) };
     for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
       if (ev.type === "session") {
+        if (ev.mode === "safe" || ev.mode === "full") lastMode = ev.mode;
         if (workDir && !ev.cwd && !staleBridgeWarned.has(ctx.conversationId)) {
           staleBridgeWarned.add(ctx.conversationId);
           orca.notify("warn", "中转程序是旧版，选的文件夹没生效，AI 仍在默认文件夹里运行；请退出中转后重新打开 Orca");
