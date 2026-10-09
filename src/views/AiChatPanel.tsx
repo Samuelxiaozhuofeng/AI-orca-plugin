@@ -708,9 +708,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     const seq = ++switchSeqRef.current;
+    // 点的就是界面上正显示的对话：界面已是最新，不重读（重读可能拿到旧缓存盖掉新消息）；
+    // 序号已自增，切走途中又点回来时，那次还没完成的切换会作废
+    if (sessionId === currentSession.id) return;
     // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
-    if (sessionId !== currentSession.id) abandonCurrentRequest();
-    // 快照已当场拍下；等写完再读目标对话，快速切回（含点回当前对话）时才读得到刚补存的内容
+    abandonCurrentRequest();
+    // 快照已当场拍下；等写完再读目标对话，快速切回时才读得到刚补存的内容
     await pendingSave.flush();
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -728,7 +731,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const session = await loadFullSession(sessionId);
     if (!session || seq !== switchSeqRef.current) return;
     // 等待期间输入框可用，这时发出的请求属于离开的对话，作废掉免得回复写进目标对话
-    if (sessionId !== currentSession.id) abandonCurrentRequest();
+    abandonCurrentRequest();
 
     setCurrentSession({
       ...session,
