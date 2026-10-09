@@ -26,7 +26,8 @@ const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
 const EXIT_GRACE_MS = 3000;
 const MANAGED_SETTINGS = process.env.ORCA_BRIDGE_MANAGED_SETTINGS || "/Library/Application Support/ClaudeCode/managed-settings.json";
-const MODELS = ["claude", "fable", "opus", "sonnet", "haiku"]; // claude = 不指定，用 Claude Code 默认
+const MODELS = ["claude", "fable", "opus", "sonnet", "haiku"]; // claude = 不指定，用 Claude Code 默认；查不到本机列表时用它
+const MODEL_QUERY_MS = Number(process.env.ORCA_BRIDGE_MODEL_QUERY_MS) || 20000;
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._\-\[\]]{0,99}$/;
 const SID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // 安全模式下 init 里出现这些权限模式说明权限被放宽，立即终止
@@ -439,6 +440,50 @@ async function handleChat(req, res, body) {
   });
 }
 
+// 启动后查一次本机 Claude Code 的模型列表；查到前 / 失败时 /models 用写死列表。
+// 不读任何设置来源、关掉全部钩子、不连 MCP：不会跑用户或文件夹里的钩子
+let modelList = MODELS.map((id) => ({ id, object: "model" }));
+function queryModels() {
+  const claudeBin = resolveClaudeBin(CLAUDE_NAME);
+  if (!claudeBin) return console.warn("查询模型列表失败：找不到 claude 命令，用默认列表");
+  const args = ["-p", "--setting-sources", "", "--settings", JSON.stringify({ disableAllHooks: true }), "--strict-mcp-config", "--no-session-persistence", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
+  const child = spawn(claudeBin, args, { cwd, env: SAFE_ENV, stdio: ["pipe", "pipe", "ignore"] });
+  children.add(child);
+  let done = false;
+  const end = (why) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    if (why) console.warn(`查询模型列表失败（${why}），用默认列表`);
+    children.delete(child);
+    child.kill("SIGTERM");
+  };
+  const timer = setTimeout(() => end("超时"), MODEL_QUERY_MS);
+  child.on("error", (err) => end(err.message));
+  child.on("exit", (code) => end(`claude 提前退出（${code}）`));
+  child.stdin.on("error", () => {});
+  child.stdout.setEncoding("utf8");
+  onLines(child.stdout, (line) => {
+    let m;
+    try { m = JSON.parse(line); } catch { return; }
+    if (m.type !== "control_response" || done) return;
+    const list = m.response?.response?.models;
+    const extra = Array.isArray(list)
+      ? list.filter((x) => typeof x?.value === "string" && x.value !== "default" && x.value !== "claude" && MODEL_RE.test(x.value))
+      : [];
+    if (!extra.length) return end("返回格式不对");
+    const seen = new Set(["claude"]);
+    modelList = [{ id: "claude", object: "model" }];
+    for (const x of extra) {
+      if (seen.has(x.value)) continue;
+      seen.add(x.value);
+      modelList.push({ id: x.value, object: "model", ...(typeof x.displayName === "string" && x.displayName ? { label: x.displayName } : {}) });
+    }
+    end();
+  });
+  child.stdin.write(JSON.stringify({ type: "control_request", request_id: "models", request: { subtype: "initialize" } }) + "\n");
+}
+
 function handlePermission(res, body) {
   const p = pending.get(body.requestId);
   if (!p) return sendJson(res, 404, { error: "没有这个待确认请求（可能已中止）" });
@@ -459,7 +504,7 @@ const server = http.createServer(async (req, res) => {
   if (!authorized(req)) return sendJson(res, 401, { error: "令牌不对" });
   try {
     if (req.method === "GET" && (req.url === "/models" || req.url === "/v1/models")) {
-      return sendJson(res, 200, { object: "list", data: MODELS.map((id) => ({ id, object: "model" })) });
+      return sendJson(res, 200, { object: "list", data: modelList });
     }
     if (req.method === "POST" && req.url === "/chat") return await handleChat(req, res, await readJson(req));
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
@@ -498,5 +543,6 @@ server.listen(port, HOST, () => {
   } else {
     console.log("安全模式：改文件、跑命令、改笔记前都会在插件里弹确认。");
   }
+  queryModels();
 
 });

@@ -105,7 +105,14 @@ export async function load(_name: string) {
   // 加载存储的 provider 配置
   await initAiChatSettings(pluginName);
   // 有本机 AI 平台时探测并按需拉起中转（非阻塞）
-  autostartLocalCli(getAiChatSettings(pluginName).providers).catch((err) => console.warn("[local-cli] 自动启动出错:", err));
+  const providers = getAiChatSettings(pluginName).providers;
+  autostartLocalCli(providers)
+    .then((ok) => {
+      if (!ok && providers.some((p) => p.protocol === "local-cli" && p.enabled !== false)) {
+        orca.notify("warn", "本机 AI 中转没能自动启动，用本机 AI 前请打开「Orca Agent Bridge」App，或看 ~/.orca-agent-bridge/bridge.log");
+      }
+    })
+    .catch((err) => console.warn("[local-cli] 自动启动出错:", err));
   
   // 先注册 UI，这样 window.getAiChatPluginName 才能被设置
   registerAiChatUI(pluginName);

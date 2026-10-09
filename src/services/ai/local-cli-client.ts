@@ -8,6 +8,7 @@
 
 import type { OpenAIChatMessage } from "./openai-client";
 import type { StreamChunk } from "./chat-stream-handler";
+import { autostartLocalCli, fetchWithReconnect } from "./local-cli-autostart";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
@@ -179,12 +180,16 @@ async function* readBridge(
     arm();
     let res: Response;
     try {
-      res = await fetch(`${base}/chat`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
+      res = await fetchWithReconnect(
+        () => fetch(`${base}/chat`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        }),
+        () => autostartLocalCli([{ apiUrl: base, apiKey, protocol: "local-cli" } as any]),
+        ctrl.signal,
+      );
     } catch {
       throw failure(new BridgeError(NOT_CONNECTED));
     }
