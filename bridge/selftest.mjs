@@ -707,6 +707,52 @@ try {
     assert.ok(!fs.existsSync(marker), "所选文件夹里的 claude 不应被启动");
     assert.notEqual(readLog("args.log"), before, "应启动 PATH 里的真 claude");
   });
+
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC";
+  const lastPrompt = () => JSON.parse(readLog("prompt.log").trim().split("\n").pop());
+  await check("I1 带 images：stdin content 是 [文字, 图片…]，回 images 事件；续接也带", async () => {
+    const r = await chat({ prompt: "看图", images: [{ mediaType: "image/png", data: PNG }, { mediaType: "image/jpeg", data: PNG }] });
+    assert.equal(r.events.at(-1).type, "done");
+    assert.ok(r.events.some((e) => e.type === "images" && e.count === 2));
+    assert.deepEqual(lastPrompt(), [
+      { type: "text", text: "看图" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: PNG } },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: PNG } },
+    ]);
+    const r2 = await chat({ prompt: "整段", resume: { sid: SID, prompt: "续接文字" }, images: [{ mediaType: "image/webp", data: PNG }] });
+    assert.equal(r2.events.at(-1).type, "done");
+    const p = lastPrompt();
+    assert.deepEqual(p[0], { type: "text", text: "续接文字" });
+    assert.equal(p[1].source.media_type, "image/webp");
+  });
+
+  await check("I2 非法 media_type / 坏 base64 / 太多 / 太大 / 非数组 → 400 带中文原因，不启动", async () => {
+    const before = readLog("args.log");
+    const big = "A".repeat(Math.ceil((10 * 1024 * 1024 + 3) / 3) * 4);
+    for (const [images, want] of [
+      [[{ mediaType: "image/svg+xml", data: PNG }], "类型不支持"],
+      [[{ mediaType: "image/png", data: "不是base64!!" }], "base64"],
+      [[{ mediaType: "image/png", data: "abc" }], "base64"],
+      [[{ mediaType: "image/png", data: "" }], "base64"],
+      [Array.from({ length: 11 }, () => ({ mediaType: "image/png", data: PNG })), "最多 10 张"],
+      [[{ mediaType: "image/png", data: big }], "单张请小于 10MB"],
+      ["x", "数组"],
+    ]) {
+      const res = await fetch(`${base}/chat`, { method: "POST", headers: auth, body: JSON.stringify({ prompt: "看图", images }) });
+      assert.equal(res.status, 400, want);
+      assert.ok((await res.json()).error.includes(want), want);
+    }
+    assert.equal(readLog("args.log"), before, "不应启动 claude");
+  });
+
+  await check("I3 无图（不带 / null / 空数组）：stdin content 仍是字符串，不回 images 事件", async () => {
+    for (const images of [undefined, null, []]) {
+      const r = await chat({ prompt: "纯文字", images });
+      assert.equal(r.events.at(-1).type, "done");
+      assert.equal(lastPrompt(), "纯文字");
+      assert.ok(!r.events.some((e) => e.type === "images"));
+    }
+  });
 } finally {
   bridge.kill();
   for (const p of others) p.kill("SIGKILL");

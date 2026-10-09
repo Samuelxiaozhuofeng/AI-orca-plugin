@@ -24,6 +24,13 @@ const SAFE_ENV = { ...process.env, PATH: (process.env.PATH || "").split(path.del
 const CLAUDE_NAME = process.env.ORCA_BRIDGE_CLAUDE || "claude";
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
+// /chat 可带图片（base64 约为原图 4/3）：总量 25MB 的图 ≈ 34MB，加上文字留到 40MB；其他路由仍 5MB
+const MAX_CHAT_BODY = 40 * 1024 * 1024;
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+const MAX_IMAGES = 10;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_IMAGES_TOTAL_BYTES = 25 * 1024 * 1024;
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/; // 配合长度是 4 的倍数；不用分组重复，大图不爆栈
 const EXIT_GRACE_MS = 3000;
 const MANAGED_SETTINGS = process.env.ORCA_BRIDGE_MANAGED_SETTINGS || "/Library/Application Support/ClaudeCode/managed-settings.json";
 const MODELS = ["claude", "fable", "opus", "sonnet", "haiku"]; // claude = 不指定，用 Claude Code 默认
@@ -192,13 +199,13 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function readJson(req) {
+function readJson(req, limit = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on("data", (c) => {
       size += c.length;
-      if (size > MAX_BODY) { reject(new Error("请求体过大")); req.destroy(); return; }
+      if (size > limit) { reject(new Error(`请求体过大（上限 ${limit / 1024 / 1024}MB），图片请少发几张或换小一点的`)); req.destroy(); return; }
       chunks.push(c);
     });
     req.on("end", () => {
@@ -265,6 +272,27 @@ function readProjectRules(dir) {
   } catch { return null; } finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
+/** 请求体里的 images：缺省 → []；不合格 → { error: 中文原因 }。只校验、原样转给 claude，不落盘、不进命令行 */
+function parseImages(raw) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) return { error: "images 必须是数组" };
+  if (raw.length > MAX_IMAGES) return { error: `图片太多：一次最多 ${MAX_IMAGES} 张` };
+  let total = 0;
+  const out = [];
+  for (const [i, img] of raw.entries()) {
+    const n = i + 1;
+    if (!img || typeof img !== "object") return { error: `第 ${n} 张图片格式不对` };
+    if (!IMAGE_TYPES.includes(img.mediaType)) return { error: `第 ${n} 张图片类型不支持（${String(img.mediaType)}），只支持 PNG、JPEG、GIF、WebP` };
+    if (typeof img.data !== "string" || !img.data || img.data.length % 4 !== 0 || !BASE64_RE.test(img.data)) return { error: `第 ${n} 张图片数据不是合法 base64` };
+    const bytes = Buffer.byteLength(img.data, "base64");
+    if (bytes > MAX_IMAGE_BYTES) return { error: `第 ${n} 张图片太大，单张请小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB` };
+    total += bytes;
+    if (total > MAX_IMAGES_TOTAL_BYTES) return { error: `图片总共太大，合计请小于 ${MAX_IMAGES_TOTAL_BYTES / 1024 / 1024}MB` };
+    out.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } });
+  }
+  return out;
+}
+
 /** SIGTERM 并等它退出；3 秒还没退就 SIGKILL */
 function stopChild(child) {
   return new Promise((resolve) => {
@@ -279,6 +307,8 @@ function stopChild(child) {
 async function handleChat(req, res, body) {
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt.trim()) return sendJson(res, 400, { error: "prompt 为空" });
+  const images = parseImages(body.images);
+  if (images.error) return sendJson(res, 400, { error: images.error });
   // 续接：sid 必须是 UUID、续接文字非空，否则忽略 resume，照旧用整段 prompt 新开
   const r = body.resume;
   const resume = r && typeof r.sid === "string" && SID_RE.test(r.sid) && typeof r.prompt === "string" && r.prompt.trim() ? { sid: r.sid, prompt: r.prompt } : null;
@@ -338,7 +368,10 @@ async function handleChat(req, res, body) {
   let stderrTail = "";
 
   child.stdin.on("error", () => {});
-  child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: resume ? resume.prompt : prompt } }) + "\n");
+  const text = resume ? resume.prompt : prompt;
+  // 有图：content 改成 [文字, 图片…]；无图保持纯字符串（与旧版一致）
+  child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: images.length ? [{ type: "text", text }, ...images] : text } }) + "\n");
+  if (images.length) send({ type: "images", count: images.length }); // 插件据此判断中转认得图片（旧中转不发）
   child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-2000); });
   const cleanup = () => {
     for (const [id, p] of pending) if (p.child === child) pending.delete(id);
@@ -461,7 +494,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && (req.url === "/models" || req.url === "/v1/models")) {
       return sendJson(res, 200, { object: "list", data: MODELS.map((id) => ({ id, object: "model" })) });
     }
-    if (req.method === "POST" && req.url === "/chat") return await handleChat(req, res, await readJson(req));
+    if (req.method === "POST" && req.url === "/chat") return await handleChat(req, res, await readJson(req, MAX_CHAT_BODY));
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
     sendJson(res, 404, { error: "not found" });
   } catch (err) {
