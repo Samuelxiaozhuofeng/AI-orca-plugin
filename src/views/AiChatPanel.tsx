@@ -1506,10 +1506,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       const modelContextLength = getModelContextLength(settings, model);
 
       // 历史在准备期间被改过就不续接；决定续接后先撤掉旧续接点，只由本请求正常 / 停止收尾写回新的
-      const ccResume = apiConfig.protocol === "local-cli" && ccHistoryGenRef.current === ccHistoryGenAtSend
+      const ccResume = apiConfig.protocol === "local-cli" && req.isCurrent() && ccHistoryGenRef.current === ccHistoryGenAtSend
         ? pickLocalCliResume(baseMessages, currentSession.ccHead)
         : undefined;
-      if (ccResume) setCurrentSession((prev) => ({ ...prev, ccHead: undefined }));
+      if (ccResume) setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: undefined }));
 
       for await (const chunk of streamChatWithRetry(
         {
@@ -2280,6 +2280,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
   function clear() {
     if (abortRef.current) abortRef.current.abort();
+    invalidateCcHead();
     setMessages([]);
     setLastError(null);
   }
