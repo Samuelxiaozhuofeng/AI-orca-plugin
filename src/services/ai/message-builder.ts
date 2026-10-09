@@ -12,17 +12,6 @@ import { buildFileContentsForApi } from "../file-service";
 import { extractOrcaImagesFromText, hasOrcaImageLinks } from "../../utils/orca-image-extractor";
 import { snipOldToolResults } from "./context-manager";
 
-export interface MessageBuildParams {
-  messages: Message[];
-  userContent: string;
-  systemPrompt?: string;
-  contextText?: string;
-  // Token 优化参数
-  maxHistoryMessages?: number; // 0=不限制
-  // 模型 ID（用于判断是否需要视觉模型代理）
-  modelId?: string;
-}
-
 export interface ConversationBuildParams {
   messages: Message[];
   systemPrompt?: string;

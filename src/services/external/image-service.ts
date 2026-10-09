@@ -9,17 +9,6 @@
 
 import type { ImageRef } from "../session-service";
 
-/**
- * 支持的图片 MIME 类型（包括动图）
- */
-const SUPPORTED_MIME_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/gif",
-  "image/webp",
-  "image/avif",
-];
 
 /**
  * 最大图片大小 (20MB，动图可能较大)
@@ -73,13 +62,6 @@ export async function imageToBase64(imageRef: ImageRef): Promise<string | null> 
     console.error("[image-service] Failed to convert image to base64:", error);
     return null;
   }
-}
-
-/**
- * 验证文件是否为支持的图片类型
- */
-export function isValidImageFile(file: File): boolean {
-  return SUPPORTED_MIME_TYPES.includes(file.type);
 }
 
 /**

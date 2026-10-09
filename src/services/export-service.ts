@@ -116,17 +116,6 @@ export function exportSessionAsFile(session: SavedSession): void {
 }
 
 /**
- * 子块信息接口
- */
-export interface BlockInfo {
-  id: number;
-  content: string;
-  created?: string;
-  modified?: string;
-  depth: number;        // 嵌套深度，0 为顶级
-}
-
-/**
  * 转换消息用于保存（保留完整信息）
  */
 function convertMessages(messages: Message[]): SavedMessage[] {

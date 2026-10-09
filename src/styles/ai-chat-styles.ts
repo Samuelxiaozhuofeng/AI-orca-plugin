@@ -386,86 +386,6 @@ export const suggestionDescStyle: React.CSSProperties = {
 // Tool Status Indicator Styles (Gemini UX Review - Semantic Tool Display)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type ToolStatus = "loading" | "success" | "failed" | "cancelled";
-
-/**
- * Tool status pill - inline status indicator
- * Modern card-style design with status-based styling
- */
-export const toolStatusPillStyle = (status: ToolStatus): React.CSSProperties => {
-  // 状态颜色配置
-  const statusColors = {
-    loading: { bg: "color-mix(in srgb, var(--orca-color-primary) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-primary) 20%, transparent)", text: "var(--orca-color-primary)" },
-    success: { bg: "color-mix(in srgb, var(--orca-color-success, #22c55e) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-success, #22c55e) 20%, transparent)", text: "var(--orca-color-success, #22c55e)" },
-    failed: { bg: "color-mix(in srgb, var(--orca-color-danger, #dc3545) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-danger, #dc3545) 20%, transparent)", text: "var(--orca-color-danger, #dc3545)" },
-    cancelled: { bg: "color-mix(in srgb, var(--orca-color-text-3) 10%, transparent)", border: "color-mix(in srgb, var(--orca-color-text-3) 20%, transparent)", text: "var(--orca-color-text-3)" },
-  };
-  const colors = statusColors[status];
-  
-  return {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    padding: "10px 14px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    background: colors.bg,
-    border: `1px solid ${colors.border}`,
-    color: "var(--orca-color-text-2)",
-    transition: "all 0.2s ease",
-    maxWidth: "100%",
-    overflow: "hidden",
-  };
-};
-
-/**
- * Tool status icon - animated icon container
- */
-export const toolStatusIconStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: "16px",
-  flexShrink: 0,
-  width: "24px",
-  height: "24px",
-  borderRadius: "6px",
-  background: "rgba(255, 255, 255, 0.5)",
-};
-
-/**
- * Tool status text - status description
- */
-export const toolStatusTextStyle: React.CSSProperties = {
-  flex: 1,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontWeight: 500,
-  fontSize: "13px",
-};
-
-/**
- * Tool status expand button - low-contrast code icon
- * Gemini UX Review: Click interaction over hover (touch-friendly)
- */
-export const toolStatusExpandButtonStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "20px",
-  height: "20px",
-  padding: 0,
-  border: "none",
-  borderRadius: "var(--orca-radius-sm)",
-  background: "transparent",
-  color: "var(--orca-color-text-3)",
-  cursor: "pointer",
-  opacity: 0.6,
-  transition: "opacity 0.2s ease",
-  flexShrink: 0,
-};
-
 /**
  * Tool status details - expandable details panel
  */
@@ -493,21 +413,6 @@ export const toolStatusErrorStyle: React.CSSProperties = {
   color: "var(--orca-color-danger, #dc3545)",
   whiteSpace: "pre-wrap",
   wordBreak: "break-all",
-};
-
-/**
- * Tool status retry button - retry action button
- */
-export const toolStatusRetryButtonStyle: React.CSSProperties = {
-  padding: "4px 8px",
-  fontSize: "12px",
-  border: "1px solid var(--orca-color-border)",
-  borderRadius: "var(--orca-radius-sm)",
-  background: "var(--orca-color-bg-2)",
-  color: "var(--orca-color-text-1)",
-  cursor: "pointer",
-  marginLeft: "8px",
-  flexShrink: 0,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

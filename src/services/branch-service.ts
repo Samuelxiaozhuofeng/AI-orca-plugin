@@ -19,12 +19,6 @@ export interface BranchInfo {
   parentMessageId?: string;
 }
 
-export interface BranchPoint {
-  messageId: string;
-  messageIndex: number;
-  branches: BranchInfo[];
-}
-
 // ───────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ───────────────────────────────────────────────────────────────────────────────
@@ -309,15 +303,3 @@ export function renameBranch(
 // Query Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 获取当前活跃的分支 ID
- */
-export function getActiveBranchId(messages: Message[]): string | null {
-  // 查找最后一条消息的 branchId
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].branchId) {
-      return messages[i].branchId ?? null;
-    }
-  }
-  return null;
-}
