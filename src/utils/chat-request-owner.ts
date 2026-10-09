@@ -53,3 +53,16 @@ export function settlePendingConfirms(resolvers: Map<string, (approved: boolean)
 export function shouldReportFailure(isCurrent: () => boolean, err: unknown): boolean {
   return isCurrent() && String((err as any)?.name) !== "AbortError";
 }
+
+/**
+ * 切换 / 恢复对话的异步加载：期间用户又选了别的对话或点了新对话（owner 被 begin / invalidate），
+ * 加载结果作废，返回 null，不覆盖用户更晚的选择。
+ */
+export async function loadIfLatest<T>(
+  owner: ReturnType<typeof createChatRequestOwner>,
+  load: () => Promise<T | null>,
+): Promise<T | null> {
+  const mine = owner.begin();
+  const result = await load();
+  return mine.isCurrent() ? result : null;
+}

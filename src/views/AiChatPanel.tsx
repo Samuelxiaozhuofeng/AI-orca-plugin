@@ -74,7 +74,7 @@ import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
-import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
+import { createChatRequestOwner, loadIfLatest, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -424,6 +424,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const abortRef = useRef<AbortController | null>(null);
   // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态、多模型面板）
   const chatOwnerRef = useRef(createChatRequestOwner());
+  // 对话选择的归属：只有最后一次选择 / 新建的加载结果才上屏
+  const selectionOwnerRef = useRef(createChatRequestOwner());
   const setMessagesUnguarded = setMessages;
   const setLastErrorUnguarded = setLastError;
   const setSendingUnguarded = setSending;
@@ -608,7 +610,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       setSessions(data.sessions);
       if (data.activeSessionId) {
         // 加载完整会话数据（包含消息）
-        const active = await loadFullSession(data.activeSessionId);
+        const activeId = data.activeSessionId;
+        const active = await loadIfLatest(selectionOwnerRef.current, () => loadFullSession(activeId));
         if (active) {
           // 恢复会话（即使没有消息，也可能有闪卡状态）
           setCurrentSession({
@@ -670,6 +673,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const defaultModel = settings.selectedModelId;
 
     abandonCurrentRequest();
+    selectionOwnerRef.current.invalidate();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -713,8 +717,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
 
     // 加载完整会话数据（包含消息）
-    const session = await loadFullSession(sessionId);
-    if (!session) return;
+    const session = await loadIfLatest(selectionOwnerRef.current, () => loadFullSession(sessionId));
+    if (!session) return; // 没加载到，或期间又选了别的 / 新建了对话
 
     setCurrentSession({
       ...session,
