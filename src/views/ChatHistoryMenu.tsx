@@ -347,7 +347,6 @@ export default function ChatHistoryMenu({
   // - 置顶始终在最前
   // - 收藏独立分组（⭐ 收藏）
   // - 非收藏按时间段分组：今天 / 昨天 / 本周 / 更早
-  const now = Date.now();
   const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
   const yesterdayStart = todayStart - 86400000;
   const weekStart = todayStart - 6 * 86400000;

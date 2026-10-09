@@ -9,7 +9,7 @@ import { getModelApiConfig } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
 import { buildContextForSend } from "../services/notes/context-builder";
 import { contextStore, contextKey, addBlockById, clearHighPriorityContexts } from "../store/context-store";
-import { estimateTokens, formatTokenCount, estimateCost, formatCost } from "../utils/token-utils";
+import { estimateTokens, formatTokenCount, estimateCost } from "../utils/token-utils";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
 import {
   uploadFile,

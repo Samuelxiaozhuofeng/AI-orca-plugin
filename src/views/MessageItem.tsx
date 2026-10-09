@@ -47,7 +47,7 @@ const React = window.React as unknown as {
   useRef: <T>(initial: T) => { current: T };
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback, useMemo, useEffect, useRef, Fragment } = React;
+const { createElement, useState, useCallback, useMemo, useEffect, useRef } = React;
 
 const { ContextMenu, Menu, MenuText } = orca.components;
 
@@ -1247,7 +1247,7 @@ export default function MessageItem({
   }, []);
 
   // Check if any tool calls are still loading
-  const toolCallsLoading = useMemo(() => {
+  useMemo(() => {
     if (!message.tool_calls || !toolResults) return true;
     return message.tool_calls.some((tc) => !toolResults.has(tc.id));
   }, [message.tool_calls, toolResults]);

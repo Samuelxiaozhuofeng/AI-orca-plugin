@@ -2,38 +2,6 @@
  * Shared styles for ChatInput components
  */
 
-export const inputWrapperStyle = (isFocused: boolean) => ({
-  display: "flex",
-  flexDirection: "column" as const,
-  gap: "8px",
-  background: "var(--orca-color-bg-2)",
-  borderRadius: "24px",
-  padding: "12px 16px",
-  border: isFocused
-    ? "1px solid var(--orca-color-primary, #007bff)"
-    : "1px solid var(--orca-color-border)",
-  boxShadow: isFocused
-    ? "0 4px 12px rgba(0,0,0,0.05)"
-    : "0 2px 8px rgba(0,0,0,0.02)",
-  transition: "all 0.2s ease",
-});
-
-export const toolbarStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-};
-
-export const addContextButtonStyle = {
-  padding: "2px 8px",
-  height: "24px",
-  fontSize: 12,
-  color: "var(--orca-color-text-2)",
-  borderRadius: "8px",
-  background: "var(--orca-color-bg-3)",
-};
-
 export const modelButtonStyle = {
   padding: "2px 10px",
   height: "24px",
@@ -80,24 +48,11 @@ export const sendButtonStyle = (canSend: boolean) => ({
   transition: "opacity 0.2s",
 });
 
-export const containerStyle = {
-  padding: "16px",
-  borderTop: "none",
-  background: "transparent",
-  position: "relative" as const,
-  zIndex: 20,
-};
-
 // Model selector menu styles
 export const menuContainerStyle = {
   padding: 16,
   boxSizing: "border-box" as const,
   background: "var(--orca-color-bg-1)",
-};
-
-export const menuFlexStyle = {
-  display: "flex",
-  gap: 16,
 };
 
 export const modelListPanelStyle = {
@@ -128,13 +83,6 @@ export const addModelTitleStyle = {
   fontWeight: 600,
   marginBottom: 8,
   color: "var(--orca-color-text-1)",
-};
-
-export const addModelHintStyle = {
-  marginTop: 8,
-  fontSize: 11,
-  color: "var(--orca-color-text-3)",
-  lineHeight: 1.4,
 };
 
 /**

@@ -25,7 +25,7 @@ const React = window.React as unknown as {
   useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
   useEffect: (fn: () => void | (() => void), deps: any[]) => void;
 };
-const { createElement, useState, useEffect } = React;
+const { createElement } = React;
 
 const { useSnapshot } = (window as any).Valtio as {
   useSnapshot: <T extends object>(proxyObject: T) => T;
