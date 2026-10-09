@@ -20,13 +20,11 @@ import {
 } from "../services/file-service";
 import ContextChips from "./ContextChips";
 import ContextPicker from "./ContextPicker";
-import { ModelSelectorButton, InjectionModeSelector, ModeSelectorButton, WorkDirButton } from "./chat-input";
+import { ModelSelectorButton, ModeSelectorButton, WorkDirButton } from "./chat-input";
 import { loadFromStorage } from "../store/chat-mode-store";
 import { textareaStyle, sendButtonStyle } from "./chat-input";
-import { MultiModelToggleButton } from "../components/MultiModelSelector";
-import { multiModelStore } from "../store/multi-model-store";
 import ToolPanel from "../components/ToolPanel";
-import { loadToolSettings, toolStore, toggleWebSearch, toggleAgenticRAG } from "../store/tool-store";
+import { loadToolSettings, toolStore, toggleWebSearch } from "../store/tool-store";
 import { getAllCommandsInfo } from "../services/commands-loader";
 import { listSkills } from "../services/ai/skills-manager";
 import type { SkillRef } from "../types/skills";
@@ -122,7 +120,7 @@ function collectBlockIdsFromDragPayload(payload: unknown, out: Set<number>, allo
 }
 
 type Props = {
-  onSend: (message: string, files?: FileRef[], clearContext?: boolean) => void | Promise<void>;
+  onSend: (message: string, files?: FileRef[]) => void | Promise<void>;
   onStop?: () => void;
   disabled?: boolean;
   currentPageId: DbId | null;
@@ -152,12 +150,8 @@ const inputContainerStyle: React.CSSProperties = {
 const TOOLBAR_HIDE_BREAKPOINTS = {
   token: 520,
   workDir: 300,
-  rag: 440,
   web: 400,
-  multi: 360,
-  injection: 320,
   mode: 280,
-  clear: 240,
 };
 
 const overflowMenuStyle: React.CSSProperties = {
@@ -256,7 +250,6 @@ export default function ChatInput({
   
   const [pendingFiles, setPendingFiles] = useState<FileRef[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const [clearContextPending, setClearContextPending] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -346,28 +339,20 @@ export default function ChatInput({
   const overflowFlags = useMemo(() => {
     const width = toolbarWidth || 9999;
     const hideWorkDir = isLocalCli && width < TOOLBAR_HIDE_BREAKPOINTS.workDir;
-    const hideRag = width < TOOLBAR_HIDE_BREAKPOINTS.rag;
     const hideWeb = width < TOOLBAR_HIDE_BREAKPOINTS.web;
-    const hideMulti = width < TOOLBAR_HIDE_BREAKPOINTS.multi;
-    const hideInjection = width < TOOLBAR_HIDE_BREAKPOINTS.injection;
     const hideMode = width < TOOLBAR_HIDE_BREAKPOINTS.mode;
-    const hideClear = width < TOOLBAR_HIDE_BREAKPOINTS.clear;
-    const hasOverflow = hideRag || hideWeb || hideMulti || hideInjection || hideMode || hideClear || hideWorkDir;
+    const hasOverflow = hideWeb || hideMode || hideWorkDir;
 
     return {
       hideWorkDir,
-      hideRag,
       hideWeb,
-      hideMulti,
-      hideInjection,
       hideMode,
-      hideClear,
       hasOverflow,
     };
   }, [toolbarWidth, isLocalCli]);
 
-  const showModeSection = overflowFlags.hideMulti || overflowFlags.hideInjection || overflowFlags.hideMode;
-  const showToolSection = overflowFlags.hideWeb || overflowFlags.hideRag;
+  const showModeSection = overflowFlags.hideMode;
+  const showToolSection = overflowFlags.hideWeb;
   const showTokenIndicator = tokenEstimate.inputTokens > 0;
 
   // 检测是否显示斜杠命令菜单 - 使用模糊匹配
@@ -553,10 +538,9 @@ export default function ChatInput({
     setIsSending(true);
     try {
       const contentToSend = trimmed || (hasContext ? "请基于我提供的上下文回答。" : "");
-      await onSend(contentToSend, pendingFiles.length > 0 ? pendingFiles : undefined, clearContextPending);
+      await onSend(contentToSend, pendingFiles.length > 0 ? pendingFiles : undefined);
       setText("");
       setPendingFiles([]);
-      setClearContextPending(false);
       // 清除拖入的高优先级上下文（发送后自动移除）
       clearHighPriorityContexts();
       if (textareaRef.current) {
@@ -568,20 +552,7 @@ export default function ChatInput({
     } finally {
       setIsSending(false);
     }
-  }, [disabled, onSend, text, pendingFiles, clearContextPending, isSending, hasContext]);
-
-  // 处理清除上下文按钮点击
-  const handleClearContextClick = useCallback(() => {
-    if (clearContextPending) {
-      // 如果已经是清除上下文状态，且没有输入内容，则撤销
-      const val = textareaRef.current?.value || text;
-      if (!val.trim() && pendingFiles.length === 0) {
-        setClearContextPending(false);
-      }
-    } else {
-      setClearContextPending(true);
-    }
-  }, [clearContextPending, text, pendingFiles]);
+  }, [disabled, onSend, text, pendingFiles, isSending, hasContext]);
 
   const handleKeyDown = useCallback(
     (e: any) => {
@@ -1538,33 +1509,6 @@ export default function ChatInput({
         )
       ),
 
-      // 清除上下文提示标签
-      clearContextPending && withTooltip(
-        "点击撤销清除上下文",
-        createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "4px 10px",
-              marginBottom: "8px",
-              background: "var(--orca-color-warning-bg, rgba(255, 193, 7, 0.1))",
-              border: "1px solid var(--orca-color-warning, #ffc107)",
-              borderRadius: "6px",
-              fontSize: "12px",
-              color: "var(--orca-color-warning, #ffc107)",
-              cursor: "pointer",
-            },
-            onClick: handleClearContextClick,
-          },
-          createElement("i", { className: "ti ti-refresh", style: { fontSize: "14px" } }),
-          "清除上下文",
-          createElement("span", { style: { color: "var(--orca-color-text-3)", marginLeft: "4px" } }, "(点击撤销)")
-        )
-      ),
-
       // Row 1: TextArea
       createElement("textarea", {
         ref: textareaRef as any,
@@ -1610,7 +1554,7 @@ export default function ChatInput({
           },
         },
 
-        // Left Tools: @ Button + File Button + Clear Context + Model Selector + Injection Mode Selector
+        // Left Tools: @ Button + File Button + Model Selector
         createElement(
           "div",
           {
@@ -1675,25 +1619,6 @@ export default function ChatInput({
             onUpdateSettings,
           }),
           isLocalCli && !overflowFlags.hideWorkDir && createElement(WorkDirButton, { workDir, onChange: onWorkDirChange }),
-          !overflowFlags.hideClear && withTooltip(
-            clearContextPending ? "\u64a4\u9500\u6e05\u9664\u4e0a\u4e0b\u6587" : "\u6e05\u9664\u4e0a\u4e0b\u6587\uff08\u5f00\u59cb\u65b0\u5bf9\u8bdd\uff09",
-            createElement(
-              Button,
-              {
-                variant: "plain",
-                onClick: handleClearContextClick,
-                style: {
-                  padding: "4px",
-                  color: clearContextPending ? "var(--orca-color-warning, #ffc107)" : undefined,
-                },
-              },
-              createElement("i", { className: "ti ti-refresh" })
-            )
-          ),
-          !overflowFlags.hideMulti && createElement(MultiModelToggleButton, {
-            settings,
-          }),
-          !overflowFlags.hideInjection && createElement(InjectionModeSelector, null),
           !overflowFlags.hideMode && createElement(ModeSelectorButton, null),
           !overflowFlags.hideWeb && withTooltip(
             toolSnap.webSearchEnabled ? "\u5173\u95ed\u8054\u7f51\u641c\u7d22" : "\u5f00\u542f\u8054\u7f51\u641c\u7d22",
@@ -1710,27 +1635,6 @@ export default function ChatInput({
                 },
               },
               createElement("i", { className: "ti ti-world-search" })
-            )
-          ),
-          !overflowFlags.hideRag && withTooltip(
-            tooltipText(
-              toolSnap.agenticRAGEnabled
-                ? "\u5173\u95ed\u6df1\u5ea6\u68c0\u7d22\uff08Agentic RAG\uff09\\n\u5f53\u524d\uff1aAI \u4f1a\u591a\u8f6e\u8fed\u4ee3\u68c0\u7d22\uff0c\u6d88\u8017\u66f4\u591atoken"
-                : "\u5f00\u542f\u6df1\u5ea6\u68c0\u7d22\uff08Agentic RAG\uff09\\n\u5f00\u542f\u540e\uff1aAI \u4f1a\u81ea\u4e3b\u89c4\u5212\u68c0\u7d22\u7b56\u7565\uff0c\u591a\u8f6e\u8fed\u4ee3\u76f4\u5230\u4fe1\u606f\u5145\u8db3"
-            ),
-            createElement(
-              Button,
-              {
-                variant: "plain",
-                onClick: toggleAgenticRAG,
-                style: {
-                  padding: "4px",
-                  color: toolSnap.agenticRAGEnabled ? "var(--orca-color-warning, #f59e0b)" : undefined,
-                  background: toolSnap.agenticRAGEnabled ? "rgba(245, 158, 11, 0.1)" : undefined,
-                  borderRadius: "4px",
-                },
-              },
-              createElement("i", { className: "ti ti-brain" })
             )
           ),
         ),
@@ -1773,19 +1677,6 @@ export default function ChatInput({
                 createElement(
                   "div",
                   { style: { ...overflowMenuStyle, minWidth: Math.min(240, overflowMenuLayout.width), maxWidth: overflowMenuLayout.width } },
-                  overflowFlags.hideClear && createElement("div", { style: overflowSectionTitleStyle }, "\u5feb\u6377\u64cd\u4f5c"),
-                  overflowFlags.hideClear && createElement(
-                    "div",
-                    {
-                      style: overflowItemStyle,
-                      onClick: () => {
-                        handleClearContextClick();
-                        close();
-                      },
-                    },
-                    createElement("span", { style: overflowItemLabelStyle }, clearContextPending ? "\u64a4\u9500\u6e05\u9664\u4e0a\u4e0b\u6587" : "\u6e05\u9664\u4e0a\u4e0b\u6587"),
-                    createElement("i", { className: "ti ti-refresh", style: { fontSize: "14px" } })
-                  ),
                   overflowFlags.hideWorkDir && createElement(
                     "div",
                     { style: overflowItemStyle },
@@ -1793,18 +1684,6 @@ export default function ChatInput({
                     createElement(WorkDirButton, { workDir, onChange: onWorkDirChange })
                   ),
                   showModeSection && createElement("div", { style: overflowSectionTitleStyle }, "\u6a21\u5f0f"),
-                  overflowFlags.hideMulti && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u591a\u6a21\u578b\u5e76\u884c"),
-                    createElement(MultiModelToggleButton, { settings })
-                  ),
-                  overflowFlags.hideInjection && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u6ce8\u5165\u6a21\u5f0f"),
-                    createElement(InjectionModeSelector, null)
-                  ),
                   overflowFlags.hideMode && createElement(
                     "div",
                     { style: overflowItemStyle },
@@ -1830,27 +1709,6 @@ export default function ChatInput({
                           },
                         },
                         createElement("i", { className: "ti ti-world-search" })
-                      )
-                    )
-                  ),
-                  overflowFlags.hideRag && createElement(
-                    "div",
-                    { style: overflowItemStyle },
-                    createElement("span", { style: overflowItemLabelStyle }, "\u6df1\u5ea6\u68c0\u7d22"),
-                    withTooltip(
-                      toolSnap.agenticRAGEnabled ? "\u5173\u95ed\u6df1\u5ea6\u68c0\u7d22" : "\u5f00\u542f\u6df1\u5ea6\u68c0\u7d22",
-                      createElement(
-                        Button,
-                        {
-                          variant: "plain",
-                          onClick: toggleAgenticRAG,
-                          style: {
-                            ...overflowToggleButtonStyle,
-                            color: toolSnap.agenticRAGEnabled ? "var(--orca-color-warning, #f59e0b)" : undefined,
-                            background: toolSnap.agenticRAGEnabled ? "rgba(245, 158, 11, 0.1)" : undefined,
-                          },
-                        },
-                        createElement("i", { className: "ti ti-brain" })
                       )
                     )
                   ),

@@ -62,7 +62,7 @@ import {
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
 import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
-import { getToolStatus, isToolDisabled, shouldAskForTool, isAgenticRAGEnabled, getAgenticRAGConfig, isWebSearchEnabled } from "../store/tool-store";
+import { getToolStatus, isToolDisabled, shouldAskForTool, isWebSearchEnabled } from "../store/tool-store";
 import { listSkills, getSkill } from "../services/ai/skills-manager";
 import type { Skill, SkillRef } from "../types/skills";
 import { getAutoTriggerSkill } from "../services/ai/skill-recommender";
@@ -80,7 +80,6 @@ import {
   createToolCallSignature,
   resolveToolCallName,
 } from "../services/ai/tool-call-router";
-import { executeAgenticRAG, getToolDisplayName } from "../services/ai/agentic-rag-service";
 import { createToolRoundLimit } from "../services/ai/tool-round-limit";
 import { ensureMcpServersReady } from "../services/external/mcp-server-manager";
 import { normalizeWebSearchResults, type WebSearchSource } from "../utils/source-attribution";
@@ -92,7 +91,6 @@ import {
   loadingContainerStyle,
   loadingBubbleStyle,
 } from "../styles/ai-chat-styles";
-import { multiModelStore } from "../store/multi-model-store";
 import {
   createBranch,
   switchBranch,
@@ -100,13 +98,6 @@ import {
   renameBranch,
   getActiveBranchId,
 } from "../services/branch-service";
-import MultiModelResponse, { type ModelResponse } from "../components/MultiModelResponse";
-import {
-  streamMultiModelChat,
-  createInitialResponses,
-  updateModelResponse,
-  getModelDisplayInfo,
-} from "../services/ai/multi-model-service";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -376,10 +367,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   type ViewMode = 'chat' | 'memory-manager';
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
 
-  // Multi-model parallel response state
-  const [multiModelResponses, setMultiModelResponses] = useState<ModelResponse[]>([]);
-  const [isMultiModelMode, setIsMultiModelMode] = useState(false);
-
   // Stream settings modal state
   const [showStreamSettings, setShowStreamSettings] = useState(false);
 
@@ -410,7 +397,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态、多模型面板）
+  // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态）
   const chatOwnerRef = useRef(createChatRequestOwner());
   // 对话选择的归属：只有最后一次选择 / 新建的加载结果才上屏
   const selectionOwnerRef = useRef(createChatRequestOwner());
@@ -418,7 +405,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const setLastErrorUnguarded = setLastError;
   const setSendingUnguarded = setSending;
   const setStreamingMessageIdUnguarded = setStreamingMessageId;
-  const setMultiModelResponsesUnguarded = setMultiModelResponses;
   const skillConfirmResolversRef = useRef(new Map<string, (approved: boolean) => void>());
   // 追踪用户是否在底部附近，用于决定流式输出时是否自动滚动
   const isNearBottomRef = useRef(true);
@@ -636,7 +622,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const switchSeqRef = useRef(0);
 
   // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
-  // 清掉生成状态和多模型面板；旧请求之后的界面写入一律丢弃
+  // 清掉生成状态；旧请求之后的界面写入一律丢弃
   const abandonCurrentRequest = () => {
     chatOwnerRef.current.invalidate();
     if (abortRef.current) abortRef.current.abort();
@@ -644,8 +630,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     settlePendingConfirms(skillConfirmResolversRef.current);
     setSending(false);
     setStreamingMessageId(null);
-    setIsMultiModelMode(false);
-    setMultiModelResponses([]);
   };
 
   const handleNewSession = useCallback(() => {
@@ -952,7 +936,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const setLastError = req.guard(setLastErrorUnguarded);
     const setSending = req.guard(setSendingUnguarded);
     const setStreamingMessageId = req.guard(setStreamingMessageIdUnguarded);
-    const setMultiModelResponses = req.guard(setMultiModelResponsesUnguarded);
     const updateMessage = req.guard(updateMessageUnguarded);
 
     // 如果正在生成：上一请求已在 begin() 中止，它的收尾作废，由本次请求接管生成状态
@@ -1325,72 +1308,6 @@ graph TD
     isNearBottomRef.current = true;
     queueMicrotask(scrollToBottom);
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 多模型并行模式处理
-    // ─────────────────────────────────────────────────────────────────────────
-    if (multiModelStore.enabled && multiModelStore.selectedModels.length >= 2) {
-      setIsMultiModelMode(true);
-      const selectedModels = [...multiModelStore.selectedModels];
-      
-      // 初始化多模型响应状态
-      const initialResponses = createInitialResponses(selectedModels);
-      setMultiModelResponses(initialResponses);
-      
-      const aborter = req.newAborter(abortRef);
-      
-      try {
-        // 构建上下文
-        let contextText = "";
-        try {
-          const contexts = contextStore.selected;
-          if (contexts.length) {
-            const result = await buildContextForSend(contexts, { maxChars: settings.maxContextChars });
-            contextText = result.text;
-          }
-        } catch {}
-        
-        const memoryText = memoryStore.getFullMemoryText();
-        const baseMessages = historyOverride || messages;
-        
-        const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), {
-          ...userMsg,
-          content: processedContent,
-        }];
-        
-        // 构建 API 消息（不包含工具，多模型模式下简化处理）
-        const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
-          messages: conversation,
-          systemPrompt,
-          contextText,
-          customMemory: memoryText,
-          chatMode: "ask", // 多模型模式下不使用工具
-          // 多模型模式不传 modelId，因为每个模型都不同
-        });
-        
-        // 并行流式请求所有模型
-        for await (const update of streamMultiModelChat({
-          modelKeys: selectedModels,
-          messages: apiMessages,
-          fallbackMessages: apiMessagesFallback,
-          signal: aborter.signal,
-        })) {
-          setMultiModelResponses(prev => updateModelResponse(prev, update));
-        }
-        
-      } catch (err: any) {
-        const isAbort = String(err?.name ?? "") === "AbortError";
-        if (!isAbort) {
-          orca.notify("error", String(err?.message ?? err ?? "多模型请求失败"));
-        }
-      } finally {
-        if (abortRef.current === aborter) abortRef.current = null;
-        setSending(false);
-      }
-      
-      return; // 多模型模式处理完成，不走单模型流程
-    }
-    // ─────────────────────────────────────────────────────────────────────────
-
     const userMsgForApi: Message = {
       id: userMsg.id, 
       role: "user", 
@@ -1584,138 +1501,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         maxHistoryMessages: settings.maxHistoryMessages,
         modelId: model,
       });
-
-      // ─────────────────────────────────────────────────────────────────────────
-      // Agentic RAG 模式：AI 自主规划检索策略，多轮迭代
-      // ─────────────────────────────────────────────────────────────────────────
-      // 本机 AI 自己检索（经 Orca MCP），不走插件的 Agentic RAG
-      if (isAgenticRAGEnabled() && includeTools && !hasHighPriorityContext && getModelApiConfig(settings, model).protocol !== "local-cli") {
-        const ragConfig = getAgenticRAGConfig();
-        const assistantId = nowId();
-        const assistantCreatedAt = Date.now();
-        
-        // 创建一个占位消息，显示正在思考
-        setMessages((prev) => [...prev, {
-          id: assistantId,
-          role: "assistant",
-          content: "🧠 正在智能检索...",
-          createdAt: assistantCreatedAt,
-          model,
-          localOnly: true, // 标记为本地消息，不发送给 API
-        }]);
-        setStreamingMessageId(assistantId);
-        
-        try {
-          // 创建 LLM 调用函数
-          const callLLM = async (prompt: string, options?: { temperature?: number; maxTokens?: number }) => {
-            const ragMessages: Message[] = [
-              { id: nowId(), role: "user", content: prompt, createdAt: Date.now() }
-            ];
-            
-            // 注意：这里不使用 chatMode: "ask"，因为 Agentic RAG 内部有工具调用能力
-            // 使用 "agent" 模式或不指定，避免 ASK_MODE_INSTRUCTION 被加入
-            const { standard: ragApiMessages } = await buildConversationMessages({
-              messages: ragMessages,
-              systemPrompt: "你是一个智能检索规划助手，具备联网搜索和笔记检索能力。请严格按照要求返回 JSON 格式。",
-              contextText: "",
-              customMemory: "",
-              chatMode: "agent", // 使用 agent 模式，避免 Ask 模式限制
-              modelId: model,
-            });
-            
-          let result = "";
-          const ragContextLength = getModelContextLength(settings, model);
-          for await (const chunk of streamChatWithRetry(
-            {
-            apiUrl: apiConfig.apiUrl,
-            apiKey: apiConfig.apiKey,
-            model,
-            protocol: apiConfig.protocol,
-            anthropicApiPath: apiConfig.anthropicApiPath,
-            temperature: options?.temperature ?? 0.3,
-              maxTokens: options?.maxTokens ?? 1000,
-              signal: aborter.signal,
-              maxContextTokens: ragContextLength,
-            },
-            ragApiMessages,
-            ragApiMessages,
-          )) {
-              if (chunk.type === "content") {
-                result += chunk.content;
-              }
-            }
-            return result;
-          };
-          
-          // 进度回调 - 使用 reasoning 字段显示详细思考过程
-          const onProgress = (update: { phase: string; status: string; reasoning: string; step?: any; iteration?: number }) => {
-            // 用 reasoning 字段显示思考过程，content 显示当前状态
-            updateMessage(assistantId, {
-              content: `*${update.status}*`,
-              reasoning: update.reasoning,
-            });
-          };
-          
-          // 执行 Agentic RAG
-          const ragResult = await executeAgenticRAG(processedContent, callLLM, {
-            maxIterations: ragConfig.maxIterations || runtimeConfig.maxToolRounds,
-            enableReflection: ragConfig.enableReflection,
-            onProgress,
-          });
-          
-          // 更新消息为最终答案，保留 reasoning 作为思考过程记录
-          setStreamingMessageId(null);
-      // 生成检索过程摘要作为 reasoning
-          const retrieveSteps = ragResult.steps.filter(s => s.type === "retrieve");
-          const correctSteps = ragResult.steps.filter(s => s.type === "correct");
-          const ragSummary = [
-            `🧠 **Agentic RAG 检索过程**`,
-            `- 迭代轮数: ${ragResult.iterations}`,
-            `- 检索步骤: ${retrieveSteps.length}${correctSteps.length > 0 ? ` (含 ${correctSteps.length} 次策略修正)` : ""}`,
-            ...retrieveSteps.map(s => {
-              const status = s.result?.includes("Error") ? "❌" : (s.result?.includes("No ") ? "⚠️" : "✅");
-              return `- ${status} ${getToolDisplayName(s.tool || "")}: ${s.reasoning}`;
-            }),
-            ragResult.strategySummary ? `- 📊 ${ragResult.strategySummary}` : "",
-            ragResult.hitLimit ? `- ⚠️ 达到最大轮数限制` : `- ✅ 信息收集完成`,
-          ].filter(Boolean).join("\n");
-          
-          updateMessage(assistantId, {
-            content: ragResult.answer,
-            reasoning: ragSummary,
-            localOnly: false,
-          });
-          
-          // 添加到会话
-          conversation.push({
-            id: assistantId,
-            role: "assistant",
-            content: ragResult.answer,
-            reasoning: ragSummary,
-            createdAt: assistantCreatedAt,
-          });
-          
-        } catch (err: any) {
-          const isAbort = String(err?.name ?? "") === "AbortError";
-          if (!isAbort) {
-            updateMessage(assistantId, {
-              content: `检索出错: ${err.message || "未知错误"}`,
-              localOnly: false,
-            });
-          } else {
-            // 用户取消，移除占位消息
-            setMessages((prev) => prev.filter(m => m.id !== assistantId));
-          }
-          setStreamingMessageId(null);
-        }
-        
-        // Agentic RAG 完成，跳过普通工具调用流程
-        setSending(false);
-        if (abortRef.current === aborter) abortRef.current = null;
-        // 不在这里额外缓存：currentSession 是发送时的旧快照，会覆盖已保存的新消息；messages 变化后的防抖自动保存会存最新状态
-        return; // 不走普通流程
-      }
-      // ─────────────────────────────────────────────────────────────────────────
 
       // 获取模型的上下文长度限制
       const modelContextLength = getModelContextLength(settings, model);
@@ -3021,100 +2806,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         )
       );
     }
-
-    // 如果在多模型模式，在消息列表末尾添加多模型响应组件
-    if (isMultiModelMode && multiModelResponses.length > 0) {
-      messageElements.push(
-        createElement(
-          "div",
-          {
-            key: "multi-model-response",
-            style: {
-              margin: "16px 0",
-              padding: "16px",
-              background: "var(--orca-color-bg-2)",
-              borderRadius: "16px",
-              border: "1px solid var(--orca-color-border)",
-            },
-          },
-          // 标题栏
-          createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "12px",
-                paddingBottom: "12px",
-                borderBottom: "1px solid var(--orca-color-border)",
-              },
-            },
-            createElement(
-              "div",
-              {
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "14px",
-                  fontWeight: 600,
-                  color: "var(--orca-color-text-1)",
-                },
-              },
-              createElement("i", { className: "ti ti-layout-columns", style: { fontSize: "18px", color: "var(--orca-color-primary)" } }),
-              `多模型对比 (${multiModelResponses.length})`
-            ),
-            // 关闭按钮
-            createElement(
-              "button",
-              {
-                onClick: () => {
-                  setIsMultiModelMode(false);
-                  setMultiModelResponses([]);
-                },
-                style: {
-                  padding: "4px 8px",
-                  border: "1px solid var(--orca-color-border)",
-                  borderRadius: "4px",
-                  background: "transparent",
-                  color: "var(--orca-color-text-2)",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                },
-              },
-              "关闭对比"
-            )
-          ),
-          // 多模型响应内容
-          createElement(MultiModelResponse, {
-            responses: multiModelResponses,
-            layout: multiModelResponses.length <= 2 ? "side-by-side" : "stacked",
-            onCopy: (modelId: string, content: string) => {
-              navigator.clipboard.writeText(content).then(() => {
-                orca.notify("success", "已复制到剪贴板");
-              });
-            },
-            onAdopt: (modelId: string, content: string) => {
-              // 采用某个模型的回答，添加到消息列表
-              const info = getModelDisplayInfo(modelId);
-              const adoptedMsg: Message = {
-                id: nowId(),
-                role: "assistant",
-                content,
-                createdAt: Date.now(),
-                model: modelId,
-              };
-              setMessages((prev) => [...prev, adoptedMsg]);
-              setIsMultiModelMode(false);
-              setMultiModelResponses([]);
-              orca.notify("success", `已采用 ${info.modelLabel} 的回答`);
-            },
-          })
-        )
-      );
-      messageListContent = messageElements;
-    }
   }
 
   // If in memory manager view, render MemoryManager instead of chat
@@ -3256,11 +2947,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     }),
     // Chat Input
     createElement(ChatInput, {
-      onSend: (text: string, files?: FileRef[], clearContext?: boolean) => {
-        // clearContext=true 时，传递空历史给 handleSend，但不清空显示的消息
-        // 这样 AI 会把这条消息当作新对话的开始，但用户仍能看到之前的消息
-        return handleSend(text, files, clearContext ? [] : undefined);
-      },
+      onSend: (text: string, files?: FileRef[]) => handleSend(text, files),
       onStop: stop,
       disabled: sending, // 生成时显示停止按钮
       currentPageId: rootBlockId,

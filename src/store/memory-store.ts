@@ -14,14 +14,6 @@ const { proxy } = (window as any).Valtio as {
 // ============================================================================
 
 /**
- * Injection mode determines which memories are included in AI conversations
- * - ALL: Include enabled memories from all users, prefixed with user name
- * - CURRENT: Include only enabled memories from the active user
- * - SELECTED: Include enabled memories from selected users only
- */
-export type InjectionMode = 'ALL' | 'CURRENT' | 'SELECTED';
-
-/**
  * User profile representing a person who owns memories
  */
 export interface UserProfile {
@@ -95,19 +87,6 @@ export interface MemoryStoreData {
   memories: MemoryItem[];
   portraits: UserPortrait[];
   activeUserId: string;
-  injectionMode: InjectionMode;
-  selectedUserIds: string[];  // User IDs selected for SELECTED mode
-  selectionPresets: SelectionPreset[];  // Saved selection presets
-}
-
-/**
- * Selection preset - saved user selection for quick switching
- */
-export interface SelectionPreset {
-  id: string;
-  name: string;
-  userIds: string[];
-  createdAt: number;
 }
 
 /**
@@ -137,9 +116,6 @@ export interface MemoryStoreActions {
   updatePortraitCategory(userId: string, categoryId: string, content: string): boolean;
   getPortraitForUser(userId: string): UserPortrait | undefined;
 
-  // Injection Mode
-  setInjectionMode(mode: InjectionMode): void;
-  getEnabledMemories(): MemoryItem[];
   getMemoryText(): string;
 
   // Persistence
@@ -167,9 +143,6 @@ export const DEFAULT_STATE: MemoryStoreData = {
   memories: [],
   portraits: [],
   activeUserId: 'default-user',
-  injectionMode: 'ALL',
-  selectedUserIds: [],
-  selectionPresets: [],
 };
 
 // ============================================================================
@@ -215,7 +188,7 @@ function validateContent(content: string): boolean {
  * Create the memory store state
  */
 function createMemoryStoreState(): MemoryStoreData {
-  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [], selectedUserIds: [], selectionPresets: [] };
+  return { ...DEFAULT_STATE, users: [{ ...DEFAULT_USER }], portraits: [] };
 }
 
 export const memoryStoreState = proxy<MemoryStoreData>(createMemoryStoreState());
@@ -353,147 +326,6 @@ export function setUserDisabled(id: string, disabled: boolean): boolean {
     isDisabled: disabled,
   };
   memoryStoreState.users = updatedUsers;
-  saveMemoryStore();
-  return true;
-}
-
-/**
- * Toggle a user's selection for SELECTED injection mode
- * @param id - User ID to toggle
- * @returns true if toggle succeeded
- */
-export function toggleUserSelection(id: string): boolean {
-  const user = memoryStoreState.users.find(u => u.id === id);
-  if (!user) {
-    return false;
-  }
-
-  const currentSelected = memoryStoreState.selectedUserIds || [];
-  const isSelected = currentSelected.includes(id);
-  
-  if (isSelected) {
-    memoryStoreState.selectedUserIds = currentSelected.filter(uid => uid !== id);
-  } else {
-    memoryStoreState.selectedUserIds = [...currentSelected, id];
-  }
-  
-  saveMemoryStore();
-  return true;
-}
-
-/**
- * Set selected user IDs for SELECTED injection mode
- * @param ids - Array of user IDs to select
- */
-export function setSelectedUserIds(ids: string[]): void {
-  // Filter to only include valid user IDs
-  const validIds = ids.filter(id => memoryStoreState.users.some(u => u.id === id));
-  memoryStoreState.selectedUserIds = validIds;
-  saveMemoryStore();
-}
-
-/**
- * Select all users for SELECTED injection mode
- */
-export function selectAllUsers(): void {
-  memoryStoreState.selectedUserIds = memoryStoreState.users
-    .filter(u => !u.isDisabled)
-    .map(u => u.id);
-  saveMemoryStore();
-}
-
-/**
- * Deselect all users for SELECTED injection mode
- */
-export function deselectAllUsers(): void {
-  memoryStoreState.selectedUserIds = [];
-  saveMemoryStore();
-}
-
-// ============================================================================
-// Selection Preset Functions
-// ============================================================================
-
-/**
- * Save current selection as a preset
- * @param name - Preset name
- * @returns Created preset or null if no users selected
- */
-export function saveSelectionPreset(name: string): SelectionPreset | null {
-  if (!name.trim() || memoryStoreState.selectedUserIds.length === 0) {
-    return null;
-  }
-
-  const preset: SelectionPreset = {
-    id: generateId(),
-    name: name.trim(),
-    userIds: [...memoryStoreState.selectedUserIds],
-    createdAt: Date.now(),
-  };
-
-  memoryStoreState.selectionPresets = [...(memoryStoreState.selectionPresets || []), preset];
-  saveMemoryStore();
-  return preset;
-}
-
-/**
- * Load a selection preset
- * @param presetId - Preset ID to load
- * @returns true if loaded successfully
- */
-export function loadSelectionPreset(presetId: string): boolean {
-  const preset = (memoryStoreState.selectionPresets || []).find(p => p.id === presetId);
-  if (!preset) {
-    return false;
-  }
-
-  // Filter to only include valid, non-disabled user IDs
-  const validUserIds = preset.userIds.filter(id => {
-    const user = memoryStoreState.users.find(u => u.id === id);
-    return user && !user.isDisabled;
-  });
-
-  memoryStoreState.selectedUserIds = validUserIds;
-  memoryStoreState.injectionMode = 'SELECTED';
-  saveMemoryStore();
-  return true;
-}
-
-/**
- * Delete a selection preset
- * @param presetId - Preset ID to delete
- * @returns true if deleted successfully
- */
-export function deleteSelectionPreset(presetId: string): boolean {
-  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
-  if (index === -1) {
-    return false;
-  }
-
-  memoryStoreState.selectionPresets = memoryStoreState.selectionPresets.filter(p => p.id !== presetId);
-  saveMemoryStore();
-  return true;
-}
-
-/**
- * Rename a selection preset
- * @param presetId - Preset ID to rename
- * @param newName - New name
- * @returns true if renamed successfully
- */
-export function renameSelectionPreset(presetId: string, newName: string): boolean {
-  if (!newName.trim()) {
-    return false;
-  }
-
-  const index = (memoryStoreState.selectionPresets || []).findIndex(p => p.id === presetId);
-  if (index === -1) {
-    return false;
-  }
-
-  const updatedPresets = [...memoryStoreState.selectionPresets];
-  updatedPresets[index] = { ...updatedPresets[index], name: newName.trim() };
-  memoryStoreState.selectionPresets = updatedPresets;
   saveMemoryStore();
   return true;
 }
@@ -1521,61 +1353,18 @@ export function addPortraitInfoItem(
   return newItem;
 }
 
-// ============================================================================
-// Injection Mode Functions
-// ============================================================================
-
-/**
- * Set the injection mode
- * @param mode - Injection mode (ALL or CURRENT)
- */
-export function setInjectionMode(mode: InjectionMode): void {
-  memoryStoreState.injectionMode = mode;
-  saveMemoryStore();
-}
-
-/**
- * Get enabled memories based on current injection mode
- * @returns Array of enabled memory items
- */
-export function getEnabledMemories(): MemoryItem[] {
-  const { memories, users, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
-
-  // Filter out disabled users
-  const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
-
-  if (injectionMode === 'ALL') {
-    return memories.filter(m => m.isEnabled && enabledUserIds.has(m.userId));
-  } else if (injectionMode === 'SELECTED') {
-    const selected = new Set(selectedUserIds || []);
-    return memories.filter(m => m.isEnabled && enabledUserIds.has(m.userId) && selected.has(m.userId));
-  } else {
-    // CURRENT mode
-    return memories.filter(m => m.userId === activeUserId && m.isEnabled && enabledUserIds.has(m.userId));
-  }
-}
-
 /**
  * Get enabled memories that are NOT extracted (for injection)
  * Self user's memories are prioritized first
  * @returns Array of enabled, non-extracted memory items
  */
 export function getUnextractedMemories(): MemoryItem[] {
-  const { memories, users, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
+  const { memories, users } = memoryStoreState;
 
   // Filter out disabled users
   const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
 
-  let filtered: MemoryItem[];
-  if (injectionMode === 'ALL') {
-    filtered = memories.filter(m => m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId));
-  } else if (injectionMode === 'SELECTED') {
-    const selected = new Set(selectedUserIds || []);
-    filtered = memories.filter(m => m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId) && selected.has(m.userId));
-  } else {
-    // CURRENT mode
-    filtered = memories.filter(m => m.userId === activeUserId && m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId));
-  }
+  const filtered = memories.filter(m => m.isEnabled && !m.isExtracted && enabledUserIds.has(m.userId));
 
   // Sort: self user's memories first
   const selfUser = users.find(u => u.isSelf);
@@ -1598,25 +1387,20 @@ export function getUnextractedMemories(): MemoryItem[] {
  * @returns Formatted memory text string
  */
 export function getMemoryText(): string {
-  const { users, injectionMode } = memoryStoreState;
+  const { users } = memoryStoreState;
   const unextractedMemories = getUnextractedMemories();
 
   if (unextractedMemories.length === 0) {
     return '';
   }
 
-  if (injectionMode === 'ALL') {
-    // ALL mode: prefix with user name
-    return unextractedMemories.map(m => {
-      const user = users.find(u => u.id === m.userId);
-      // Use "我" for self user, otherwise use user name
-      const userName = user?.isSelf ? '我' : (user?.name || '未知用户');
-      return `- [${userName}]: ${m.content}`;
-    }).join('\n');
-  } else {
-    // CURRENT mode: no prefix
-    return unextractedMemories.map(m => `- ${m.content}`).join('\n');
-  }
+  // Prefix with user name
+  return unextractedMemories.map(m => {
+    const user = users.find(u => u.id === m.userId);
+    // Use "我" for self user, otherwise use user name
+    const userName = user?.isSelf ? '我' : (user?.name || '未知用户');
+    return `- [${userName}]: ${m.content}`;
+  }).join('\n');
 }
 
 /**
@@ -1625,21 +1409,12 @@ export function getMemoryText(): string {
  * @returns Formatted portrait text string
  */
 export function getPortraitText(): string {
-  const { users, portraits, activeUserId, injectionMode, selectedUserIds } = memoryStoreState;
+  const { users, portraits } = memoryStoreState;
   
   // Filter out disabled users
   const enabledUserIds = new Set(users.filter(u => !u.isDisabled).map(u => u.id));
   
-  let relevantPortraits: UserPortrait[];
-  if (injectionMode === 'ALL') {
-    relevantPortraits = portraits.filter(p => enabledUserIds.has(p.userId));
-  } else if (injectionMode === 'SELECTED') {
-    const selected = new Set(selectedUserIds || []);
-    relevantPortraits = portraits.filter(p => enabledUserIds.has(p.userId) && selected.has(p.userId));
-  } else {
-    // CURRENT mode
-    relevantPortraits = portraits.filter(p => p.userId === activeUserId && enabledUserIds.has(p.userId));
-  }
+  const relevantPortraits = portraits.filter(p => enabledUserIds.has(p.userId));
 
   if (relevantPortraits.length === 0) {
     return '';
@@ -1647,7 +1422,7 @@ export function getPortraitText(): string {
 
   // Sort: self user's portrait first
   const selfUser = users.find(u => u.isSelf);
-  if (selfUser && (injectionMode === 'ALL' || injectionMode === 'SELECTED')) {
+  if (selfUser) {
     relevantPortraits.sort((a, b) => {
       const aIsSelf = a.userId === selfUser.id;
       const bIsSelf = b.userId === selfUser.id;
@@ -1686,11 +1461,7 @@ export function getPortraitText(): string {
     }
     
     if (lines.length > 0) {
-      if (injectionMode === 'ALL' || injectionMode === 'SELECTED') {
-        parts.push(`[${userName}的印象]\n${lines.join('\n')}`);
-      } else {
-        parts.push(lines.join('\n'));
-      }
+      parts.push(`[${userName}的印象]\n${lines.join('\n')}`);
     }
   }
 
@@ -1729,9 +1500,6 @@ export async function saveMemoryStore(): Promise<void> {
       memories: memoryStoreState.memories,
       portraits: memoryStoreState.portraits,
       activeUserId: memoryStoreState.activeUserId,
-      injectionMode: memoryStoreState.injectionMode,
-      selectedUserIds: memoryStoreState.selectedUserIds,
-      selectionPresets: memoryStoreState.selectionPresets || [],
     };
     await orca.plugins.setData(pluginName, STORAGE_KEY, JSON.stringify(data));
   } catch (error) {
@@ -1793,9 +1561,6 @@ export async function loadMemoryStore(): Promise<void> {
     memoryStoreState.memories = data.memories;
     memoryStoreState.portraits = data.portraits || [];
     memoryStoreState.activeUserId = data.activeUserId || 'default-user';
-    memoryStoreState.injectionMode = data.injectionMode || 'ALL';
-    memoryStoreState.selectedUserIds = data.selectedUserIds || [];
-    memoryStoreState.selectionPresets = data.selectionPresets || [];
   } catch (error) {
     console.error('[MemoryStore] Failed to load:', error);
     // Keep default state on error
@@ -1822,10 +1587,6 @@ export const memoryStore = {
   setUserAsSelf,
   toggleUserDisabled,
   setUserDisabled,
-  toggleUserSelection,
-  setSelectedUserIds,
-  selectAllUsers,
-  deselectAllUsers,
   deleteUser,
   setActiveUser,
   getActiveUser,
@@ -1858,19 +1619,11 @@ export const memoryStore = {
   updatePortraitInfoItemValue,
   reorderPortraitCategories,
 
-  // Injection Mode
-  setInjectionMode,
-  getEnabledMemories,
+  // Injection
   getUnextractedMemories,
   getMemoryText,
   getPortraitText,
   getFullMemoryText,
-
-  // Selection Presets
-  saveSelectionPreset,
-  loadSelectionPreset,
-  deleteSelectionPreset,
-  renameSelectionPreset,
 
   // Persistence
   save: saveMemoryStore,

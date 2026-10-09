@@ -4,7 +4,6 @@
  */
 
 import { proxy } from "valtio";
-import { normalizeToolRoundLimit } from "../services/ai/tool-round-limit";
 
 /**
  * 工具状态类型
@@ -103,16 +102,6 @@ export function unregisterMcpServerTools(serverId: string): void {
 const DEFAULT_TOOL_STATUS: ToolStatus = "auto";
 
 /**
- * Agentic RAG 配置
- */
-export interface AgenticRAGConfig {
-  /** 最大迭代次数（防止无限循环） */
-  maxIterations: number;
-  /** 是否启用反思机制（评估检索结果质量） */
-  enableReflection: boolean;
-}
-
-/**
  * 工具 Store
  */
 interface ToolStore {
@@ -126,10 +115,6 @@ interface ToolStore {
   imageSearchEnabled: boolean;
   /** 维基百科搜索开关 */
   wikipediaEnabled: boolean;
-  /** Agentic RAG 开关（深度检索模式） */
-  agenticRAGEnabled: boolean;
-  /** Agentic RAG 配置 */
-  agenticRAGConfig: AgenticRAGConfig;
 }
 
 export const toolStore = proxy<ToolStore>({
@@ -138,11 +123,6 @@ export const toolStore = proxy<ToolStore>({
   webSearchEnabled: false,
   imageSearchEnabled: true,
   wikipediaEnabled: true,
-  agenticRAGEnabled: false,
-  agenticRAGConfig: {
-    maxIterations: 0,
-    enableReflection: true,
-  },
 });
 
 /**
@@ -233,31 +213,6 @@ export function isWikipediaEnabled(): boolean {
 }
 
 /**
- * 切换 Agentic RAG 开关
- */
-export function toggleAgenticRAG(): void {
-  toolStore.agenticRAGEnabled = !toolStore.agenticRAGEnabled;
-  saveToolSettings();
-}
-
-/**
- * 获取 Agentic RAG 状态
- */
-export function isAgenticRAGEnabled(): boolean {
-  return toolStore.agenticRAGEnabled;
-}
-
-/**
- * 获取 Agentic RAG 配置
- */
-export function getAgenticRAGConfig(): AgenticRAGConfig {
-  return {
-    ...toolStore.agenticRAGConfig,
-    maxIterations: normalizeToolRoundLimit(toolStore.agenticRAGConfig.maxIterations),
-  };
-}
-
-/**
  * 保存工具设置到本地存储
  */
 async function saveToolSettings(): Promise<void> {
@@ -267,8 +222,6 @@ async function saveToolSettings(): Promise<void> {
       webSearchEnabled: toolStore.webSearchEnabled,
       imageSearchEnabled: toolStore.imageSearchEnabled,
       wikipediaEnabled: toolStore.wikipediaEnabled,
-      agenticRAGEnabled: toolStore.agenticRAGEnabled,
-      agenticRAGConfig: toolStore.agenticRAGConfig,
     };
     
     // 同时使用 Orca 插件存储和 localStorage（双重保障）
@@ -309,16 +262,6 @@ export async function loadToolSettings(): Promise<void> {
           toolStore.webSearchEnabled = parsed.webSearchEnabled ?? false;
           toolStore.imageSearchEnabled = parsed.imageSearchEnabled ?? true;
           toolStore.wikipediaEnabled = parsed.wikipediaEnabled ?? true;
-          toolStore.agenticRAGEnabled = parsed.agenticRAGEnabled ?? false;
-          if (parsed.agenticRAGConfig) {
-            toolStore.agenticRAGConfig = {
-              ...toolStore.agenticRAGConfig,
-              ...parsed.agenticRAGConfig,
-            };
-            toolStore.agenticRAGConfig.maxIterations = normalizeToolRoundLimit(
-              toolStore.agenticRAGConfig.maxIterations
-            );
-          }
         } else {
           // 旧格式：直接是 toolStatus 对象
           toolStore.toolStatus = parsed;
