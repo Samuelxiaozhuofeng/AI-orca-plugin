@@ -1,5 +1,5 @@
 /**
- * Shared API helpers — used by memory-extraction & portrait-generation.
+ * Shared API helpers — used by suggestion-service.
  */
 
 import type { AiChatSettings, ApiProtocol } from "../../settings/ai-chat-settings";

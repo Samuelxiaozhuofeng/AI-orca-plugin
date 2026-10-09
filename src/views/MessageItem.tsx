@@ -5,7 +5,7 @@
  * - Markdown content rendering
  * - Reasoning/thinking display (collapsible)
  * - Tool call status indicators (semantic, animated, auto-collapse when done)
- * - Action bar (copy, regenerate, extract memory)
+ * - Action bar (copy, regenerate)
  * - File attachments (images, documents, code, data)
  *
  * Gemini UX Review: Tool calls now use inline status flow instead of technical cards
@@ -15,8 +15,6 @@ import MarkdownMessage from "../components/MarkdownMessage";
 import EnhancedMarkdownMessage from "../components/EnhancedMarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
 import SuggestedReplies from "../components/SuggestedReplies";
-import ExtractMemoryButton from "./ExtractMemoryButton";
-import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { getFileDisplayUrl, getFileIcon, getFileFullPath } from "../services/file-service";
 import { saveSingleMessageToJournal } from "../services/export-service";
 import {
@@ -760,10 +758,6 @@ interface MessageItemProps {
   onTogglePinned?: () => void; // 切换消息的重要标记
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
-  // Conversation context for memory extraction (all messages up to this point)
-  conversationContext?: string;
-  // Callback when memories are extracted from this message
-  onExtractMemory?: (memories: ExtractedMemory[], userId?: string) => void;
   // Callback when user clicks a suggested reply
   onSuggestedReply?: (text: string) => void;
   // Callback to generate AI-powered suggestions
@@ -1116,8 +1110,6 @@ export default function MessageItem({
   onRollback,
   onTogglePinned,
   toolResults,
-  conversationContext,
-  onExtractMemory,
   onSuggestedReply,
   onGenerateSuggestions,
   onSkillConfirmAction,
@@ -1130,7 +1122,6 @@ export default function MessageItem({
   onRenameBranch,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const [isExtractDropdownOpen, setIsExtractDropdownOpen] = useState(false);
   const messageRowRef = useRef<HTMLDivElement | null>(null);
   const sourcePanelHoverRef = useRef(false);
   const closeSourcePanelTimerRef = useRef<number | null>(null);
@@ -1164,7 +1155,7 @@ export default function MessageItem({
   const showTimestamp = shouldRenderTimestamp(displaySettings.showTimestamps);
 
   // Keep action bar visible when dropdown is open
-  const showActionBar = isHovered || isExtractDropdownOpen;
+  const showActionBar = isHovered;
 
   const skillDraftStatusLabel = useMemo(() => {
     switch (skillDraft?.status) {
@@ -2199,17 +2190,6 @@ export default function MessageItem({
               createElement("i", { className: "ti ti-notebook" })
             )
           ),
-        // Extract Memory Button (Only for AI messages with content)
-        isAssistant &&
-          message.content &&
-          conversationContext &&
-          onExtractMemory &&
-          !isStreaming &&
-          createElement(ExtractMemoryButton, {
-            conversationContext,
-            onExtracted: onExtractMemory,
-            onDropdownVisibilityChange: setIsExtractDropdownOpen,
-          }),
         // Regenerate Button (Only for last AI message)
         !isUser &&
           isLastAiMessage &&

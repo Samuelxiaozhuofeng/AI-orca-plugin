@@ -143,14 +143,13 @@ function skillListItems(skills: SkillPromptInfo[]): string[] {
 }
 
 /**
- * 本机 AI（Claude Code）用的个人设定：自动激活技能 + 已启用技能 + 本条格式要求 + 用户信息。
- * 不含插件工具调用说明（Claude Code 用自己的工具）；技能和用户信息的写法与直连 API 的系统提示词一致。
+ * 本机 AI（Claude Code）用的个人设定：自动激活技能 + 已启用技能 + 本条格式要求。
+ * 不含插件工具调用说明（Claude Code 用自己的工具）；技能的写法与直连 API 的系统提示词一致。
  */
 export function buildLocalCliInstructions(options: {
   skills?: SkillPromptInfo[];
   autoActivatedSkill?: AutoActivatedSkill;
   formatSuffix?: string;
-  memoryText?: string;
 }): string {
   const sections: string[] = [];
   if (options.autoActivatedSkill) {
@@ -165,7 +164,6 @@ export function buildLocalCliInstructions(options: {
 ${skillListItems(options.skills).join("\n")}`);
   }
   if (options.formatSuffix?.trim()) sections.push(options.formatSuffix.trim());
-  if (options.memoryText?.trim()) sections.push(`用户信息:\n${options.memoryText.trim()}`);
   return sections.join("\n\n");
 }
 

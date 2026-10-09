@@ -10,7 +10,6 @@
 
 import MessageItem from "../views/MessageItem";
 import type { Message } from "../services/session-service";
-import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { messageListStyle } from "../styles/ai-chat-styles";
 
 const React = window.React as unknown as {
@@ -71,10 +70,6 @@ export interface MessageListProps {
   onSuggestedReply?: (text: string) => void;
   /** 生成建议回调 */
   onGenerateSuggestions?: (content: string) => () => Promise<string[]>;
-  /** 提取记忆回调 */
-  onExtractMemory?: (memories: ExtractedMemory[], userId?: string) => void;
-  /** 获取对话上下文（用于记忆提取） */
-  getConversationContext?: (messageIndex: number) => string;
 }
 
 /**
@@ -98,8 +93,6 @@ export default function MessageList({
   onTogglePinned,
   onSuggestedReply,
   onGenerateSuggestions,
-  onExtractMemory,
-  getConversationContext,
 }: MessageListProps) {
   const containerStyle: React.CSSProperties = {
     ...messageListStyle,
@@ -140,8 +133,6 @@ export default function MessageList({
         onSuggestedReply: readonly ? undefined : (isLastAi ? onSuggestedReply : undefined),
         onGenerateSuggestions: readonly ? undefined : (isLastAi && m.content && onGenerateSuggestions ? onGenerateSuggestions(m.content) : undefined),
         tokenStats: tokenStatsMap?.get(m.id),
-        conversationContext: readonly ? undefined : (getConversationContext ? getConversationContext(i) : undefined),
-        onExtractMemory: readonly ? undefined : onExtractMemory,
       })
     );
   });

@@ -2,7 +2,7 @@ import { test, assert, assertEqual } from "./test-harness";
 import { buildLocalCliPrompt } from "../src/services/ai/local-cli-client";
 import { buildLocalCliInstructions } from "../src/services/ai/dynamic-prompt";
 
-// 记忆、技能、格式要求作为「个人设定」放在本机 AI prompt 最前面
+// 技能、格式要求作为「个人设定」放在本机 AI prompt 最前面
 
 const msgs: any[] = [
   { role: "system", content: "sys" },
@@ -27,17 +27,17 @@ test("buildLocalCliPrompt：没有或空白个人设定时与原来完全一样"
   }
 });
 
-test("buildLocalCliInstructions：没有记忆和技能时为空；有则不含插件工具说明", () => {
+test("buildLocalCliInstructions：没有技能和格式要求时为空；有则不含插件工具说明", () => {
   assertEqual(buildLocalCliInstructions({}), "");
-  assertEqual(buildLocalCliInstructions({ skills: [], memoryText: "  ", formatSuffix: "" }), "");
+  assertEqual(buildLocalCliInstructions({ skills: [], formatSuffix: "" }), "");
   const text = buildLocalCliInstructions({
     skills: [{ name: "写周报", description: "整理本周工作", instruction: "# 标题\n列出完成事项\n列出下周计划" }],
     autoActivatedSkill: { name: "写周报", instruction: "完整指令" },
     formatSuffix: "\n\n【回答风格】用户要求简洁回答。",
-    memoryText: "喜欢简洁",
   });
   assert(text.includes("## 🔔 已自动激活技能: 写周报") && text.includes("完整指令"), text);
   assert(text.includes("- **写周报**：整理本周工作\n  核心要求：列出完成事项；列出下周计划"), text);
-  assert(text.includes("【回答风格】用户要求简洁回答。") && text.endsWith("用户信息:\n喜欢简洁"), text);
+  assert(text.includes("【回答风格】用户要求简洁回答。") && text.endsWith("【回答风格】用户要求简洁回答。"), text);
+  assert(!text.includes("用户信息"), text);
   assert(!text.includes("skill_") && !text.includes("function call"), text);
 });

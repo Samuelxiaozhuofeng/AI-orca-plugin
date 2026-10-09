@@ -4,8 +4,6 @@ import { buildContextForSend } from "../services/notes/context-builder";
 import { contextKey, contextStore, type ContextRef } from "../store/context-store";
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
-import { memoryStore } from "../store/memory-store";
-import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { findViewPanelById } from "../utils/panel-tree";
 import { generateSuggestedReplies } from "../services/ai/suggestion-service";
 import { estimateTokens, formatTokenCount } from "../utils/token-utils";
@@ -23,7 +21,6 @@ import StreamSettingsModal from "./StreamSettingsModal";
 import VisionModelSettingsModal from "./VisionModelSettingsModal";
 import EmptyState from "./EmptyState";
 import TypingIndicator from "../components/TypingIndicator";
-import MemoryManager from "./MemoryManager";
 import ChatNavigation from "../components/ChatNavigation";
 import GlobalImagePreview from "../components/GlobalImagePreview";
 import { toBody } from "../utils/modal-dismiss";
@@ -362,10 +359,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
-
-  // View mode state for switching between chat and memory manager
-  type ViewMode = 'chat' | 'memory-manager';
-  const [viewMode, setViewMode] = useState<ViewMode>('chat');
 
   // Stream settings modal state
   const [showStreamSettings, setShowStreamSettings] = useState(false);
@@ -869,18 +862,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     // 点击滚动到底部按钮后，恢复自动滚动
     isNearBottomRef.current = true;
   }, [scrollToBottom]);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Memory Manager View Switching
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const handleOpenMemoryManager = useCallback(() => {
-    setViewMode('memory-manager');
-  }, []);
-
-  const handleCloseMemoryManager = useCallback(() => {
-    setViewMode('chat');
-  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Message Selection Mode (for batch save)
@@ -1454,10 +1435,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       let reasoningMessageId: string | null = null;
       let reasoningCreatedAt: number | null = null;
 
-      // Get memory text for injection based on current injection mode
-      // Uses getFullMemoryText which combines portrait (higher priority) + unextracted memories
-      const memoryText = memoryStore.getFullMemoryText();
-
       // 获取模型特定的 API 配置
       const apiConfig = getModelApiConfig(settings, model);
 
@@ -1505,7 +1482,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         messages: conversation,
         systemPrompt: toolAwareSystemPrompt,
         contextText,
-        customMemory: memoryText,
         maxHistoryMessages: settings.maxHistoryMessages,
         modelId: model,
       });
@@ -1535,7 +1511,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           localCli: apiConfig.protocol === "local-cli"
             ? buildLocalCliContext(currentSession.id, {
                 contextText,
-                instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix, memoryText }),
+                instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix }),
                 workDir: currentSession.workDir,
                 resume: ccResume,
                 run: ccRun,
@@ -1977,7 +1953,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             ? buildToolRecoverySystemPrompt(toolAwareSystemPrompt, recoveryReason)
             : toolAwareSystemPrompt,
           contextText,
-          customMemory: memoryText,
           maxHistoryMessages: settings.maxHistoryMessages,
           modelId: model,
         });
@@ -2299,12 +2274,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     if (target && !target.localOnly) invalidateCcHead();
   }, [messages, invalidateCcHead]);
 
-  // 提取出的记忆写进记忆管理（点按钮时的用户），与记忆管理里手动添加同一条路
-  const handleExtractMemory = useCallback((memories: ExtractedMemory[], userId?: string) => {
-    const added = memories.filter(mem => memoryStore.addMemory(mem.content, userId)).length;
-    orca.notify(added > 0 ? "success" : "info", added > 0 ? `已添加 ${added} 条记忆` : "没有可添加的记忆");
-  }, []);
-
   // 切换消息的重要标记（pinned）
   const handleTogglePinned = useCallback((messageId: string) => {
     setMessages((prev) => prev.map((m) => {
@@ -2490,11 +2459,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       }
     });
 
-    // 计算系统开销 token（系统提示 + 记忆 + 上下文）
+    // 计算系统开销 token（系统提示 + 上下文）
     const systemPromptTokens = estimateTokens(buildDynamicSystemPrompt());
-    const memoryTokens = estimateTokens(memoryStore.getFullMemoryText() || "");
     // 上下文 token 在 ChatInput 中已经显示，这里只计算基础开销
-    const baseOverheadTokens = systemPromptTokens + memoryTokens;
+    const baseOverheadTokens = systemPromptTokens;
 
     // 货币符号
     const currencySymbol = settingsForUi.currency === 'CNY' ? '¥' : 
@@ -2645,17 +2613,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 `提示词 ${formatTokenCount(systemPromptTokens)}`
               )
             ),
-            memoryTokens > 0 && withTooltip(
-              "记忆消耗（用户画像+记忆）",
-              createElement(
-                "span",
-                {
-                  style: { display: "flex", alignItems: "center", gap: "4px" },
-                },
-                createElement("i", { className: "ti ti-brain", style: { fontSize: "12px" } }),
-                `记忆 ${formatTokenCount(memoryTokens)}`
-              )
-            ),
             withTooltip(
               "基础开销合计",
               createElement(
@@ -2735,14 +2692,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           onSwitchBranch: handleSwitchBranch,
           onDeleteBranch: handleDeleteBranch,
           onRenameBranch: handleRenameBranch,
-          // 提取记忆：本轮「用户提问 + AI 回答」交给 ExtractMemoryButton
-          conversationContext: m.role === "assistant" && m.content
-            ? (() => {
-                const prevUser = messages.slice(0, i).reverse().find(pm => pm.role === "user");
-                return `${prevUser?.content ? `用户: ${prevUser.content}\n` : ""}AI: ${m.content}`;
-              })()
-            : undefined,
-          onExtractMemory: handleExtractMemory,
         })
       );
     });
@@ -2838,11 +2787,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     }
   }
 
-  // If in memory manager view, render MemoryManager instead of chat
-  if (viewMode === 'memory-manager') {
-    return createElement(MemoryManager, { onBack: handleCloseMemoryManager });
-  }
-
   return createElement(
     "div",
     {
@@ -2907,7 +2851,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             orca.commands.invokeCommand("core.openSettings");
           }
         },
-        onOpenMemoryManager: handleOpenMemoryManager,
         onOpenStreamSettings: () => setShowStreamSettings(true),
         onOpenVisionModelSettings: () => setShowVisionModelSettings(true),
         onOpenMcpSettings: () => setShowMcpSettings(true),

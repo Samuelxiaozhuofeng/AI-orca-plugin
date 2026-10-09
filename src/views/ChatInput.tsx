@@ -747,7 +747,7 @@ export default function ChatInput({
         
         try {
           // 使用 addPageById 将块添加为高优先级上下文（priority=1）
-          // 高优先级上下文会排在普通上下文之前，但仍低于记忆和用户印象
+          // 高优先级上下文会排在普通上下文之前，但仍低于系统提示
           const added = addBlockById(blockId, 1);
           if (added) addedCount++;
         } catch (err) {

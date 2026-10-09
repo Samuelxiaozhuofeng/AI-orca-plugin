@@ -13,7 +13,6 @@ const { Button } = orca.components;
 interface HeaderMenuProps {
   onClearChat: () => void;
   onOpenSettings: () => void;
-  onOpenMemoryManager: () => void;
   onOpenStreamSettings?: () => void;
   onOpenVisionModelSettings?: () => void;
   onOpenMcpSettings?: () => void;
@@ -28,7 +27,6 @@ interface HeaderMenuProps {
 export default function HeaderMenu({
   onClearChat,
   onOpenSettings,
-  onOpenMemoryManager,
   onOpenStreamSettings,
   onOpenVisionModelSettings,
   onOpenMcpSettings,
@@ -162,17 +160,6 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-settings" }),
           "Settings"
-        ),
-        // Memory Manager
-        createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onOpenMemoryManager),
-            className: "header-menu-item",
-          },
-          createElement("i", { className: "ti ti-brain" }),
-          "记忆管理"
         ),
         // Stream Settings
         onOpenStreamSettings && createElement(

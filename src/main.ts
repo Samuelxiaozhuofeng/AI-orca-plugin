@@ -2,7 +2,6 @@ import { registerAiChatSettingsSchema, initAiChatSettings, getAiChatSettings } f
 import { autostartLocalCli } from "./services/ai/local-cli-autostart";
 import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-chat-ui";
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
-import { loadMemoryStore } from "./store/memory-store";
 
 import { initCommands } from "./services/commands-loader";
 import { loadVisionModelConfig } from "./services/ai/vision-model-service";
@@ -135,9 +134,6 @@ export async function load(_name: string) {
       );
     }
   }
-
-  // Load persisted memory data
-  await loadMemoryStore();
 
   // 加载视觉模型配置
   await loadVisionModelConfig(pluginName);

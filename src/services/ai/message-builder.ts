@@ -22,7 +22,6 @@ export interface MessageBuildParams {
   userContent: string;
   systemPrompt?: string;
   contextText?: string;
-  customMemory?: string;
   // Token 优化参数
   maxHistoryMessages?: number; // 0=不限制
   // 模型 ID（用于判断是否需要视觉模型代理）
@@ -33,7 +32,6 @@ export interface ConversationBuildParams {
   messages: Message[];
   systemPrompt?: string;
   contextText?: string;
-  customMemory?: string;
   // Token 优化参数
   maxHistoryMessages?: number; // 0=不限制
   // 模型 ID（用于判断是否需要视觉模型代理）
@@ -416,16 +414,14 @@ async function messageToApiWithImages(m: Message, useVisionProxy: boolean = fals
 }
 
 /**
- * Build system message content from prompt, context, and memory
+ * Build system message content from prompt and context
  */
 function buildSystemContent(
   systemPrompt?: string,
-  contextText?: string,
-  customMemory?: string
+  contextText?: string
 ): string | null {
   const parts: string[] = [];
   if (systemPrompt?.trim()) parts.push(systemPrompt.trim());
-  if (customMemory?.trim()) parts.push(`用户信息:\n${customMemory.trim()}`);
   if (contextText?.trim()) parts.push(`用户上下文:\n${contextText.trim()}`);
 
   return parts.length > 0 ? parts.join("\n\n") : null;
@@ -441,7 +437,7 @@ export async function buildConversationMessages(params: ConversationBuildParams)
   standard: OpenAIChatMessage[];
   fallback: OpenAIChatMessage[];
 }> {
-  const { messages, systemPrompt, contextText, customMemory, maxHistoryMessages, modelId } = params;
+  const { messages, systemPrompt, contextText, maxHistoryMessages, modelId } = params;
 
   // 检查是否需要使用视觉模型代理
   // 检查消息中是否包含图片
@@ -456,7 +452,7 @@ export async function buildConversationMessages(params: ConversationBuildParams)
     console.log("[message-builder] 使用视觉模型代理处理图片");
   }
 
-  const systemContent = buildSystemContent(systemPrompt, contextText, customMemory);
+  const systemContent = buildSystemContent(systemPrompt, contextText);
   let filteredMessages = messages.filter((m) => !m.localOnly);
   
   // 硬限制历史消息数量（如果设置了）
