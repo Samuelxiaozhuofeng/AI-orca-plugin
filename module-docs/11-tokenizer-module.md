@@ -13,7 +13,7 @@ src/utils/tokenizer/
 └── types.ts      # 类型定义
 ```
 
-界面和业务代码一般不直接引用本模块，而是通过 `src/utils/token-utils.ts`（`estimateTokens`、`formatTokenCount`、`estimateCost`、`formatCost`、`formatTokenSpeed`，并转出 `estimateTokensDetailed`等）。
+界面和业务代码一般不直接引用本模块，而是通过 `src/utils/token-utils.ts`（`estimateTokens`、`formatTokenCount`、`formatTokenSpeed`，并转出 `estimateTokensDetailed` 等）。
 
 估算方式：启发式规则（CJK 约 1.5 字符/token、英文约 4 字符/token、符号、数字分别计）或「简化 BPE 估算」，不引入真实 tokenizer 库；模型名未识别时回退启发式。默认配置：`modelName: "gpt-4o"`、`safetyMargin: 0.05`（`setTokenizerConfig` 可改）。
 

@@ -11,7 +11,7 @@
 
 ## 关联文件
 
-- `src/main.ts`：`load()` / `unload()`；注册设置 schema、UI、渲染器、打开命令与快捷键，初始化斜杠命令目录和 MCP 服务器
+- `src/main.ts`：`load()` / `unload()`；注册设置 schema、UI、渲染器、打开命令与快捷键，初始化 MCP 服务器
 - `src/ui/ai-chat-ui.ts`：注册 / 反注册 + `openAiChatPanel` / `toggleAiChatPanel` / `closeAiChatPanel`，关闭前自动保存
 - `src/ui/ai-chat-context-menu.ts`：右键菜单命令（见 `module-docs/04-context.md`）
 - `src/ui/ai-chat-renderer.ts`：AI 对话块渲染器（见 `module-docs/12-custom-block-renderer.md`）

@@ -28,7 +28,7 @@
 - 消息操作（`MessageItem`）：复制、删除此消息、回档到此处、保存到日记、重新生成（仅最后一条 AI 消息）、从此处创建分支（AI 消息）、标记为重要（压缩时保留）。
 - 对话分支：从某条 AI 消息分叉出不同回复，可切换 / 重命名 / 删除分支（`branch-service.ts`）。
 - 工具调用：见 `module-docs/06-ai-tools.md` 与根目录 `TOOL_CALL_LOGIC.md`。
-- 斜杠命令：只有 `/clear`。输入 `/` 弹出只含 `/clear` 的菜单，选中后填入输入框；输入框内容恰好是 `/clear` 时回车即清空当前对话（与 Clear Chat 相同），不发给 AI；`/clear 其他字` 当普通消息发送。
+- 斜杠命令：只有 `/clear`。输入 `/` 弹出只含 `/clear` 的菜单，选中后先填入输入框；输入框内容恰好是 `/clear` 时（手打完整或选中填入后）回车即清空当前对话（与 Clear Chat 相同），不发给 AI；`/clear 其他字` 当普通消息发送。
 - 上下文：输入区的上下文标签（页面 / 块 / 标签 / 拖入的块）在发送时由 `buildContextForSend` 转成文本放入请求（见 `module-docs/04-context.md`）。
 - 本机 AI（Claude Code）：选择该平台时请求经本机 bridge 发出；每个对话可单独选工作文件夹，同一对话会尽量续接 Claude Code 会话（`ccHead`）；插件对话只读取所选工作文件夹里那一份 `CLAUDE.md`。详见 `bridge/README.md`。
 

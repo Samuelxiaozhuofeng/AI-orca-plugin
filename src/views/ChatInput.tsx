@@ -314,8 +314,10 @@ export default function ChatInput({
   const handleKeyDown = useCallback(
     (e: any) => {
       // 斜杠菜单键盘导航
+      // 已完整输入 /clear 时回车直接执行，不再先填入
+      const typedFullCommand = (textareaRef.current?.value ?? "").trim() === CLEAR_COMMAND.command;
       if (slashMenuOpen) {
-        if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey))) {
+        if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !typedFullCommand))) {
           e.preventDefault();
           setText(CLEAR_COMMAND.command + " ");
           if (textareaRef.current) {

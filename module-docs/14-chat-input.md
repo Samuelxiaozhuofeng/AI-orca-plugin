@@ -27,7 +27,7 @@ src/views/
 - 发送：`Enter` 发送、`Shift+Enter` 换行（输入法组词时 Enter 不发送）。只有上下文没有文字时发送「请基于我提供的上下文回答。」；发送成功后清空文本和文件，并清掉拖入的高优先级上下文。
 - 输入框高度随内容增长，最高 360px；占位文字 `Ask AI...`（有待发送文件时为「描述文件或直接发送...」）。
 - `@`：在行首或空格 / 换行之后输入 `@` 打开 `ContextPicker`；工具栏也有 `Add Context (@)` 按钮。
-- 斜杠命令菜单：只有 `/clear`。文本以 `/` 开头、没有空格且是 `/clear` 的前缀时弹出；Tab / Enter 或点击把 `/clear ` 填入输入框，Esc 关闭。提交内容 trim 后恰好是 `/clear` 时调用 `onClearChat`（清空当前对话）并清空输入框，不调用 `onSend`。
+- 斜杠命令菜单：只有 `/clear`。文本以 `/` 开头、没有空格且是 `/clear` 的前缀时弹出；Tab / Enter 或点击把 `/clear ` 填入输入框（已完整输入 `/clear` 时 Enter 直接提交），Esc 关闭。提交内容 trim 后恰好是 `/clear` 时调用 `onClearChat`（清空当前对话）并清空输入框，不调用 `onSend`。
 - 文件：点回形针按钮选择（`isSupportedFile` 判断类型）、粘贴图片、拖入文件；上传由 `file-service.ts` 的 `uploadFile` 处理。视频文件按完整识别（画面+音频）处理。
 - 拖入 Orca 块：识别 `orca/` 开头的拖拽数据或文本里的块 id，以 `addBlockById(id, 1)` 加为高优先级上下文，不插入文本。
 - Token 预估：输入框右下角显示 `~N`（`estimateTokens`），悬停提示预估输入 / 输出 token。
