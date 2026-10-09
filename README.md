@@ -7,11 +7,11 @@
 
 ## 🌟 核心特性
 
-- 🤖 **多模型支持** - OpenAI、Claude、Gemini、Ollama 等
-- 🔧 **23+ AI 工具** - 搜索、创建、更新笔记
+- 🤖 **多平台模型** - OpenAI 协议、Anthropic 协议的服务（内置 OpenAI、DeepSeek，可自行添加），以及本机 AI（经 `bridge/` 中转调用本机 Claude Code）
+- 🔧 **MCP 工具** - 通过 MCP 服务器接入笔记和外部工具（默认连 Orca Note MCP）
 - 💾 **会话管理** - 分支、收藏、导出、历史
 - 📁 **多文件支持** - PDF、Word、Excel、图片、视频
-- 🎮 **联网搜索** - Web 搜索、Wikipedia、货币转换
+- ⌨️ **斜杠命令** - 输入 `/` 选用 Commands 目录里的提示词模板
 - 🎨 **Markdown 增强** - 代码、表格
 
 ## 🚀 快速开始
@@ -28,8 +28,14 @@ npm install
 # 开发模式
 npm run dev
 
-# 生产构建
+# 生产构建（tsc + vite build；若有 build.config.local.json 会把 dist 复制到其中 copyTo 指定的位置）
 npm run build
+
+# 运行测试
+npm test
+
+# 打包发布 zip（需先 build）
+npm run package
 ```
 
 ### 配置
@@ -42,10 +48,10 @@ npm run build
 ## 📖 文档
 
 - **[完整架构说明](./ARCHITECTURE.md)** - 详细的架构、功能和实现说明
-- **[快速设置指南](./docs/QUICK_SETUP_GUIDE.md)** - 快速上手教程
+- **[本机 AI 中转](./bridge/README.md)** - 本机 AI（Claude Code）中转的安装与权限说明
 - **[工具调用逻辑](./TOOL_CALL_LOGIC.md)** - AI 工具系统说明
 - **[AI 助手指引](./AGENTS.md)** - 开发者指引
-- **[工具提示词](./Tool-Prompt/)** - 23+ 工具的详细文档
+- **[模块文档](./module-docs/)** - 各模块行为说明
 
 ## 🎯 主要功能
 
@@ -63,36 +69,31 @@ npm run build
 
 ### 3. AI 工具
 
-**搜索工具**：全文搜索、标签搜索、引用搜索、高级查询
+插件自身只内置一个元工具 `tool_instructions`（查询某个工具的用法）；笔记读写等工具来自 MCP 服务器（默认配置 Orca Note MCP，`http://localhost:18672/mcp`，可在对话菜单「MCP 服务器」里增删服务器、开关单个工具）。
 
-**读取工具**：获取块内容、链接、元数据
-
-**日记工具**：今日日记、指定日期、日期范围
-
-**写入工具**：创建块、创建页面、插入标签、更新属性
-
-**联网工具**：网页搜索、图片搜索、Wikipedia、货币转换
+选「本机 AI」平台时，由本机 Claude Code 自带的工具干活，写操作的确认见 [bridge/README.md](./bridge/README.md)。
 
 ### 4. 会话管理
 
 - 自动保存对话历史
 - 支持会话分支切换
-- 导出为 Markdown/JSON/Journal
-- 收藏和搜索功能
+- 导出为 Markdown 文件，或保存到日记
+- 收藏、置顶、重命名
 
 ### 5. 文件处理
 
 支持多种文件类型：
 
-- **图片**：PNG, JPEG, GIF, WebP, AVIF
-- **视频**：MP4, WebM, MOV（自动抽帧）
+- **图片**：PNG, JPEG, GIF, WebP, BMP, SVG, AVIF
+- **视频**：MP4, WebM, MOV 等（自动抽帧）
+- **音频**：MP3, WAV, OGG 等
 - **文档**：PDF, Word, Excel（自动提取文本）
 - **代码**：JavaScript, Python, TypeScript 等
 - **数据**：JSON, CSV（解析结构化数据）
 
-### 6. 多模型对比
+### 6. 本机 AI
 
-同时向多个 AI 模型发送请求，对比不同模型的回答质量。
+给平台选「本机 AI」协议，对话经 `bridge/` 中转交给本机 Claude Code；输入框旁可为每个对话单独选工作文件夹，该文件夹里的 `CLAUDE.md` 会被读取。详见 [bridge/README.md](./bridge/README.md)。
 
 ## 🛠️ 技术栈
 
@@ -110,14 +111,16 @@ AI-orca-plugin/
 │   ├── ui/                  # UI 注册
 │   ├── views/               # React 组件
 │   ├── components/          # 可复用组件
-│   ├── services/            # 业务逻辑（40+ 服务）
+│   ├── services/            # 业务逻辑（ai/ external/ notes/ 子目录 + 会话、分支、导出、文件等）
 │   ├── store/               # 状态管理
 │   ├── settings/            # 设置配置
 │   ├── utils/               # 工具函数
 │   └── styles/              # 样式定义
+├── bridge/                  # 本机 AI 中转（Orca Agent Bridge）
+├── scripts/                 # 构建后处理、打包、测试脚本
 ├── dist/                    # 构建输出
 ├── tests/                   # 测试文件
-├── Tool-Prompt/             # 工具文档
+├── module-docs/             # 模块文档
 ├── ARCHITECTURE.md          # 架构说明
 └── package.json
 ```
@@ -126,9 +129,7 @@ AI-orca-plugin/
 
 ### 添加新工具
 
-1. 在 `src/services/ai-tools.ts` 定义工具
-2. 实现工具执行逻辑
-3. 在 `Tool-Prompt/` 添加工具文档
+笔记等工具由 MCP 服务器提供，不在插件内定义：在对话菜单「MCP 服务器」里添加服务器即可。`src/services/ai/ai-tools.ts` 只负责元工具 `tool_instructions` 和把 `mcp__` 开头的调用转发给 MCP 客户端。
 
 ### 添加新组件
 
@@ -154,9 +155,9 @@ console.log(orca.state.blocks);
 import { contextStore } from "./store/context-store";
 console.log(contextStore);
 
-// 测试工具调用
-import { executeTool } from "./services/ai-tools";
-const result = await executeTool("searchNotes", { query: "test" });
+// 查看某个工具的用法
+import { executeTool } from "./services/ai/ai-tools";
+const result = await executeTool("tool_instructions", { toolName: "mcp__..." });
 ```
 
 ## 📝 更新日志

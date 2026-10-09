@@ -1,62 +1,25 @@
-# Orca AI Chat Plugin - 完整架构与功能说明
-
-## 📋 目录
-
-- [项目概述](#项目概述)
-- [技术栈](#技术栈)
-- [项目结构](#项目结构)
-- [核心架构](#核心架构)
-- [功能模块](#功能模块)
-- [服务层详解](#服务层详解)
-- [状态管理](#状态管理)
-- [UI组件](#ui组件)
-- [工具系统](#工具系统)
-- [文件处理](#文件处理)
-- [多模型支持](#多模型支持)
-- [数据流](#数据流)
-- [开发指南](#开发指南)
-
----
+# Orca AI Chat Plugin - 架构说明
 
 ## 项目概述
 
-**Orca AI Chat Plugin** 是 Orca Note（块级笔记应用）的 AI 聊天增强插件，提供类似 ChatGPT 的智能对话体验。
+**Orca AI Chat Plugin** 是 Orca Note（块级笔记应用）的 AI 聊天插件：在侧边栏 / 面板里和 AI 对话，可把页面、标签作为上下文，通过 MCP 工具读写笔记，也可把对话交给本机 Claude Code（本机 AI）处理。
 
 ### 核心特性
 
-- 🤖 **多模型支持** - OpenAI、Anthropic Claude、Google Gemini、本地 Ollama 等
-- 🔧 **丰富的 AI 工具** - 23+ 内置工具，支持搜索、创建、更新笔记
-- 💾 **会话管理** - 支持分支、收藏、导出、历史记录
-- 📁 **多文件支持** - PDF、Word、Excel、图片、视频处理
-- 🌐 **联网搜索** - 集成 Web 搜索、Wikipedia、货币转换
-- 🔄 **流式输出** - SSE 实时流式响应
-- 🎨 **Markdown 增强** - 支持代码高亮、表格、图表
+- **多平台模型** - 平台按协议分三类：`openai`（OpenAI 兼容接口）、`anthropic`、`local-cli`（本机 AI）。内置平台 OpenAI、DeepSeek，可自行添加平台和模型
+- **MCP 工具** - 笔记和外部工具都经 MCP 服务器接入
+- **会话管理** - 自动保存、分支、收藏、置顶、重命名、导出 Markdown、保存到日记
+- **多文件支持** - 图片、视频、音频、PDF、Word、Excel、代码、数据文件
+- **斜杠命令** - 输入 `/` 选用 `Commands/` 目录里的提示词模板
+- **流式输出** - SSE 实时流式响应
+- **Markdown 增强** - 代码块、表格、图片画廊等
 
 ---
 
 ## 技术栈
 
-### 核心技术
-
-- **TypeScript** - 类型安全的开发语言
-- **React 18** - UI 框架（通过 `window.React` 访问）
-- **Vite** - 构建工具和开发服务器
-- **Valtio** - 响应式状态管理
-
-### 第三方库
-
-| 库 | 用途 |
-|---|---|
-| `xlsx` | Excel 文件解析 |
-| `mammoth` | Word 文档解析 |
-| `unpdf` | PDF 文件解析 |
-
-### API 集成
-
-- OpenAI / Azure OpenAI
-- Anthropic Claude
-- Google Gemini
-- 其他 OpenAI 兼容服务（Ollama、LM Studio 等）
+- **TypeScript**、**React 18**（通过 `window.React` 访问，不打包 React）、**Vite**、**Valtio**（`window.Valtio`）
+- 依赖库：`xlsx`（Excel）、`mammoth`（Word）、`unpdf`（PDF）
 
 ---
 
@@ -64,743 +27,190 @@
 
 ```
 AI-orca-plugin/
-├── src/                          # 源代码目录
-│   ├── main.ts                   # 插件入口点
-│   ├── orca.d.ts                 # Orca API 类型定义
-│   │
-│   ├── ui/                       # UI 注册和协调
-│   │   ├── ai-chat-ui.ts         # 面板/侧边工具注册
-│   │   ├── ai-chat-renderer.ts   # 自定义块渲染器
-│   │   └── ai-chat-context-menu.ts # 右键菜单
-│   │
-│   ├── views/                    # React 视图组件
-│   │   ├── AiChatPanel.tsx       # 主聊天面板
-│   │   ├── AiChatSidetool.tsx    # 侧边栏工具
-│   │   ├── ChatInput.tsx         # 聊天输入框
-│   │   ├── MessageItem.tsx       # 消息项渲染
-│   │   ├── ContextPicker.tsx     # 上下文选择器
-│   │   └── ...                   # 其他 UI 组件
-│   │
-│   ├── components/               # 可复用组件
-│   │   ├── MarkdownMessage.tsx   # Markdown 渲染
-│   │   ├── MultiModelResponse.tsx # 多模型响应
-│   │   └── ...
-│   │
-│   ├── services/                 # 业务逻辑层
-│   │   ├── openai-client.ts      # OpenAI API 客户端
-│   │   ├── chat-stream-handler.ts # 流式响应处理
-│   │   ├── ai-tools.ts           # AI 工具定义
-│   │   ├── session-service.ts    # 会话管理
-│   │   ├── file-service.ts       # 文件处理
-│   │   └── ...                   # 40+ 服务文件
-│   │
-│   ├── store/                    # 状态管理（Valtio）
-│   │   ├── context-store.ts      # 上下文状态
-│   │   ├── session-store.ts      # 会话状态
-│   │   ├── tool-store.ts         # 工具状态
-│   │   ├── ui-store.ts           # UI 状态
-│   │   └── ...
-│   │
-│   ├── settings/                 # 设置和配置
-│   │   └── ai-chat-settings.ts   # 设置模式定义
-│   │
-│   ├── utils/                    # 工具函数
-│   │   ├── markdown-renderer.ts  # Markdown 解析
-│   │   ├── token-utils.ts        # Token 计算
-│   │   └── ...
-│   │
-│   ├── styles/                   # 样式定义
-│   │   ├── ai-chat-styles.ts     # 主样式
-│   │   └── chat-animations.ts    # 动画效果
-│   │
-│   └── types/                    # 类型定义
-│       └── index.ts
-│
-├── dist/                         # 构建输出目录
-├── scripts/                      # 构建脚本
-├── tests/                        # 测试文件
-├── docs/                         # 文档目录
-├── module-docs/                  # 模块文档
-└── plugin-docs/                  # 插件文档
+├── src/
+│   ├── main.ts                    # 插件入口（load / unload）
+│   ├── orca.d.ts                  # Orca API 类型定义
+│   ├── ui/
+│   │   ├── ai-chat-ui.ts          # 面板 + 编辑器侧边工具注册、打开面板
+│   │   ├── ai-chat-renderer.ts    # 自定义块渲染器（aichat.conversation）
+│   │   └── ai-chat-context-menu.ts # 页面 / 标签右键菜单「加入 AI 上下文」
+│   ├── views/
+│   │   ├── AiChatPanel.tsx        # 主聊天面板
+│   │   ├── AiChatSidetool.tsx     # 编辑器侧边按钮
+│   │   ├── ChatInput.tsx          # 输入框（文件、斜杠命令）
+│   │   ├── chat-input/            # 输入框子部件：模型选择、工作文件夹按钮（仅本机 AI）、样式
+│   │   ├── MessageItem.tsx        # 单条消息
+│   │   ├── HeaderMenu.tsx         # 顶部菜单（清空、显示设置、MCP 服务器、导出、保存到日记）
+│   │   ├── ChatHistoryMenu.tsx    # 历史对话列表
+│   │   ├── ContextPicker.tsx / ContextChips.tsx # 上下文选择与展示
+│   │   ├── DisplaySettingsPanel.tsx # 字号 / 紧凑模式 / 时间戳
+│   │   ├── McpServerSettingsModal.tsx # MCP 服务器设置
+│   │   └── EmptyState.tsx         # 欢迎页
+│   ├── components/                # 消息列表、Markdown 渲染、工具确认弹窗、引用、图片画廊等
+│   ├── services/
+│   │   ├── ai/                    # 见「服务层」
+│   │   ├── external/              # MCP 客户端 / 服务器管理、图片、动图、视频
+│   │   ├── notes/                 # context-builder.ts（上下文文本）、document-parser.ts（PDF/Word/Excel）
+│   │   ├── session-service.ts     # 会话持久化
+│   │   ├── branch-service.ts      # 对话分支
+│   │   ├── export-service.ts      # 导出 Markdown / 保存到日记
+│   │   ├── file-service.ts        # 文件类型、上传、内容提取
+│   │   ├── commands-loader.ts     # 斜杠命令加载
+│   │   └── commands-defaults.ts   # 默认命令模板
+│   ├── store/                     # Valtio 状态：context / session / ui / tool / mcp / display-settings
+│   ├── settings/ai-chat-settings.ts # 设置 schema、平台与模型配置
+│   ├── utils/                     # Markdown 渲染、token 估算（含 tokenizer/）、面板树、延迟保存等
+│   └── styles/                    # 主样式、动画
+├── bridge/                        # 本机 AI 中转（Orca Agent Bridge），见 bridge/README.md
+├── scripts/                       # post-build.mjs、package-release.mjs、run-tests.mjs
+├── tests/                         # *.test.ts，入口 tests/run-tests.ts
+├── module-docs/                   # 模块文档
+└── plugin-docs/                   # Orca 官方插件 API 参考
 ```
 
 ---
 
 ## 核心架构
 
-### 插件生命周期
+### 插件生命周期（`src/main.ts`）
 
-```typescript
-// src/main.ts
+`load`：
+1. 注册设置 schema、读取已存的平台配置
+2. 若设置里有本机 AI 平台，非阻塞地探测并按需拉起中转（`autostartLocalCli`）
+3. 注册 UI（面板、侧边工具、右键菜单）和块渲染器
+4. 注册命令 `openAiChatPanel`，默认快捷键 macOS `meta+shift+k`、其他系统 `ctrl+shift+k`（已被占用则不分配）
+5. 初始化 `Commands/` 目录的默认模板
+6. 读取 MCP 设置，补上默认 MCP 服务器，非阻塞地连接各服务器
 
-export async function load(pluginName: string) {
-  // 1. 注册设置模式
-  await registerAiChatSettingsSchema(pluginName);
-  
-  // 2. 初始化设置
-  await initAiChatSettings(pluginName);
-  
-  // 3. 注册 UI（面板、侧边工具、上下文菜单）
-  registerAiChatUI(pluginName);
-  registerAiChatRenderer();
-  
-  // 5. 初始化命令目录
-  await initCommands();
-  
-}
+`unload`：清掉快捷键、命令、UI 和渲染器注册。
 
-export async function unload() {
-  // 清理 UI 注册
-  unregisterAiChatUI();
-  unregisterAiChatRenderer();
-}
-```
+### Orca API 与 React
 
-### Orca API 集成
-
-插件通过全局 `orca` 对象与 Orca Note 交互：
-
-```typescript
-// 状态访问
-orca.state.blocks[blockId]        // 获取块数据
-orca.state.repoDir                // 仓库目录
-
-// 后端调用
-await orca.invokeBackend("get-block-tree", blockId)
-await orca.invokeBackend("search-blocks-by-text", query)
-await orca.invokeBackend("query", queryDescription)
-
-// 导航
-orca.nav.openInLastPanel("block", { blockId })
-orca.nav.close(panelId)
-
-// UI 组件
-const { Button, Input } = orca.components
-
-// 通知
-orca.notify("success", "操作成功")
-```
-
-### React 使用模式
-
-插件不打包 React，而是使用 Orca 提供的全局 React：
-
-```typescript
-const React = window.React as any;
-const { createElement, useState, useEffect } = React;
-const { useSnapshot } = (window as any).Valtio;
-
-// 创建组件
-export default function MyComponent({ prop }: Props) {
-  const [state, setState] = useState(0);
-  
-  return createElement("div", null, 
-    createElement("h1", null, "Hello")
-  );
-}
-```
+插件通过全局 `orca` 对象与 Orca 交互（`orca.state`、`orca.invokeBackend`、`orca.plugins.getData/setData/writeFile`、`orca.panels`、`orca.editorSidetools`、`orca.renderers` 等，类型见 `src/orca.d.ts`，API 参考见 `plugin-docs/`）。组件用 `window.React` 的 `createElement` 写，不用 JSX；样式用 `--orca-color-*` CSS 变量。
 
 ---
 
 ## 功能模块
 
-### 1. 聊天面板（AiChatPanel）
+### 聊天与流式
 
-主聊天界面，支持：
+- `ai/openai-client.ts`：按平台协议（openai / anthropic / local-cli）发起流式请求
+- `ai/chat-stream-handler.ts`：流式聊天，含重试与回退
+- `ai/message-builder.ts`：构建发给模型的消息（含图片、视频、文件的多模态内容）
+- `ai/tool-call-protocol.ts`、`ai/tool-call-router.ts`：解析模型输出里 XML / DSML 形式的工具调用，并把工具名对应到可用工具
+- `ai/tool-round-limit.ts`：工具调用最大轮数（0 = 不限制，上限 100）
+- `ai/model-fetcher.ts`：从平台的 `/models` 接口拉取模型列表
+- `ai/dynamic-prompt.ts`：系统提示词（基础提示 + 按能力追加段落）
+- `ai/context-manager.ts`：长对话压缩、旧工具结果裁剪
 
-- **流式对话** - SSE 实时响应
-- **多轮对话** - 保持上下文连续性
-- **工具调用** - AI 自动调用 23+ 工具
-- **文件上传** - 支持图片、PDF、Word、Excel、视频
-- **分支管理** - 对话分支切换
-- **代码执行** - Python/JavaScript 代码解释器
+### 上下文
 
-**核心流程**：
+上下文引用（`store/context-store.ts`）有三种：页面（`page`）、块（`block`）、标签（`tag`）。添加方式：输入框旁的上下文选择器、页面 / 标签右键菜单「Add Page / Tag to AI Context」。发送时由 `notes/context-builder.ts` 的 `buildContextForSend` 生成上下文文本，长度受设置 `maxContextChars` 限制。
 
-```
-用户输入 → 构建上下文 → 发送 API → 流式接收 
-→ 工具调用处理 → 更新 UI → 保存会话
-```
+### 会话
 
-### 2. 上下文管理
+- 存储：插件目录下 `Sessions/index.json`（索引）和 `Sessions/<sessionId>.json`（每个会话一个文件）；旧版 `chat-sessions` 数据会迁移
+- 防抖保存与串行写入见 `utils/pending-save.ts`
+- 分支：`branch-service.ts` 创建 / 切换 / 重命名 / 删除分支
+- 导出：`export-service.ts` 导出 Markdown 文件，或把整个对话 / 选中的消息保存到日记
+- 对话也可作为 `aichat.conversation` 块渲染在笔记里（`ui/ai-chat-renderer.ts`）
 
-**选择机制**：
-- 块选择（单个/多个）
-- 页面选择（包含所有子块）
-- 标签选择（所有带该标签的块）
-- 拖拽添加
+### 工具系统
 
-**上下文构建**：
-```typescript
-// src/services/context-builder.ts
-export async function buildContextForSend(
-  refs: ContextRef[],
-  options?: BuildOptions
-): Promise<string>
-```
+插件内置的工具只有一个元工具 `tool_instructions`（返回指定工具的参数说明）。其余工具全部来自 MCP 服务器：
 
-**压缩策略**：
-- 自动识别需要压缩的长上下文
-- 使用 AI 进行语义压缩
-- 保留关键信息
+- `store/mcp-store.ts`：服务器列表、连接状态、已发现的工具、被用户关闭的工具；默认服务器 `orca-note`（`http://localhost:18672/mcp`）
+- `external/mcp-client.ts`：MCP 客户端，支持 streamable-http，失败时回退 legacy-sse
+- `external/mcp-server-manager.ts`：连接生命周期、把远程工具转成 function-calling 格式、路由调用、按开关过滤
+- `external/mcp-tool-names.ts`：外部工具统一以 `mcp__<服务器id>__<工具名>` 命名
+- `ai/ai-tools.ts`：`executeTool` 把 `mcp__` 工具转发给 MCP 客户端
+- `store/tool-store.ts`、`utils/tool-display-config.ts`：工具显示名
 
-### 3. 会话管理
+### 本机 AI（local-cli）
 
-**功能**：
-- 自动保存对话
-- 会话列表（按时间/收藏）
-- 分支管理
-- 导出（Markdown/JSON/Journal）
-- 搜索和过滤
+平台协议选 `local-cli` 时，请求发往本机 `bridge/` 中转（默认 `http://127.0.0.1:18673`），由中转调用本机 Claude Code：
 
-**存储**：
-```typescript
-// 保存到 Orca Note 块
-#saved-ai-chat-session {session_id}
-  - title: 会话标题
-  - created: 时间戳
-  - messages: [...] (压缩存储)
-```
+- `ai/local-cli-client.ts`：流式请求与事件映射
+- `ai/local-cli-context.ts`：组装运行时上下文（Orca MCP 地址与令牌、确认弹窗、工作文件夹等）
+- `ai/local-cli-autostart.ts`：探测中转，必要时拉起 `/Applications/Orca Agent Bridge.app`
+- `ai/local-cli-resume.ts`：同一对话接着聊时的续接
+- 输入框旁的工作文件夹按钮（`views/chat-input/WorkDirButton.tsx`）：每个对话单独选；该文件夹里的 `CLAUDE.md` 由中转读取
 
-### 4. 工具系统
+模式、权限、令牌、工作文件夹等细节见 `bridge/README.md`。
 
-**内置工具（23个）**：
+### 文件处理
 
-| 类别 | 工具 |
-|---|---|
-| 读取 | getBlockLinks, getBlockMeta, getBlocksText, getPage |
-| 日记 | getTodayJournal, getJournalByDate, getJournals |
-| 写入 | createBlock, createPage, insertTag, updateTagProperties |
-| 查询 | queryByTagProperty, getTagsAndPages, getPageByName |
-| 联网 | webSearch, imageSearch, wikipedia, currency |
-| 其他 | fetchUrl, getSavedAiConversations, batchInsertTags |
+`file-service.ts` 的 `FILE_TYPE_CONFIGS` 定义可上传的类型：
 
-**工具状态**：
-- `auto` - 自动执行（搜索等安全操作）
-- `ask` - 询问用户（写入等敏感操作）
-- `disabled` - 临时禁用
-
-**动态工具**：
-- **Code Interpreter** - 代码执行
-
-### 5. 多模型支持
-
-**支持的提供商**：
-- OpenAI (GPT-4, GPT-4 Turbo, GPT-4o, o1, o3)
-- Anthropic (Claude 3.5 Sonnet, Claude 3 Opus)
-- Google (Gemini Pro, Gemini Flash)
-- Azure OpenAI
-- 自定义 OpenAI 兼容服务
-
-**多模型对比**：
-- 同时向多个模型发送请求
-- 并行显示响应
-- 对比不同模型的回答质量
-
-### 6. 文件处理
-
-**支持的文件类型**：
-
-| 类型 | 格式 | 处理方式 |
+| 类型 | 格式 | 处理 |
 |---|---|---|
-| 图片 | PNG, JPEG, GIF, WebP, AVIF | 转 base64，支持动图帧切割 |
-| 视频 | MP4, WebM, MOV | 抽帧 + 音频识别 |
-| 文档 | PDF, Word, Excel | 提取文本内容 |
-| 代码 | JS, TS, Python, 等 | 直接读取 |
-| 数据 | JSON, CSV | 解析结构化数据 |
+| 图片 | PNG, JPEG, GIF, WebP, BMP, SVG, AVIF | 转 base64（动图在 `external/animated-image-service.ts` 处理） |
+| 视频 | MP4, WebM, MOV, AVI, MKV | 抽帧（`external/video-service.ts`） |
+| 音频 | MP3, WAV, OGG, MP4, FLAC, AAC | 按音频类别处理 |
+| 文档 | PDF, Word, Excel | `notes/document-parser.ts` 提取文本 |
+| 文本 / 代码 / 数据 | txt, md, 代码, CSV, JSON | 直接读取 |
 
-**处理流程**：
-```
-文件上传 → 类型检测 → 格式转换 
-→ 内容提取 → 发送给 AI
-```
+### 斜杠命令
+
+`commands-loader.ts` 从插件目录 `Commands/<name>.md` 读取命令；文件被删会用 `commands-defaults.ts` 里的默认模板（`orcanote`、`debug`、`review`、`refactor`）重建，用户改过的不会被覆盖。输入框输入 `/` 弹出命令菜单；`AiChatPanel.tsx` 另有一组内置的回答格式指令（如 `/brief`、`/table`、`/summary`）。
 
 ---
 
-## 服务层详解
+## 设置
 
-### 核心服务
+`settings/ai-chat-settings.ts`：
 
-#### openai-client.ts
-OpenAI API 客户端，支持：
-- SSE 流式响应
-- 工具调用（function calling）
-- 多模态输入（图片、视频）
-- 错误重试和处理
+| 项 | 默认值 |
+|---|---|
+| 当前平台 / 模型 | `openai` / `gpt-4o-mini` |
+| `temperature` | 0.7 |
+| `maxTokens` | 4096 |
+| `currency` | `USD`（可选 USD / CNY / EUR / JPY） |
+| `maxHistoryMessages` | 0（不限制，改用动态压缩） |
+| `maxToolResultChars` | 8000（0 = 不限制） |
+| `maxContextChars` | 60000 |
 
-#### chat-stream-handler.ts
-流式聊天处理器：
-- 解析 SSE 流
-- 处理工具调用（JSON/XML 格式）
-- 增量更新 UI
-- 错误恢复
-
-#### ai-tools.ts
-工具定义和执行：
-- 23+ 工具定义（OpenAI Tool 格式）
-- 工具参数验证
-- 工具执行逻辑
-- 结果格式化
-
-#### session-service.ts
-会话持久化：
-- 会话创建和更新
-- 自动压缩大会话
-- 会话列表管理
-- 导出功能
-
-#### file-service.ts
-文件处理：
-- 文件类型检测
-- 文件上传
-- 内容提取
-- 格式转换
-
-#### document-parser.ts
-文档解析：
-- PDF 文本提取（unpdf）
-- Word 解析（mammoth）
-- Excel 解析（xlsx）
-
-#### video-service.ts
-视频处理：
-- 视频抽帧
-- 缩略图生成
-- 音频识别（如果支持）
-
-### 辅助服务
-
-- **context-builder.ts** - 上下文文本构建
-- **message-builder.ts** - OpenAI 消息格式构建
-- **citation-service.ts** - 引用管理
-- **export-service.ts** - 会话导出
-- **branch-service.ts** - 会话分支管理
-- **web-search-service.ts** - 网页搜索
-- **utility-tools.ts** - Wikipedia、货币转换等
+平台（`AiProvider`）含 `apiUrl`、`apiKey`、`protocol`、`models`、`enabled`；模型（`ProviderModel`）可单独覆盖温度、最大输出、`maxToolRounds`、`contextLength`，并可标注能力（vision / web / reasoning / tools / rerank / embedding）。显示设置（字号、紧凑模式、时间戳）在 `store/display-settings-store.ts`。
 
 ---
 
-## 状态管理
+## 状态管理（Valtio）
 
-使用 **Valtio** 进行响应式状态管理：
-
-### contextStore
-```typescript
-{
-  contextRefs: ContextRef[],      // 选中的上下文项
-  contextPreview: string,          // 预览文本
-  draggedItems: any[],             // 拖拽项
-}
-```
-
-### sessionStore
-```typescript
-{
-  messages: Message[],             // 当前会话消息
-  sessionId: string,               // 会话 ID
-  branches: Branch[],              // 分支列表
-  activeBranchId: string,          // 激活分支
-}
-```
-
-### toolStore
-```typescript
-{
-  toolStatus: Map<toolName, Status>,
-  webSearchEnabled: boolean,
-  // ...其他工具开关
-}
-```
-
-### uiStore
-```typescript
-{
-  panelId: string,                 // 面板 ID
-  lastRootBlockId: number,         // 最后访问的块 ID
-  isStreaming: boolean,            // 是否正在流式输出
-}
-```
-
----
-
-## UI组件
-
-### 主要组件
-
-#### AiChatPanel.tsx
-主聊天面板，包含：
-- 消息列表
-- 输入框
-- 上下文选择器
-- 设置面板
-- 会话历史
-
-#### ChatInput.tsx
-智能输入框：
-- 多行输入
-- 文件拖拽上传
-- 斜杠命令（/）
-- 快捷键支持
-
-#### MessageItem.tsx
-消息项渲染：
-- Markdown 渲染
-- 代码高亮
-- 工具调用显示
-- 引用标注
-- 操作按钮（复制、重试、分支）
-
-#### MarkdownMessage.tsx
-增强的 Markdown 渲染：
-- 代码块（带复制按钮）
-- 表格
-- 任务列表
-- 时间线
-- 对比视图
-- 图片画廊
-
----
-
-## 工具系统
-
-### 工具定义格式
-
-```typescript
-const TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "toolName",
-    description: "工具描述...",
-    parameters: {
-      type: "object",
-      properties: {
-        param1: {
-          type: "string",
-          description: "参数描述"
-        }
-      },
-      required: ["param1"]
-    }
-  }
-}
-```
-
-### 工具执行流程
-
-```
-AI 决定调用工具 → 解析工具调用
-→ 检查工具状态（auto/ask/disabled）
-→ 执行工具（如需询问则弹窗）
-→ 格式化结果 → 返回给 AI
-→ AI 生成最终回复
-```
-
-### 工具分类
-
-**读取类**：
-- `getBlockLinks` - 获取块的链接
-- `getBlockMeta` - 获取块元数据
-- `getBlocksText` - 批量获取块文本
-- `getPage` - 获取页面内容
-
-**日记类**：
-- `getTodayJournal` - 今日日记
-- `getJournalByDate` - 指定日期
-- `getJournals` - 日期范围
-
-**写入类**：
-- `createBlock` - 创建块
-- `createPage` - 创建页面
-- `insertTag` - 插入标签
-- `updateTagProperties` - 更新标签属性
-
-**联网类**：
-- `webSearch` - 网页搜索
-- `imageSearch` - 图片搜索
-- `wikipedia` - Wikipedia 查询
-- `currency` - 货币转换
-
----
-
-## 文件处理
-
-### 处理流程
-
-```
-文件选择/拖拽 → 文件验证（类型、大小）
-→ 上传到 Orca assets → 获取文件路径
-→ 类型检测 → 内容提取 → 附加到消息
-```
-
-### 文件类型处理
-
-**图片**：
-```typescript
-// 转为 base64
-const base64 = await imageToBase64(fileRef);
-return {
-  type: "image_url",
-  image_url: { url: `data:image/jpeg;base64,${base64}` }
-};
-```
-
-**视频**：
-```typescript
-// 抽帧（多张图片）
-const frames = await extractVideoFrames(videoFile);
-return frames.map(frame => ({
-  type: "image_url",
-  image_url: { url: frame }
-}));
-```
-
-**文档**：
-```typescript
-// 提取文本
-const text = await parseDocument(arrayBuffer, fileName, mimeType);
-return {
-  type: "text",
-  text: `[文件: ${fileName}]\n${text}`
-};
-```
-
----
-
-## 多模型支持
-
-### 提供商配置
-
-```typescript
-// src/settings/ai-chat-settings.ts
-type Provider = 
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "azure"
-  | "custom";
-
-interface ModelConfig {
-  provider: Provider;
-  apiKey: string;
-  baseURL?: string;
-  model: string;
-}
-```
-
-### 多模型对比
-
-```typescript
-// src/services/multi-model-service.ts
-export async function streamMultiModelChat(
-  models: ModelConfig[],
-  messages: Message[]
-) {
-  // 并行发送请求
-  const streams = models.map(config => 
-    streamChat(config, messages)
-  );
-  
-  // 实时更新各模型响应
-  for await (const update of mergeStreams(streams)) {
-    updateModelResponse(update.modelId, update.content);
-  }
-}
-```
+| store | 内容 |
+|---|---|
+| `contextStore` | `selected`：已选上下文引用 |
+| `sessionStore` | `currentSession`、`messages`、`contexts`、`isDirty` |
+| `uiStore` | `aiChatPanelId`、`lastRootBlockId`、`pendingChatSession` |
+| `mcpStore` | `servers`、`serverStatuses`、`disabledTools`、`discoveredTools` |
+| `displaySettingsStore` | `fontSize`、`compactMode`、`showTimestamps` |
+| `tool-store` | 工具显示名映射 `TOOL_DISPLAY_NAMES` |
 
 ---
 
 ## 数据流
 
-### 聊天流程
+### 聊天
 
 ```
-用户输入
-  ↓
-构建消息列表（历史 + 当前 + 上下文）
-  ↓
-选择模型和工具
-  ↓
-发送 API 请求（SSE）
-  ↓
-接收流式响应
-  ├─ 文本内容 → 增量更新 UI
-  └─ 工具调用 → 执行工具 → 继续请求
-  ↓
-生成最终回复
-  ↓
-保存会话
-```
-
-### 工具调用流程
-
-```
-AI 返回工具调用
-  ↓
-解析工具名称和参数
-  ↓
-检查工具状态
-  ├─ auto → 直接执行
-  ├─ ask → 弹窗确认 → 执行
-  └─ disabled → 拒绝执行
-  ↓
-执行工具逻辑
-  ↓
-格式化结果（成功/失败）
-  ↓
-附加工具结果到消息
-  ↓
-继续 API 请求（包含工具结果）
-  ↓
-AI 根据工具结果生成最终回复
-```
-
-### 上下文处理流程
-
-```
-用户选择上下文（块/页面/标签）
-  ↓
-存储到 contextStore
-  ↓
-构建上下文预览文本
-  ├─ 获取块内容
-  ├─ 展开子块（可选）
-  └─ 格式化为文本
-  ↓
-发送聊天时附加上下文
-  ↓
-AI 基于上下文回答
+用户输入（可带文件、斜杠命令、上下文）
+  → 构建消息（历史 + 上下文 + 文件内容）
+  → 按平台协议发流式请求（local-cli 走 bridge）
+  → 文本增量更新 UI；遇到工具调用 → 执行（MCP）→ 带结果继续请求（受最大轮数限制）
+  → 生成最终回复 → 防抖保存会话
 ```
 
 ---
 
-## 开发指南
-
-### 环境搭建
+## 开发
 
 ```bash
-# 安装依赖
 npm install
-
-# 开发模式（热重载）
-npm run dev
-
-# 生产构建
-npm run build
-
-# 预览构建结果
-npm run preview
+npm run dev       # Vite 开发服务器
+npm run build     # tsc + vite build + scripts/post-build.mjs（有 build.config.local.json 时把 dist 复制到 copyTo）
+npm run package   # 打包发布 zip
+npm test          # 运行 tests/ 下的测试
 ```
 
-### 添加新工具
-
-1. 在 `src/services/ai-tools.ts` 定义工具：
-
-```typescript
-export const MY_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "myTool",
-    description: "工具描述",
-    parameters: { /* ... */ }
-  }
-};
-```
-
-2. 实现工具逻辑：
-
-```typescript
-async function executeMyTool(args: any) {
-  // 实现逻辑
-  return "结果";
-}
-```
-
-3. 注册工具：
-
-```typescript
-export const TOOLS = [
-  // ...其他工具
-  MY_TOOL
-];
-
-export async function executeTool(name: string, args: any) {
-  if (name === "myTool") {
-    return await executeMyTool(args);
-  }
-  // ...
-}
-```
-
-### 添加新组件
-
-1. 创建组件文件 `src/components/MyComponent.tsx`：
-
-```typescript
-const React = window.React as any;
-const { createElement, useState } = React;
-
-export default function MyComponent({ prop }: Props) {
-  const [state, setState] = useState(0);
-  
-  return createElement("div", { className: "my-component" },
-    createElement("h1", null, "Hello")
-  );
-}
-```
-
-2. 在父组件中使用：
-
-```typescript
-import MyComponent from "../components/MyComponent";
-
-// 在 createElement 中使用
-createElement(MyComponent, { prop: "value" })
-```
-
-### 调试技巧
-
-1. **查看 Orca 状态**：
-   ```javascript
-   console.log(orca.state.blocks);
-   ```
-
-2. **查看 Valtio Store**：
-   ```javascript
-   import { contextStore } from "./store/context-store";
-   console.log(contextStore);
-   ```
-
-3. **测试工具调用**：
-   ```javascript
-   import { executeTool } from "./services/ai-tools";
-   const result = await executeTool("searchNotes", { query: "test" });
-   ```
-
-4. **监控 API 请求**：
-   打开浏览器开发者工具 Network 标签，查看 API 请求和响应
-
-### 代码规范
-
-- **缩进**：2 空格
-- **类型**：严格使用 TypeScript 类型
-- **命名**：
-  - 文件：kebab-case（`my-service.ts`）
-  - 组件：PascalCase（`MyComponent.tsx`）
-  - 函数：camelCase（`myFunction`）
-  - 常量：UPPER_SNAKE_CASE（`MY_CONSTANT`）
-- **样式**：使用 `--orca-color-*` CSS 变量
-- **React**：使用 `createElement`，不使用 JSX
-
----
-
-## 总结
-
-**Orca AI Chat Plugin** 是一个功能丰富、架构清晰的 AI 增强插件，核心特点：
-
-✅ **模块化设计** - 清晰的服务层、状态管理、UI 组件分离  
-✅ **可扩展性强** - 易于添加新工具、模型支持  
-✅ **用户体验好** - 流式输出、多文件支持  
-✅ **功能完善** - 创建、多模型等  
-✅ **类型安全** - 全面的 TypeScript 类型定义  
-
-适合作为构建智能笔记助手的参考项目。
+- 新测试：写 `tests/xxx.test.ts`，在 `tests/run-tests.ts` 里 import
+- 新增笔记类工具：在 MCP 服务器一侧提供，插件会自动发现；不在插件里单独定义
+- 规范：2 空格缩进、TypeScript 严格模式；文件 kebab-case、组件 PascalCase、函数 camelCase
