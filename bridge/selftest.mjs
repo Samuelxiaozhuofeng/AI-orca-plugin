@@ -4,7 +4,7 @@
 // 第三轮：不续接、旧命名残留清扫、配置权限、无配置安全模式、App 的 launch.sh 写默认配置与 PATH 顺序；
 // 续接第一段：--resume、非法 sid 忽略、resumed 标记、assistant uuid、续接早退 resume_failed、同会话先停旧进程。
 // 运行：node bridge/selftest.mjs（不需要真 claude，不碰 ~/.orca-agent-bridge）
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -639,7 +639,7 @@ try {
     const a = lastArgs();
     assert.equal(a[a.indexOf("--add-dir") + 1], path.join(home, "extra"));
     assert.equal(a[a.indexOf("--setting-sources") + 1], "user");
-    assert.deepEqual(JSON.parse(a[a.indexOf("--settings") + 1]).claudeMdExcludes, [path.join(home, ".claude", "CLAUDE.md")]);
+    assert.deepEqual(JSON.parse(a[a.indexOf("--settings") + 1]).claudeMdExcludes, [path.join(home, ".claude", "CLAUDE.md"), path.join(home, ".claude", "rules", "**")]);
     assert.equal(a[a.indexOf("--permission-mode") + 1], "bypassPermissions");
   });
 
@@ -656,6 +656,18 @@ try {
     await chat({ prompt: "hi", workDir: d });
     const a = lastArgs();
     assert.ok(a[a.indexOf("--append-system-prompt") + 1].includes("暗号 BANANA"));
+    // 链到文件夹外 → 不读；FIFO → 不卡住、照常启动不带参数
+    const secret = path.join(tmp, "secret-w2b.txt");
+    fs.writeFileSync(secret, "SECRET");
+    fs.rmSync(path.join(d, "CLAUDE.md"));
+    fs.symlinkSync(secret, path.join(d, "CLAUDE.md"));
+    await chat({ prompt: "hi", workDir: d });
+    assert.ok(!lastArgs().includes("--append-system-prompt"));
+    fs.rmSync(path.join(d, "CLAUDE.md"));
+    execFileSync("mkfifo", [path.join(d, "CLAUDE.md")]);
+    const r = await chat({ prompt: "hi", workDir: d });
+    assert.equal(r.status, 200);
+    assert.ok(!lastArgs().includes("--append-system-prompt"));
   });
   await check("W3 PATH 含相对项时，所选文件夹里的同名 claude / node 不会被启动", async () => {
     const bin = path.join(tmp, "bin-w3");

@@ -33,10 +33,11 @@ const SID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const BAD_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk"];
 // Orca MCP 只读工具白名单（自动放行）；实测 tools/list 后再填，先为空 = 一律弹确认
 const AUTO_ALLOW_MCP_TOOLS = [];
-// 不读用户级全局 ~/.claude/CLAUDE.md：插件对话只按所选工作文件夹自己的 CLAUDE.md 办事（终端里直接用 Claude Code 不受影响）
+// 不读用户级全局规则（CLAUDE.md 和 rules/）：插件对话只按所选工作文件夹自己的 CLAUDE.md 办事（终端里直接用 Claude Code 不受影响）
+const USER_CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env.CLAUDE_CONFIG_DIR) : path.join(os.homedir(), ".claude");
 const COMMON_ARGS = [
   "-p",
-  "--settings", JSON.stringify({ claudeMdExcludes: [path.join(os.homedir(), ".claude", "CLAUDE.md")] }),
+  "--settings", JSON.stringify({ claudeMdExcludes: [path.join(USER_CLAUDE_DIR, "CLAUDE.md"), path.join(USER_CLAUDE_DIR, "rules", "**")] }),
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
@@ -241,15 +242,21 @@ function resolveWorkDir(raw) {
 
 // 项目级设置不加载（完全放开靠 --setting-sources user，安全模式靠 --restricted），所选文件夹的 CLAUDE.md 也跟着读不到：
 // 这里只把那一份正文交给 AI，钩子和设置照旧不加载。不跟 @引用、子目录 CLAUDE.md、.claude/rules
-const MAX_RULES_BYTES = 256 * 1024;
+const MAX_RULES_BYTES = 100 * 1024; // Linux 单个参数上限 128KB
 function readProjectRules(dir) {
-  const file = path.join(dir, "CLAUDE.md");
+  let fd;
   try {
-    if (!fs.statSync(file).isFile()) return null;
-    if (fs.statSync(file).size > MAX_RULES_BYTES) { console.warn(`${file} 超过 256KB，未读给 AI`); return null; }
-    const text = fs.readFileSync(file, "utf8").replace(/\0/g, "").trim();
-    return text ? `# 工作文件夹的项目规则（${file}）\n\n${text}` : null;
-  } catch { return null; }
+    // 符号链接只认指向文件夹内的（别人的仓库可能把 CLAUDE.md 链到 ~/.ssh 之类）；O_NONBLOCK + fstat：读前被换成 FIFO 也不卡住中转
+    const real = fs.realpathSync(path.join(dir, "CLAUDE.md"));
+    if (!real.startsWith(dir + path.sep)) return null;
+    fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return null;
+    if (st.size > MAX_RULES_BYTES) { console.warn(`${real} 超过 100KB，未读给 AI`); return null; }
+    const buf = Buffer.alloc(MAX_RULES_BYTES);
+    const text = buf.toString("utf8", 0, fs.readSync(fd, buf, 0, MAX_RULES_BYTES, 0)).replace(/\0/g, "").trim();
+    return text ? `# 工作文件夹的项目规则（${real}）\n\n${text}` : null;
+  } catch { return null; } finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
 /** SIGTERM 并等它退出；3 秒还没退就 SIGKILL */
