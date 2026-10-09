@@ -5,6 +5,7 @@
  */
 
 import type { ExtractedMemory } from "../services/ai/memory-extraction";
+import { memoryStore } from "../store/memory-store";
 import { withTooltip } from "../utils/orca-tooltip";
 
 const React = window.React as unknown as {
@@ -109,7 +110,7 @@ export interface ExtractMemoryButtonProps {
   /** The conversation context to analyze for memory extraction */
   conversationContext: string;
   /** Callback when extraction is complete with extracted memories */
-  onExtracted: (memories: ExtractedMemory[]) => void;
+  onExtracted: (memories: ExtractedMemory[], userId?: string) => void;
   /** Callback when extraction starts (for loading state) */
   onExtractionStart?: () => void;
   /** Callback when extraction fails */
@@ -158,6 +159,8 @@ export default function ExtractMemoryButton({
   const doExtract = useCallback(async (prompt?: string) => {
     if (isLoading || !conversationContext.trim()) return;
 
+    // 点按钮时的记忆用户；请求期间切换用户也写回这个人
+    const userId = memoryStore.getActiveUser()?.id;
     setIsLoading(true);
     setShowDropdown(false);
     onExtractionStart?.();
@@ -182,7 +185,7 @@ export default function ExtractMemoryButton({
         return;
       }
 
-      onExtracted(result.memories);
+      onExtracted(result.memories, userId);
     } catch (error: any) {
       const errorMsg = error?.message || "记忆提取失败";
       onExtractionError?.(errorMsg);

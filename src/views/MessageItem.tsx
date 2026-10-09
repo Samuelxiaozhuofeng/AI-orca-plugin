@@ -763,7 +763,7 @@ interface MessageItemProps {
   // Conversation context for memory extraction (all messages up to this point)
   conversationContext?: string;
   // Callback when memories are extracted from this message
-  onExtractMemory?: (memories: ExtractedMemory[]) => void;
+  onExtractMemory?: (memories: ExtractedMemory[], userId?: string) => void;
   // Callback when user clicks a suggested reply
   onSuggestedReply?: (text: string) => void;
   // Callback to generate AI-powered suggestions

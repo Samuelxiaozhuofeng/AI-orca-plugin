@@ -2466,13 +2466,13 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
   }, []);
 
-  // 切换消息的重要标记（pinned）
-  // 提取出的记忆写进记忆管理（当前用户），与记忆管理里手动添加同一条路
-  const handleExtractMemory = useCallback((memories: ExtractedMemory[]) => {
-    const added = memories.filter(mem => memoryStore.addMemory(mem.content)).length;
+  // 提取出的记忆写进记忆管理（点按钮时的用户），与记忆管理里手动添加同一条路
+  const handleExtractMemory = useCallback((memories: ExtractedMemory[], userId?: string) => {
+    const added = memories.filter(mem => memoryStore.addMemory(mem.content, userId)).length;
     orca.notify(added > 0 ? "success" : "info", added > 0 ? `已添加 ${added} 条记忆` : "没有可添加的记忆");
   }, []);
 
+  // 切换消息的重要标记（pinned）
   const handleTogglePinned = useCallback((messageId: string) => {
     setMessages((prev) => prev.map((m) => {
       if (m.id === messageId) {

@@ -72,7 +72,7 @@ export interface MessageListProps {
   /** 生成建议回调 */
   onGenerateSuggestions?: (content: string) => () => Promise<string[]>;
   /** 提取记忆回调 */
-  onExtractMemory?: (memories: ExtractedMemory[]) => void;
+  onExtractMemory?: (memories: ExtractedMemory[], userId?: string) => void;
   /** 获取对话上下文（用于记忆提取） */
   getConversationContext?: (messageIndex: number) => string;
 }
