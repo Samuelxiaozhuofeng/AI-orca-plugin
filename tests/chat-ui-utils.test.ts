@@ -3,9 +3,6 @@ import * as fc from "fast-check";
 import {
   getTimeGreeting,
   isSameDay,
-  groupMessagesByDate,
-  calculateTokenPercentage,
-  getProgressColor,
   groupCommandsByCategory,
   fuzzyMatch,
   addRecentCommandPure,
@@ -48,136 +45,6 @@ test("Property 1: Time-based greeting selection", () => {
     { numRuns: 100 }
   );
 });
-
-
-/**
- * Property 2: Message date grouping
- * For any list of messages with timestamps, the grouping function SHALL produce
- * date separators such that all messages between two separators share the same calendar date.
- * 
- * **Feature: chat-ui-enhancement, Property 2: Message date grouping**
- * **Validates: Requirements 4.1**
- */
-test("Property 2: Message date grouping", () => {
-  // Generate arbitrary messages with valid timestamps (using integer timestamps to avoid NaN)
-  const validDateArb = fc.integer({ min: 1704067200000, max: 1767225600000 }) // 2024-01-01 to 2025-12-31
-    .map((ts) => new Date(ts));
-  
-  const messageArb = fc.record({
-    id: fc.uuid(),
-    timestamp: validDateArb,
-    content: fc.string(),
-  });
-
-  fc.assert(
-    fc.property(fc.array(messageArb, { minLength: 0, maxLength: 20 }), (messages) => {
-      const grouped = groupMessagesByDate(messages);
-
-      // Property: All messages between two separators share the same calendar date
-      let currentSeparatorDate: Date | null = null;
-
-      for (const item of grouped) {
-        if (item.type === "separator") {
-          currentSeparatorDate = item.date;
-        } else if (item.type === "message") {
-          // There must be a separator before any message
-          assert(currentSeparatorDate !== null, "Message without preceding separator");
-
-          // The message date must match the separator date (same calendar day)
-          const msgDate = item.message.timestamp;
-          assert(
-            isSameDay(msgDate, currentSeparatorDate!),
-            `Message date ${msgDate.toISOString()} does not match separator date ${currentSeparatorDate!.toISOString()}`
-          );
-        }
-      }
-
-      // Property: Number of messages in output equals input
-      const messageCount = grouped.filter((item) => item.type === "message").length;
-      assertEqual(messageCount, messages.length, "Message count mismatch");
-
-      return true;
-    }),
-    { numRuns: 100 }
-  );
-});
-
-
-/**
- * Property 3: Token progress percentage calculation
- * For any current token count and max token limit where max > 0,
- * the percentage calculation SHALL return a value between 0 and 100 (clamped).
- * 
- * **Feature: chat-ui-enhancement, Property 3: Token progress percentage calculation**
- * **Validates: Requirements 5.1**
- */
-test("Property 3: Token progress percentage calculation", () => {
-  fc.assert(
-    fc.property(
-      fc.integer({ min: 0, max: 1000000 }), // current tokens
-      fc.integer({ min: 1, max: 1000000 }), // max tokens (must be > 0)
-      (current, max) => {
-        const percentage = calculateTokenPercentage(current, max);
-        
-        // Property: Result is always between 0 and 100
-        assert(percentage >= 0, `Percentage ${percentage} is less than 0`);
-        assert(percentage <= 100, `Percentage ${percentage} is greater than 100`);
-        
-        // Property: When current <= max, percentage should be <= 100
-        if (current <= max) {
-          assert(percentage <= 100, `Percentage ${percentage} should be <= 100 when current <= max`);
-        }
-        
-        // Property: When current is 0, percentage should be 0
-        if (current === 0) {
-          assertEqual(percentage, 0, "Percentage should be 0 when current is 0");
-        }
-        
-        return true;
-      }
-    ),
-    { numRuns: 100 }
-  );
-});
-
-/**
- * Property 4: Token progress color thresholds
- * For any percentage value, the color function SHALL return:
- * - "danger" for >= 95%
- * - "warning" for >= 80% and < 95%
- * - "primary" for < 80%
- * 
- * **Feature: chat-ui-enhancement, Property 4: Token progress color thresholds**
- * **Validates: Requirements 5.2, 5.3**
- */
-test("Property 4: Token progress color thresholds", () => {
-  fc.assert(
-    fc.property(fc.float({ min: 0, max: 100, noNaN: true }), (percentage) => {
-      const color = getProgressColor(percentage);
-      
-      // Property: Color is always one of the valid options
-      const validColors = [
-        "var(--orca-color-danger)",
-        "var(--orca-color-warning)",
-        "var(--orca-color-primary)",
-      ];
-      assert(validColors.includes(color), `Invalid color: ${color}`);
-      
-      // Property: Correct color for each threshold
-      if (percentage >= 95) {
-        assertEqual(color, "var(--orca-color-danger)", `Percentage ${percentage} should return danger`);
-      } else if (percentage >= 80) {
-        assertEqual(color, "var(--orca-color-warning)", `Percentage ${percentage} should return warning`);
-      } else {
-        assertEqual(color, "var(--orca-color-primary)", `Percentage ${percentage} should return primary`);
-      }
-      
-      return true;
-    }),
-    { numRuns: 100 }
-  );
-});
-
 
 
 // ============================================================================
@@ -387,91 +254,12 @@ test("Property 8: Context token sum", () => {
 // Tool Progress Display Property Tests
 // ============================================================================
 
-import { formatToolProgress } from "../src/utils/chat-ui-utils";
-
-/**
- * Property 9: Tool progress display
- * For any completed count and total count where total > 0,
- * the progress string SHALL be formatted as "{completed}/{total} 完成".
- * 
- * **Feature: chat-ui-enhancement, Property 9: Tool progress display**
- * **Validates: Requirements 10.3**
- */
-test("Property 9: Tool progress display", () => {
-  fc.assert(
-    fc.property(
-      fc.integer({ min: 0, max: 100 }), // completed count
-      fc.integer({ min: 1, max: 100 }), // total count (must be > 0)
-      (completed, total) => {
-        const progressString = formatToolProgress(completed, total);
-        
-        // Property: Result is formatted as "{completed}/{total} 完成"
-        const expectedFormat = `${completed}/${total} 完成`;
-        assertEqual(
-          progressString,
-          expectedFormat,
-          `Progress string "${progressString}" should equal "${expectedFormat}"`
-        );
-        
-        // Property: Result contains the completed count
-        assert(
-          progressString.includes(String(completed)),
-          `Progress string should contain completed count ${completed}`
-        );
-        
-        // Property: Result contains the total count
-        assert(
-          progressString.includes(String(total)),
-          `Progress string should contain total count ${total}`
-        );
-        
-        // Property: Result ends with "完成"
-        assert(
-          progressString.endsWith("完成"),
-          `Progress string should end with "完成"`
-        );
-        
-        return true;
-      }
-    ),
-    { numRuns: 100 }
-  );
-});
-
-/**
- * Edge case: Tool progress with zero total
- * When total is 0 or negative, should return "0/0 完成"
- */
-test("Property 9 Edge Case: Tool progress with zero total", () => {
-  fc.assert(
-    fc.property(
-      fc.integer({ min: 0, max: 100 }), // completed count
-      fc.integer({ min: -100, max: 0 }), // total count (0 or negative)
-      (completed, total) => {
-        const progressString = formatToolProgress(completed, total);
-        
-        // Property: When total <= 0, return "0/0 完成"
-        assertEqual(
-          progressString,
-          "0/0 完成",
-          `Progress string with total ${total} should be "0/0 完成"`
-        );
-        
-        return true;
-      }
-    ),
-    { numRuns: 100 }
-  );
-});
-
-
 // ============================================================================
 // Display Settings Property Tests
 // ============================================================================
 
 import {
   getMessageGap,
-  getMessagePadding,
   getBubblePadding,
   shouldRenderTimestamp,
   spacingConfig,
@@ -489,14 +277,11 @@ test("Property 10: Compact mode spacing reduction", () => {
   fc.assert(
     fc.property(fc.boolean(), (compactMode) => {
       const gap = getMessageGap(compactMode);
-      const padding = getMessagePadding(compactMode);
       const bubblePadding = getBubblePadding(compactMode);
       
       // Property: Gap is always a positive number
       assert(gap > 0, `Gap ${gap} should be positive`);
       
-      // Property: Padding is always a non-empty string
-      assert(padding.length > 0, "Padding should be non-empty");
       assert(bubblePadding.length > 0, "Bubble padding should be non-empty");
       
       // Property: Compact mode has smaller gap than comfortable mode
@@ -510,11 +295,9 @@ test("Property 10: Compact mode spacing reduction", () => {
       // Property: Values match the config
       if (compactMode) {
         assertEqual(gap, spacingConfig.compact.messageGap, "Compact gap should match config");
-        assertEqual(padding, spacingConfig.compact.messagePadding, "Compact padding should match config");
         assertEqual(bubblePadding, spacingConfig.compact.bubblePadding, "Compact bubble padding should match config");
       } else {
         assertEqual(gap, spacingConfig.comfortable.messageGap, "Comfortable gap should match config");
-        assertEqual(padding, spacingConfig.comfortable.messagePadding, "Comfortable padding should match config");
         assertEqual(bubblePadding, spacingConfig.comfortable.bubblePadding, "Comfortable bubble padding should match config");
       }
       

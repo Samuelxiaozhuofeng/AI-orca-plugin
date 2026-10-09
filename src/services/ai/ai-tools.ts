@@ -84,31 +84,6 @@ function parseSearchResultsFromContent(content: string): any[] {
 }
 
 /**
- * ═══════════════════════════════════════════════════════════════════════════
- * AI Tool Definitions (JSON Schema for OpenAI)
- * ═══════════════════════════════════════════════════════════════════════════
- */
-export const TOOLS: OpenAITool[] = [
-  {
-    type: "function",
-    function: {
-      name: "tool_instructions",
-      description: `获取指定工具的用法说明（仅返回该工具）。`,
-      parameters: {
-        type: "object",
-        properties: {
-          toolName: {
-            type: "string",
-            description: "工具名称，如以 mcp__ 开头的外部工具。",
-          },
-        },
-        required: ["toolName"],
-      },
-    },
-  },
-];
-
-/**
  * 获取工具列表（MCP 工具）
  */
 export function getTools(): OpenAITool[] {
@@ -116,11 +91,7 @@ export function getTools(): OpenAITool[] {
 }
 
 /**
- * 搜索类工具名称列表 - 当用户拖入块时禁用这些工具
- * 因为用户已经明确指定了要讨论的块，不需要再搜索笔记
-/**
- * 获取限制后的工具列表（当用户拖入块时使用）
- * 禁用搜索类工具，只保留读取和写入工具
+ * 获取拖入块场景的工具列表（目前与 getTools 相同，返回 MCP 工具）
  */
 export function getToolsForDraggedContext(): OpenAITool[] {
   return getAllDiscoveredTools();

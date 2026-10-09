@@ -213,10 +213,6 @@ export function getMessageGap(compactMode: boolean): number {
   return compactMode ? spacingConfig.compact.messageGap : spacingConfig.comfortable.messageGap;
 }
 
-export function getMessagePadding(compactMode: boolean): string {
-  return compactMode ? spacingConfig.compact.messagePadding : spacingConfig.comfortable.messagePadding;
-}
-
 /**
  * Get the bubble padding based on compact mode
  * 
