@@ -1245,7 +1245,7 @@ export default function MessageItem({
           showTimestamp && message.createdAt && formatMessageTime(message.createdAt),
           // 输出速度
           speedLine && withTooltip(
-            tooltipText(usageText ? "输出速度（估算）· 本轮输入 / 输出 token 与费用" : "输出速度（估算）"),
+            tooltipText(usageText ? "输出速度（估算）· 入 / 出 / ≈$：本轮累计（含工具多轮与缓存读取）；费用按 API 价估算，订阅用户不按此付费" : "输出速度（估算）"),
             createElement(
               "span",
               {

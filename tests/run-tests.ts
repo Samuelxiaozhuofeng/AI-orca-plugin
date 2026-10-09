@@ -21,6 +21,7 @@ import "./workdir.test";
 import "./local-image-paths.test";
 import "./token-speed.test";
 import "./local-cli-tool-summary.test";
+import "./local-cli-review4.test";
 import { run } from "./test-harness";
 
 await run();

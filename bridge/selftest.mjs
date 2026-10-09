@@ -23,6 +23,7 @@ if (argv.includes(JSON.stringify({ disableAllHooks: true }))) {
   // 中转启动时查模型列表：ORCA_FAKE_MODELS=ok 回列表、junk 回乱码、其他不回
   log("models.log", JSON.stringify({ pid: process.pid, argv, cwd: process.cwd() }));
   const mode = process.env.ORCA_FAKE_MODELS;
+  if (mode === "stubborn") process.on("SIGTERM", () => {}); // 模拟查询子进程收到 SIGTERM 不退
   process.stdin.on("data", (d) => {
     if (!String(d).includes('"initialize"')) return;
     if (mode === "ok") fs.writeSync(1, JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: "models", response: { models: [{ value: "default", displayName: "Default" }, { value: "opus", displayName: "Opus 9" }, { value: "claude-new-1", displayName: "New 1" }, { value: "opus" }, { value: "bad name" }] } } }) + "\\n");
@@ -276,7 +277,7 @@ try {
       await sleep(200);
       assert.equal(readLog("resp.log"), before, "不应写 stdin");
     } finally {
-      process.kill(pid, "SIGKILL");
+      if (pid > 0) process.kill(pid, "SIGKILL");
     }
   });
 
@@ -326,7 +327,7 @@ try {
       assert.ok(alive(pid), "子进程应仍活着（忽略了 SIGTERM）");
       assert.ok(!fs.existsSync(dir), "中止后临时目录未删");
     } finally {
-      process.kill(pid, "SIGKILL");
+      if (pid > 0) process.kill(pid, "SIGKILL");
     }
   });
 
@@ -381,7 +382,8 @@ try {
       assert.equal(r.events.at(-1).type, "error");
       assert.ok(ms >= 2500 && ms < 6000, `用时 ${ms}ms`);
     } finally {
-      try { process.kill(Number(readLog("linger.log").trim()), "SIGKILL"); } catch {}
+      const lp = Number(readLog("linger.log").trim());
+      try { if (lp > 0) process.kill(lp, "SIGKILL"); } catch {}
     }
   });
 
@@ -397,7 +399,7 @@ try {
       assert.ok(!alive(pid), "宽限期后子进程未被杀");
       assert.ok(!fs.existsSync(dir), "临时目录未删");
     } finally {
-      try { process.kill(pid, "SIGKILL"); } catch {}
+      try { if (pid > 0) process.kill(pid, "SIGKILL"); } catch {}
     }
   });
 
@@ -539,7 +541,7 @@ try {
       assert.ok(!alive(pidA), "旧进程应已被 SIGKILL");
       assert.match(readLog("order.log"), new RegExp(`ignore ${pidA}`));
     } finally {
-      try { process.kill(pidA, "SIGKILL"); } catch {}
+      try { if (pidA > 0) process.kill(pidA, "SIGKILL"); } catch {}
     }
   });
   await check("H8 config.json 不存在 → 安全模式、不生成文件、工作目录 ~/OrcaAgent", async () => {
@@ -818,6 +820,25 @@ try {
       assert.match(b.out, /查询模型列表失败（(超时|返回格式不对)）/);
     });
   }
+  await check("N1 请求体超限 → 客户端读到 413 和中文原因（不是连接错误）", async () => {
+    const res = await fetch(`${base}/chat`, { method: "POST", headers: auth, body: "x".repeat(41 * 1024 * 1024) });
+    assert.equal(res.status, 413);
+    assert.match((await res.json()).error, /请求太大（超过 40MB）/);
+    assert.equal((await fetch(`${base}/models`, { headers: auth })).status, 200, "中转之后应仍可用");
+  });
+  await check("N2 查模型子进程 SIGTERM 不退 → 宽限期后 SIGKILL", async () => {
+    const b = await startBridge("n2", [], { ORCA_FAKE_MODELS: "stubborn", ORCA_BRIDGE_MODEL_QUERY_MS: "300" });
+    others.push(b.proc);
+    await sleep(800);
+    const q = JSON.parse(readLog("models.log").trim().split("\n").pop());
+    try {
+      assert.ok(alive(q.pid), "SIGTERM 后应仍活着（忽略了 SIGTERM）");
+      await sleep(3200);
+      assert.ok(!alive(q.pid), "宽限期后应被 SIGKILL");
+    } finally {
+      try { if (q.pid > 0) process.kill(q.pid, "SIGKILL"); } catch {}
+    }
+  });
 } finally {
   bridge.kill();
   for (const p of others) p.kill("SIGKILL");

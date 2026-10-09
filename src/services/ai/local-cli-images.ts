@@ -13,6 +13,7 @@ const MAX_IMAGES = 10;
 const MAX_IMAGE_MB = 10;
 const MAX_TOTAL_MB = 25;
 const MB = 1024 * 1024;
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/; // 同 bridge：配合长度是 4 的倍数
 // message-builder 读图失败时留下的文字标记
 const LOAD_FAILED_RE = /^\[(?:图片|文件)(?:加载失败|处理错误): (.+)\]$/;
 
@@ -55,6 +56,7 @@ export async function collectLocalCliImages(m: OpenAIChatMessage | undefined): P
     if (!match) { notes.push(`${label}不是可识别的图片数据`); continue; }
     const mediaType = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase();
     const data = match[2];
+    if (!data || data.length % 4 !== 0 || !BASE64_RE.test(data)) { notes.push(`${label}数据不是合法 base64`); continue; }
     if (!IMAGE_TYPES.includes(mediaType)) { notes.push(`${label}格式不支持（${mediaType}），只支持 PNG、JPEG、GIF、WebP`); continue; }
     if (images.length >= MAX_IMAGES) { notes.push(`${label}超出数量：一次最多发 ${MAX_IMAGES} 张`); continue; }
     const bytes = decodedBytes(data);
@@ -66,7 +68,10 @@ export async function collectLocalCliImages(m: OpenAIChatMessage | undefined): P
   return { images, notes };
 }
 
-/** 没发出去的图片写进回复的提示 */
+/** 没发出去的图片 / 文件写进回复末尾的提示；固定前缀，构建历史时按 IMAGE_NOTES_RE 剥掉 */
 export function imageNotesText(notes: string[]): string {
-  return notes.map((r) => `\n\n> 这张图片没能发给本机 AI：${r}`).join("");
+  return notes.map((r) => `\n\n> 没能发给本机 AI：${r}`).join("");
 }
+
+/** 回复末尾插件写的说明段（含旧版「这张图片没能发给本机 AI：」），只认末尾，不动正文中间 */
+export const IMAGE_NOTES_RE = /(?:\s*\n> (?:这张图片)?没能发给本机 AI：[^\n]*)+\s*$/;
