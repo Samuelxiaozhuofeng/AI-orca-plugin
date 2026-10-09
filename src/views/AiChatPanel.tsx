@@ -71,7 +71,8 @@ import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
-import { createChatRequestOwner, settlePendingConfirms } from "../utils/chat-request-owner";
+import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
+import { createPendingSave } from "../utils/pending-save";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -626,6 +627,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
   }, []);
 
+  // 自动保存的防抖（1 秒）；离开对话前 flush，免得最后一条回复还没存就被取消
+  const [pendingSave] = useState(() => createPendingSave(1000));
+  // 新建 / 切换对话的序号：切换中途等待时又点了别的，只认最后一次
+  const switchSeqRef = useRef(0);
+
   // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
   // 清掉生成状态和多模型面板；旧请求之后的界面写入一律丢弃
   const abandonCurrentRequest = () => {
@@ -644,7 +650,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
+    switchSeqRef.current++;
     abandonCurrentRequest();
+    // 立即补存离开的对话（快照此刻同步拍下；写入串行，先于新对话的保存落地）
+    void pendingSave.flush();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -667,8 +676,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
-    // 切换对话：中止进行中的生成，旧请求的后续写入一律丢弃
-    if (sessionId !== currentSession.id) abandonCurrentRequest();
+    const seq = ++switchSeqRef.current;
+    // 点的就是界面上正显示的对话：界面已是最新，不重读（重读可能拿到旧缓存盖掉新消息）；
+    // 序号已自增，切走途中又点回来时，那次还没完成的切换会作废
+    if (sessionId === currentSession.id) return;
+    // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
+    abandonCurrentRequest();
+    // 快照已当场拍下；等写完再读目标对话，快速切回时才读得到刚补存的内容
+    await pendingSave.flush();
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
@@ -683,7 +698,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
     // 加载完整会话数据（包含消息）
     const session = await loadFullSession(sessionId);
-    if (!session) return;
+    if (!session || seq !== switchSeqRef.current) return;
+    // 等待期间输入框可用，这时发出的请求属于离开的对话，作废掉免得回复写进目标对话
+    abandonCurrentRequest();
 
     setCurrentSession({
       ...session,
@@ -708,20 +725,34 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
+    const deletingCurrent = currentSession.id === sessionId;
+    // 删当前对话：先停掉生成，免得删的过程中又登记保存把它写回来
+    if (deletingCurrent) abandonCurrentRequest();
+    await pendingSave.flush();
     await deleteSession(sessionId);
     const data = await loadSessions();
     setSessions(data.sessions);
-    if (currentSession.id === sessionId) {
+    if (deletingCurrent) {
+      pendingSave.cancel();
       handleNewSession();
     }
   }, [currentSession.id, handleNewSession]);
 
   const handleClearAllSessions = useCallback(async () => {
+    // 先存好当前对话，再按服务里的最新索引（补存可能改了收藏状态）判断它会不会被清掉；
+    // 会被清掉就先停生成再补存一次，免得删的过程中又登记保存把它写回来
+    await pendingSave.flush();
+    const latest = await loadSessions();
+    if (!latest.sessions.find(s => s.id === currentSession.id)?.favorited) {
+      abandonCurrentRequest();
+      await pendingSave.flush();
+    }
     await clearAllSessions();
     const data = await loadSessions();
     setSessions(data.sessions);
     // 如果当前会话被清理了，切换到剩余会话或创建新会话
     if (!data.sessions.find(s => s.id === currentSession.id)) {
+      pendingSave.cancel();
       if (data.activeSessionId) {
         handleSelectSession(data.activeSessionId);
       } else {
@@ -756,32 +787,27 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   // Auto-cache session when messages change (debounced)
-  const autoCacheTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const hasRealMessages = messages.some((m) => !m.localOnly);
     if (!hasRealMessages || !sessionsLoaded) return;
 
     // Debounce auto-cache to avoid too frequent saves
-    if (autoCacheTimeoutRef.current) {
-      clearTimeout(autoCacheTimeoutRef.current);
-    }
-    autoCacheTimeoutRef.current = setTimeout(async () => {
+    // 两步：触发时先同步拍下离开时的快照（滚动位置等），再排队写入
+    pendingSave.schedule(() => {
       const sessionToCache: SavedSession = {
         ...currentSession,
         messages,
         contexts: [...contextSnap.selected],
         scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
       };
-      await autoCacheSession(sessionToCache);
-      const data = await loadSessions();
-      setSessions(data.sessions);
-    }, 1000); // 1 second debounce
+      return async () => {
+        await autoCacheSession(sessionToCache);
+        const data = await loadSessions();
+        setSessions(data.sessions);
+      };
+    });
 
-    return () => {
-      if (autoCacheTimeoutRef.current) {
-        clearTimeout(autoCacheTimeoutRef.current);
-      }
-    };
+    return () => pendingSave.cancel();
   }, [messages, currentSession, sessionsLoaded, contextSnap.selected]);
 
   // Sync state to session store for auto-save on close

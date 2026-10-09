@@ -17,6 +17,7 @@ import "./local-cli-round3.test";
 import "./local-cli-autostart.test";
 import "./local-cli-instructions.test";
 import "./chat-request-owner.test";
+import "./pending-save.test";
 import { run } from "./test-harness";
 
 await run();
