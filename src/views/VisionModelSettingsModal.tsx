@@ -7,6 +7,7 @@
  * - 设置描述的详细程度
  */
 
+import { useModalDismiss } from "../utils/modal-dismiss";
 import {
   getVisionModelConfig,
   saveVisionModelConfig,
@@ -74,6 +75,7 @@ export default function VisionModelSettingsModal({ isOpen, onClose }: VisionMode
     }
   }, [visionModels]);
 
+  const overlayDismiss = useModalDismiss(isOpen, onClose);
   if (!isOpen) return null;
 
   // Styles
@@ -253,7 +255,7 @@ export default function VisionModelSettingsModal({ isOpen, onClose }: VisionMode
     "div",
     {
       style: overlayStyle,
-      onClick: (e: any) => e.target === e.currentTarget && onClose(),
+      ...overlayDismiss,
     },
     createElement(
       "div",

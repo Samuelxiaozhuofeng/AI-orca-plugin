@@ -60,8 +60,8 @@ const dropdownMenuStyle: React.CSSProperties = {
   background: "var(--orca-color-bg-1)",
   borderRadius: "6px",
   padding: "8px",
-  minWidth: "260px",
-  maxWidth: "300px",
+  minWidth: "min(260px, 80vw)",
+  maxWidth: "min(300px, calc(100vw - 16px))",
   boxShadow: "0 -4px 12px rgba(0, 0, 0, 0.15)",
   border: "1px solid var(--orca-color-border)",
   zIndex: 100,
@@ -150,10 +150,12 @@ export default function ExtractMemoryButton({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showDropdown]);
 
-  // Notify parent when dropdown visibility changes
+  // Notify parent while dropdown is open or extraction is running (keeps the action bar mounted)
+  const keepVisible = showDropdown || isLoading;
   useEffect(() => {
-    onDropdownVisibilityChange?.(showDropdown);
-  }, [showDropdown, onDropdownVisibilityChange]);
+    onDropdownVisibilityChange?.(keepVisible);
+    return () => onDropdownVisibilityChange?.(false);
+  }, [keepVisible, onDropdownVisibilityChange]);
 
   const doExtract = useCallback(async (prompt?: string) => {
     if (isLoading || !conversationContext.trim()) return;
@@ -247,7 +249,7 @@ export default function ExtractMemoryButton({
         style: promptInputStyle,
         autoFocus: true,
         onKeyDown: (e: any) => {
-          if (e.key === "Enter") handleConfirmExtract();
+          if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleConfirmExtract();
           if (e.key === "Escape") handleCancelDropdown();
         },
       }),

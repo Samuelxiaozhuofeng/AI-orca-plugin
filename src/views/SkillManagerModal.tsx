@@ -19,6 +19,7 @@ const React = window.React as unknown as {
 const { createElement, useState, useEffect, useCallback, useMemo } = React;
 const { Button } = orca.components;
 
+import { useModalDismiss } from "../utils/modal-dismiss";
 import { withTooltip } from "../utils/orca-tooltip";
 import {
   listSkills,
@@ -311,6 +312,13 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
     }
   }, [handleJumpToBlock, openEditor]);
 
+  // Esc 先关内层（编辑 / 新建 / 删除确认 / 导入），都没开才关整个窗口
+  const overlayDismiss = useModalDismiss(isOpen, onClose, () => {
+    if (deleteTarget) setDeleteTarget(null);
+    else if (importPending) setImportPending(null);
+    else if (editingSkill || showCreate) return; // 编辑中不因 Esc 丢内容
+    else onClose();
+  });
   if (!isOpen) return null;
 
   // ════════════════════════════════════════════════════════════
@@ -555,7 +563,7 @@ export default function SkillManagerModal({ isOpen, onClose }: SkillManagerModal
 
   return createElement(
     "div",
-    { style: overlayStyle, onClick: onClose },
+    { style: overlayStyle, ...overlayDismiss },
     // ── 主弹窗 ──
     createElement(
       "div",

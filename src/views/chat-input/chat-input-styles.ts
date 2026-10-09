@@ -90,9 +90,8 @@ export const containerStyle = {
 
 // Model selector menu styles
 export const menuContainerStyle = {
-  // width removed to let content define width (minWidth ensures it's not too narrow)
-  minWidth: 540,
   padding: 16,
+  boxSizing: "border-box" as const,
   background: "var(--orca-color-bg-1)",
 };
 
@@ -104,9 +103,6 @@ export const menuFlexStyle = {
 export const modelListPanelStyle = {
   flex: 1,
   minWidth: 0,
-  // Restore paddingRight to ensure input doesn't touch the border
-  paddingRight: 16,
-  borderRight: "1px solid var(--orca-color-border)",
   display: "flex",
   flexDirection: "column" as const,
 };
@@ -140,3 +136,30 @@ export const addModelHintStyle = {
   color: "var(--orca-color-text-3)",
   lineHeight: 1.4,
 };
+
+/**
+ * Measure horizontal space available for a toolbar popup inside the clipping panel.
+ * align "left": menu grows rightwards from the anchor's left edge; "right": grows leftwards.
+ */
+export function measureMenuWidth(
+  anchor: Element | null | undefined,
+  align: "left" | "right",
+  min: number,
+  max: number,
+): number {
+  if (!anchor) return Math.max(min, Math.min(360, max));
+  const rect = anchor.getBoundingClientRect();
+  let clipLeft = 0;
+  let clipRight = window.innerWidth;
+  for (let el = anchor.parentElement; el; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    if (cs.overflow !== "visible" || cs.overflowX !== "visible") {
+      const r = el.getBoundingClientRect();
+      clipLeft = r.left;
+      clipRight = r.right;
+      break;
+    }
+  }
+  const available = align === "left" ? clipRight - rect.left - 8 : rect.right - clipLeft - 8;
+  return Math.max(min, Math.min(available, max));
+}

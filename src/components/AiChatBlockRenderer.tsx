@@ -370,7 +370,7 @@ export default function AiChatBlockRenderer({
               onChange: (e: any) => setNoteValue(e.target.value),
               onBlur: handleSaveNote,
               onKeyDown: (e: any) => {
-                if (e.key === "Enter") handleSaveNote();
+                if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleSaveNote();
                 if (e.key === "Escape") setIsEditingNote(false);
               },
               placeholder: title || "添加备注...",

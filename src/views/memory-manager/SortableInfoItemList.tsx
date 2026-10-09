@@ -300,7 +300,7 @@ export default function SortableInfoItemList({
   }, [newValue, onAddValue]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent, itemId: string) => {
-    if (e.key === "Enter") handleAddValue(itemId);
+    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") handleAddValue(itemId);
     else if (e.key === "Escape") { setNewValue(""); setAddingValueToId(null); }
   }, [handleAddValue]);
 
@@ -331,7 +331,7 @@ export default function SortableInfoItemList({
   }, [editingLabelItemId, editingLabelText, onEditItem]);
 
   const handleLabelKeyDown = useCallback((e: React.KeyboardEvent, item: PortraitInfoItem) => {
-    if (e.key === "Enter") { e.preventDefault(); handleSaveEditLabel(item); }
+    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") { e.preventDefault(); handleSaveEditLabel(item); }
     else if (e.key === "Escape") { setEditingLabelItemId(null); setEditingLabelText(""); }
   }, [handleSaveEditLabel]);
 
@@ -519,7 +519,7 @@ export default function SortableInfoItemList({
                   ref: editInputRef,
                   value: editingText,
                   onChange: (e: any) => setEditingText(e.target.value),
-                  onKeyDown: (e: any) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSaveEditValue(); } else if (e.key === "Escape") { setEditingValue(null); setEditingText(""); } },
+                  onKeyDown: (e: any) => { if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSaveEditValue(); } else if (e.key === "Escape") { setEditingValue(null); setEditingText(""); } },
                   style: floatingEditInputStyle,
                   placeholder: "输入新值...",
                 }),

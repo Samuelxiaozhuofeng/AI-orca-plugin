@@ -9,6 +9,7 @@
 import type { InjectionMode, UserProfile, SelectionPreset } from "../../store/memory-store";
 import { memoryStore, memoryStoreState } from "../../store/memory-store";
 import { withTooltip } from "../../utils/orca-tooltip";
+import { measureMenuWidth } from "./chat-input-styles";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -226,6 +227,7 @@ const savePresetInputStyle: React.CSSProperties = {
 // ============================================================================
 
 export default function InjectionModeSelector() {
+  const [menuWidth, setMenuWidth] = useState(280);
   const snap = useSnapshot(memoryStoreState);
   const currentMode = snap.injectionMode;
   const users = snap.users as UserProfile[];
@@ -308,7 +310,7 @@ export default function InjectionModeSelector() {
       menu: (close: () => void) =>
         createElement(
           "div",
-          { style: menuContainerStyle },
+          { style: { ...menuContainerStyle, width: menuWidth } },
           // Mode Tabs
           createElement(
             "div",
@@ -537,6 +539,7 @@ export default function InjectionModeSelector() {
               style: savePresetInputStyle,
               autoFocus: true,
               onKeyDown: (e: any) => {
+                if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
                 if (e.key === "Enter") handleSavePreset();
                 if (e.key === "Escape") {
                   setShowSavePreset(false);
@@ -574,7 +577,10 @@ export default function InjectionModeSelector() {
           Button,
           {
             variant: "plain",
-            onClick: openMenu,
+            onClick: (e: any) => {
+              setMenuWidth(measureMenuWidth(e.currentTarget, "left", 220, 280));
+              openMenu(e);
+            },
             style: selectorButtonStyle,
           },
           createElement("i", { className: `ti ${displayIcon}` }),

@@ -1,6 +1,7 @@
 ﻿/**
  * Web Search Settings Modal - 联网搜索设置（支持多引擎故障转移）
  */
+import { useModalDismiss } from "../utils/modal-dismiss";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { getAiChatSettings, updateAiChatSettings, type SearchProvider, type WebSearchConfig, type SearchProviderInstance } from "../settings/ai-chat-settings";
 import { isInstanceConfigured, getProviderDisplayName, testSearchInstance, type ConnectivityTestResult } from "../services/external/web-search-service";
@@ -129,6 +130,7 @@ export default function WebSearchSettingsModal({ isOpen, onClose }: Props) {
     setInstances(arr);
   };
 
+  const overlayDismiss = useModalDismiss(isOpen, onClose);
   if (!isOpen) return null;
 
   const overlay: React.CSSProperties = { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
@@ -143,7 +145,7 @@ export default function WebSearchSettingsModal({ isOpen, onClose }: Props) {
   const iconBtn: React.CSSProperties = { background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--orca-color-text-2)", fontSize: 16 };
   const footer: React.CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 20 };
 
-  return createElement("div", { style: overlay, onClick: onClose },
+  return createElement("div", { style: overlay, ...overlayDismiss },
     createElement("div", { style: modal, onClick: (e: any) => e.stopPropagation() },
       createElement("div", { style: title },
         createElement("i", { className: "ti ti-world", style: { color: "var(--orca-color-primary)" } }),

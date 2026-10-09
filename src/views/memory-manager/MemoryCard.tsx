@@ -187,7 +187,7 @@ export default function MemoryCard({
         style: editInputStyle,
         autoFocus: true,
         onKeyDown: (e: any) => {
-          if (e.key === "Enter" && e.ctrlKey) handleConfirmAddMemory();
+          if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && e.ctrlKey) handleConfirmAddMemory();
           if (e.key === "Escape") handleCancelAddMemory();
         },
       }),
@@ -348,7 +348,7 @@ export default function MemoryCard({
             },
             onBlur: handleSaveEditMemory,
             onKeyDown: (e: any) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSaveEditMemory();
               }

@@ -11,6 +11,7 @@ const React = window.React as unknown as {
 const { createElement, useState, useEffect } = React;
 const { Button } = orca.components;
 
+import { useModalDismiss } from "../utils/modal-dismiss";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { getAiChatSettings, updateAiChatSettings } from "../settings/ai-chat-settings";
 import { normalizeToolRoundLimit } from "../services/ai/tool-round-limit";
@@ -52,6 +53,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
     }
   };
 
+  const overlayDismiss = useModalDismiss(isOpen, onClose);
   if (!isOpen) return null;
 
   const overlayStyle: React.CSSProperties = {
@@ -121,7 +123,7 @@ export default function StreamSettingsModal({ isOpen, onClose }: CompressionSett
 
   return createElement(
     "div",
-    { style: overlayStyle, onClick: onClose },
+    { style: overlayStyle, ...overlayDismiss },
     createElement(
       "div",
       { style: modalStyle, onClick: (e: any) => e.stopPropagation() },

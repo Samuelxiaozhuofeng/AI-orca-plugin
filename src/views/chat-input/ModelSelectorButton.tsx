@@ -5,15 +5,16 @@
 
 import type { AiChatSettings } from "../../settings/ai-chat-settings";
 import { getSelectedProvider, getSelectedModel } from "../../settings/ai-chat-settings";
-import { modelButtonStyle, modelLabelStyle } from "./chat-input-styles";
+import { modelButtonStyle, modelLabelStyle, measureMenuWidth } from "./chat-input-styles";
 import ModelSelectorMenu from "./ModelSelectorMenu";
 import { withTooltip } from "../../utils/orca-tooltip";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
   useMemo: <T>(fn: () => T, deps: any[]) => T;
+  useState: <T>(initial: T | (() => T)) => [T, (next: T | ((prev: T) => T)) => void];
 };
-const { createElement, useMemo } = React;
+const { createElement, useMemo, useState } = React;
 
 const { Button, ContextMenu } = orca.components;
 
@@ -28,6 +29,7 @@ export default function ModelSelectorButton({
   onSelect,
   onUpdateSettings,
 }: Props) {
+  const [menuWidth, setMenuWidth] = useState(360);
   const displayInfo = useMemo(() => {
     const provider = getSelectedProvider(settings);
     const model = getSelectedModel(settings);
@@ -55,6 +57,7 @@ export default function ModelSelectorButton({
           onSelect,
           onUpdateSettings,
           close,
+          width: menuWidth,
         }),
     },
     (openMenu: (e: any) => void) =>
@@ -64,7 +67,10 @@ export default function ModelSelectorButton({
           Button,
           {
             variant: "plain",
-            onClick: openMenu,
+            onClick: (e: any) => {
+              setMenuWidth(measureMenuWidth(e.currentTarget, "left", 240, 420));
+              openMenu(e);
+            },
             style: {
               ...modelButtonStyle,
               borderColor: displayInfo.hasApiKey ? undefined : "var(--orca-color-warning)",

@@ -95,7 +95,6 @@ export default function ContextChips({
           createElement(
             "div",
             {
-              key,
               style: {
                 position: "relative",
                 display: "inline-flex",
@@ -155,7 +154,8 @@ export default function ContextChips({
               },
               createElement("i", { className: "ti ti-x", style: { fontSize: 12 } })
             )
-          )
+          ),
+          { key }
         );
       })
     ),

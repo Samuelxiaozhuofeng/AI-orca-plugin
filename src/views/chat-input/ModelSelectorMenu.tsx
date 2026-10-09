@@ -45,6 +45,7 @@ type Props = {
   onSelect: (providerId: string, modelId: string) => void;
   onUpdateSettings: (settings: AiChatSettings) => void;
   close: () => void;
+  width: number;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -397,7 +398,7 @@ function ModelEditPanel({
 
   return createElement(
     "div",
-    { style: { padding: "16px", minWidth: "320px" } },
+    { style: { padding: "16px", minWidth: 0 } },
     // 标题
     createElement(
       "div",
@@ -653,7 +654,7 @@ function ProviderConfigPanel({
 
   return createElement(
     "div",
-    { style: { ...addModelPanelStyle, minWidth: "320px" } },
+    { style: { ...addModelPanelStyle, minWidth: 0 } },
     // 标题
     createElement(
       "div",
@@ -826,6 +827,7 @@ export default function ModelSelectorMenu({
   onSelect,
   onUpdateSettings,
   close,
+  width,
 }: Props) {
   const [filter, setFilter] = useState("");
   const [expandedProviders, setExpandedProviders] = useState<Set<string>>(() => {
@@ -927,7 +929,7 @@ export default function ModelSelectorMenu({
   if (editingProvider) {
     return createElement(
       "div",
-      { style: menuContainerStyle },
+      { style: { ...menuContainerStyle, width } },
       createElement(ProviderConfigPanel, {
         provider: editingProvider,
         onUpdate: handleUpdateProvider,
@@ -939,10 +941,10 @@ export default function ModelSelectorMenu({
 
   return createElement(
     "div",
-    { style: menuContainerStyle },
+    { style: { ...menuContainerStyle, width } },
     createElement(
       "div",
-      { style: { ...modelListPanelStyle, minWidth: "320px" } },
+      { style: modelListPanelStyle },
       // 搜索框
       createElement(Input as any, {
         placeholder: "搜索模型...",

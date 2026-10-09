@@ -266,7 +266,7 @@ function EditableTitle({ title, onSave }: EditableTitleProps) {
   }, [editValue, title, onSave]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") {
       handleSave();
     } else if (e.key === "Escape") {
       setEditValue(title);

@@ -243,7 +243,7 @@ export default function ContextPicker({
       setHighlightIndex(i => Math.max(i - 1, 0));
       return;
     }
-    if (e.key === "Enter") {
+    if (!(e.nativeEvent?.isComposing || e.keyCode === 229) && e.key === "Enter") {
       e.preventDefault();
       const item = allItems[highlightIndex];
       if (item) handleSelectItem(item);
