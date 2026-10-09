@@ -7,6 +7,7 @@
  * - OCR 识别图片文字
  */
 
+import { resolveAssetPath, resolveAssetUrl } from "../../utils/asset-path";
 import type { ImageRef } from "../session-service";
 
 
@@ -23,17 +24,10 @@ const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 export async function imageToBase64(imageRef: ImageRef): Promise<string | null> {
   try {
     // 构建完整路径
-    let fullPath = imageRef.path;
-    if (imageRef.path.startsWith("./") || imageRef.path.startsWith("../")) {
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        const relativePath = imageRef.path.replace(/^\.\//, "");
-        fullPath = `${repoDir}/assets/${relativePath}`;
-      }
-    }
+    const fullPath = resolveAssetPath(imageRef.path);
 
     // 使用 fetch 读取本地文件
-    const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
+    const response = await fetch(resolveAssetUrl(fullPath));
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.status}`);
     }

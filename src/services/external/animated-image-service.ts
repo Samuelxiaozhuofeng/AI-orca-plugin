@@ -5,6 +5,7 @@
  * 将动图转换为多张静态 JPG 图片发送给 AI
  */
 
+import { resolveAssetPath, resolveAssetUrl } from "../../utils/asset-path";
 import type { FileRef } from "../session-service";
 
 /**
@@ -81,14 +82,7 @@ export async function processAnimatedImage(
  * 获取文件完整路径
  */
 async function getFullPath(filePath: string): Promise<string> {
-  if (filePath.startsWith("./") || filePath.startsWith("../")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      const relativePath = filePath.replace(/^\.\//, "");
-      return `${repoDir}/assets/${relativePath}`;
-    }
-  }
-  return filePath;
+  return resolveAssetPath(filePath);
 }
 
 /**
@@ -109,7 +103,7 @@ async function extractAnimatedFrames(
 
   // 尝试 fetch
   try {
-    const fileUrl = `file:///${imagePath.replace(/\\/g, "/")}`;
+    const fileUrl = resolveAssetUrl(imagePath);
     const response = await fetch(fileUrl);
     if (response.ok) {
       blob = await response.blob();
@@ -158,7 +152,7 @@ async function extractGifFrames(
   let blob: Blob | null = null;
 
   // 方法1: 使用 file:// URL
-  const fileUrl = `file:///${imagePath.replace(/\\/g, "/")}`;
+  const fileUrl = resolveAssetUrl(imagePath);
   try {
     const response = await fetch(fileUrl);
     if (response.ok) {

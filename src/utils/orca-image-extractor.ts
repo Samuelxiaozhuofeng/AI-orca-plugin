@@ -12,6 +12,7 @@
  * 4. 转换为 base64 发送给 AI
  */
 
+import { resolveAssetPath } from "./asset-path";
 import type { ImageRef } from "../services/session-service";
 import { imageToBase64 } from "../services/external/image-service";
 
@@ -189,24 +190,7 @@ function getMimeTypeFromPath(path: string): string {
  * 获取图片的完整路径
  */
 function getFullImagePath(imagePath: string): string {
-  // 如果已经是绝对路径，直接返回
-  if (imagePath.startsWith("/") || imagePath.includes(":")) {
-    return imagePath;
-  }
-  
-  // 相对路径，拼接 repo 目录
-  const repoDir = orca.state.repoDir;
-  if (repoDir) {
-    // 移除开头的 ./ 或 ../
-    const relativePath = imagePath.replace(/^\.\//, "").replace(/^\.\.\//, "");
-    // 检查是否在 assets 目录下
-    if (!relativePath.startsWith("assets/")) {
-      return `${repoDir}/assets/${relativePath}`;
-    }
-    return `${repoDir}/${relativePath}`;
-  }
-  
-  return imagePath;
+  return resolveAssetPath(imagePath);
 }
 
 /**

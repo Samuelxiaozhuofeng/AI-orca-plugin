@@ -10,6 +10,7 @@
  * - 数据：CSV, JSON, Excel (xlsx)
  */
 
+import { resolveAssetPath, resolveAssetUrl } from "../utils/asset-path";
 import type { FileRef } from "./session-service";
 import { buildVideoContentForApi, isVideoFile, generateVideoThumbnail } from "./external/video-service";
 import { isAnimatedImage, buildAnimatedImageContentForApi } from "./external/animated-image-service";
@@ -238,16 +239,9 @@ export async function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
  */
 async function readTextFromPath(filePath: string): Promise<string | null> {
   try {
-    let fullPath = filePath;
-    if (filePath.startsWith("./") || filePath.startsWith("../")) {
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        const relativePath = filePath.replace(/^\.\//, "");
-        fullPath = `${repoDir}/assets/${relativePath}`;
-      }
-    }
+    const fullPath = resolveAssetPath(filePath);
 
-    const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
+    const response = await fetch(resolveAssetUrl(fullPath));
     if (!response.ok) return null;
     return await response.text();
   } catch (error) {
@@ -261,16 +255,9 @@ async function readTextFromPath(filePath: string): Promise<string | null> {
  */
 async function readBinaryFromPath(filePath: string): Promise<ArrayBuffer | null> {
   try {
-    let fullPath = filePath;
-    if (filePath.startsWith("./") || filePath.startsWith("../")) {
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        const relativePath = filePath.replace(/^\.\//, "");
-        fullPath = `${repoDir}/assets/${relativePath}`;
-      }
-    }
+    const fullPath = resolveAssetPath(filePath);
 
-    const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
+    const response = await fetch(resolveAssetUrl(fullPath));
     if (!response.ok) return null;
     return await response.arrayBuffer();
   } catch (error) {
@@ -384,25 +371,14 @@ export async function uploadFile(file: File): Promise<FileRef | null> {
  * 获取文件显示 URL（用于图片预览）
  */
 export function getFileDisplayUrl(fileRef: FileRef): string {
-  const fullPath = getFileFullPath(fileRef);
-  return `file:///${fullPath.replace(/\\/g, "/")}`;
+  return resolveAssetUrl(fileRef.path);
 }
 
 /**
  * 获取文件完整路径（用于 shell-open 等操作）
  */
 export function getFileFullPath(fileRef: FileRef): string {
-  let fullPath = fileRef.path;
-
-  if (fileRef.path.startsWith("./") || fileRef.path.startsWith("../")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      const relativePath = fileRef.path.replace(/^\.\//, "");
-      fullPath = `${repoDir}/assets/${relativePath}`;
-    }
-  }
-
-  return fullPath;
+  return resolveAssetPath(fileRef.path);
 }
 
 /**
@@ -447,16 +423,9 @@ async function convertAvifToJpeg(avifBase64: string): Promise<string | null> {
  */
 export async function fileToBase64(fileRef: FileRef): Promise<string | null> {
   try {
-    let fullPath = fileRef.path;
-    if (fileRef.path.startsWith("./") || fileRef.path.startsWith("../")) {
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        const relativePath = fileRef.path.replace(/^\.\//, "");
-        fullPath = `${repoDir}/assets/${relativePath}`;
-      }
-    }
+    const fullPath = resolveAssetPath(fileRef.path);
 
-    const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
+    const response = await fetch(resolveAssetUrl(fullPath));
     if (!response.ok) {
       return null;
     }
