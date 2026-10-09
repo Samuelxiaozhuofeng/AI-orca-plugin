@@ -8,6 +8,7 @@
 
 import type { OpenAIChatMessage } from "./openai-client";
 import type { StreamChunk } from "./chat-stream-handler";
+import { summarizeToolCall, summarizeToolResult } from "./local-cli-tool-summary";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
@@ -27,7 +28,17 @@ export type LocalCliConfirm = (
 export type LocalCliResume = { sid: string; partialText?: string };
 
 /** 本轮运行结果（本函数写、调用方收尾时读）：新中转报的会话 id、最后一个 assistant uuid、续接失败已改整段重发 */
-export type LocalCliRun = { sid?: string; uuid?: string; resumeFailed?: boolean };
+export type LocalCliRun = { sid?: string; uuid?: string; resumeFailed?: boolean; usage?: LocalCliUsage };
+
+/** 本机 AI 一轮的用量（中转已算好：input 含缓存读写） */
+export type LocalCliUsage = { input: number; output: number; costUsd?: number };
+
+/** done 事件里的用量；缺字段或不是数字 → undefined（不显示，不当 0） */
+export function parseBridgeUsage(u: any): LocalCliUsage | undefined {
+  const ok = (v: any) => typeof v === "number" && Number.isFinite(v) && v >= 0;
+  if (!u || !ok(u.input) || !ok(u.output)) return undefined;
+  return { input: u.input, output: u.output, ...(ok(u.costUsd) ? { costUsd: u.costUsd } : {}) };
+}
 
 export interface LocalCliContext {
   /** 插件对话 id：完全放开模式的提醒每个对话只弹一次 */
@@ -75,9 +86,11 @@ export function mapBridgeEvent(ev: any): StreamChunk | null {
     case "thinking":
       return ev.delta ? { type: "reasoning", reasoning: String(ev.delta) } : null;
     case "tool":
-      return { type: "reasoning", reasoning: `\n调用 ${String(ev.name)}\n` };
-    case "tool_result":
-      return { type: "reasoning", reasoning: `${String(ev.name)} ${ev.ok ? "完成" : "失败"}\n` };
+      return { type: "reasoning", reasoning: summarizeToolCall(ev) };
+    case "tool_result": {
+      const line = summarizeToolResult(ev);
+      return line ? { type: "reasoning", reasoning: line } : null;
+    }
     default:
       return null;
   }
@@ -334,6 +347,8 @@ export async function* streamLocalCli(
           throw new BridgeError(`本机 AI 出错：${String(ev.message || "未知错误")}`);
         } else if (ev.type === "done") {
           done = true;
+          const usage = parseBridgeUsage(ev.usage);
+          if (ctx.run && usage) ctx.run.usage = usage;
         }
         let chunk = mapBridgeEvent(ev);
         if (!chunk) continue;

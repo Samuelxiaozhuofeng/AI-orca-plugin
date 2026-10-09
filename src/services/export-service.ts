@@ -12,6 +12,7 @@ interface SavedMessage {
   content: string;
   createdAt?: number;
   durationMs?: number; // 输出耗时，用于显示 tok/s
+  usage?: { input: number; output: number; costUsd?: number }; // 本机 AI 本轮用量
   // 文件/图片
   files?: Array<{
     path: string;
@@ -127,6 +128,7 @@ function convertMessages(messages: Message[]): SavedMessage[] {
         content: m.content,
         createdAt: m.createdAt,
         durationMs: m.durationMs,
+        usage: m.usage,
       };
       // 文件/图片
       if (m.files && m.files.length > 0) {

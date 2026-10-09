@@ -41,6 +41,7 @@ export type Message = {
   content: string;
   createdAt: number;
   durationMs?: number; // 从第一个字到写完的毫秒数，用于显示 tok/s
+  usage?: { input: number; output: number; costUsd?: number }; // 本机 AI 本轮用量（中转算好），旧消息没有
   localOnly?: boolean;
   images?: ImageRef[]; // 图片引用（存路径）- 兼容旧版
   files?: FileRef[]; // 文件引用（存路径）- 新版，支持多种文件类型

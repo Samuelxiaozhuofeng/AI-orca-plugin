@@ -82,6 +82,13 @@ function start(p) {
     out({ type: "assistant", uuid: "u-2", parent_tool_use_id: null, message: { content: [{ type: "text", text: "b" }] } });
     return finishOk();
   }
+  if (p.includes("toolrun")) {
+    out({ type: "assistant", uuid: "u-t", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "t1", name: "Task", input: { description: "查资料" } }] } });
+    out({ type: "assistant", uuid: "u-s", parent_tool_use_id: "t1", message: { content: [{ type: "text", text: "subtext" }, { type: "tool_use", id: "s1", name: "Read", input: { file_path: "/a/b.md" } }, { type: "tool_use", id: "s2", name: "Bash", input: { command: "ls" } }] } });
+    out({ type: "user", parent_tool_use_id: "t1", message: { content: [{ type: "tool_result", tool_use_id: "s1", is_error: false, content: "ok" }, { type: "tool_result", tool_use_id: "s2", is_error: true, content: "sub fail" }] } });
+    out({ type: "user", parent_tool_use_id: null, message: { content: [{ type: "tool_result", tool_use_id: "t1", is_error: true, content: [{ type: "text", text: "line1\\n" + "x".repeat(400) }] }] } });
+    return out({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.0123, usage: { input_tokens: 10, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000, output_tokens: 50 } });
+  }
   if (p.includes("textcrash")) {
     out({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } } });
     return setTimeout(() => process.exit(2), 50);
@@ -706,6 +713,21 @@ try {
     assert.equal(r.status, 200);
     assert.ok(!fs.existsSync(marker), "所选文件夹里的 claude 不应被启动");
     assert.notEqual(readLog("args.log"), before, "应启动 PATH 里的真 claude");
+  });
+  await check("T1 工具失败带单行截断原因、子代理工具带 sub、done 带用量", async () => {
+    const r = await chat({ prompt: "toolrun" });
+    const tools = r.events.filter((e) => e.type === "tool" || e.type === "tool_result");
+    assert.deepEqual(tools.slice(0, 3).map((e) => [e.type, e.name, Boolean(e.sub)]), [["tool", "Task", false], ["tool", "Read", true], ["tool", "Bash", true]]);
+    assert.deepEqual(tools[3], { type: "tool_result", name: "Bash", ok: false, error: "sub fail", sub: true });
+    assert.equal(tools.length, 5, "子代理成功的结果不转发");
+    assert.equal(tools[4].sub, undefined);
+    assert.equal(tools[4].error.length, 300);
+    assert.ok(tools[4].error.startsWith("line1 xxx") && !tools[4].error.includes("\n"));
+    assert.ok(!r.raw.includes("subtext"), "子代理正文不转发");
+    assert.ok(!r.events.some((e) => e.uuid === "u-s"), "子代理 uuid 不转发");
+    assert.deepEqual(r.events.at(-1), { type: "done", usage: { input: 1110, output: 50, costUsd: 0.0123 } });
+    const plain = await chat({ prompt: "hi" });
+    assert.deepEqual(plain.events.at(-1), { type: "done" });
   });
 } finally {
   bridge.kill();

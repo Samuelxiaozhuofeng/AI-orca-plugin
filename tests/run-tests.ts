@@ -20,6 +20,7 @@ import "./session-select-race.test";
 import "./workdir.test";
 import "./local-image-paths.test";
 import "./token-speed.test";
+import "./local-cli-tool-summary.test";
 import { run } from "./test-harness";
 
 await run();
