@@ -11,7 +11,7 @@ import type { StreamChunk } from "./chat-stream-handler";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
-const NOT_CONNECTED = "本机 AI 未连接：本机 AI 中转未启动。请打开「Orca Agent Bridge」App，或在终端运行 node bridge/orca-agent-bridge.mjs";
+const NOT_CONNECTED = "本机 AI 未连接：本机 AI 中转未启动。请打开「Orca Agent Bridge」App，或在终端运行 node bridge/orca-agent-bridge.mjs。打开 App 后仍连不上，启动失败原因见 ~/.orca-agent-bridge/bridge.log";
 /** 中止提示：由调用方确认请求仍属当前对话后补到原消息上（生成器不输出它） */
 export const LOCAL_CLI_ABORT_NOTE = "（已中止，中止前已执行的操作不会撤销）";
 const MIN_IDLE_MS = 30000;
