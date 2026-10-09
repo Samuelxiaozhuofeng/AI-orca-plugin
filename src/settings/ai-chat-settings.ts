@@ -70,14 +70,11 @@ export type AiChatSettings = {
   // 以下为全局默认值，模型可以覆盖
   temperature: number;
   maxTokens: number;
-  maxToolRounds: number;            // 工具调用最大轮数（0=不限制）
   currency: CurrencyType;
   // Token 优化设置
   maxHistoryMessages: number;        // 最大历史消息数（0=不限制）
   maxToolResultChars: number;        // 工具结果最大字符数（0=不限制）
   maxContextChars: number;           // 上下文最大字符数
-  // 流式超时设置
-  streamTimeout: number;             // 流式响应超时（毫秒），本地模型建议设置更长
   // 兼容旧版本的字段（迁移用）
   apiKey?: string;
   apiUrl?: string;
@@ -128,14 +125,11 @@ const DEFAULT_AI_CHAT_SETTINGS: AiChatSettings = {
   // 全局默认值（模型未设置时使用）
   temperature: 0.7,
   maxTokens: 4096,
-  maxToolRounds: 0,
   currency: "USD",
   // Token 优化默认值
   maxHistoryMessages: 0,           // 0=不限制（改用动态压缩）
   maxToolResultChars: 8000,        // 工具结果最大字符数（0=不限制）
   maxContextChars: 60000,          // 恢复原来的 60000
-  // 流式超时设置
-  streamTimeout: 30000,            // 默认 30 秒，本地模型可设置 120000（2分钟）或更长
 };
 
 
@@ -314,14 +308,11 @@ type StoredConfig = {
   selectedModelId: string;
   temperature: number;
   maxTokens: number;
-  maxToolRounds: number;
   currency: CurrencyType;
   // Token 优化设置
   maxHistoryMessages?: number;
   maxToolResultChars?: number;
   maxContextChars?: number;
-  // 流式超时设置
-  streamTimeout?: number;
 };
 
 // 内存缓存（避免频繁读取）
@@ -454,24 +445,19 @@ export function getAiChatSettings(pluginName: string): AiChatSettings {
     selectedModelId: config?.selectedModelId || DEFAULT_AI_CHAT_SETTINGS.selectedModelId,
     temperature: config?.temperature ?? DEFAULT_AI_CHAT_SETTINGS.temperature,
     maxTokens: config?.maxTokens ?? DEFAULT_AI_CHAT_SETTINGS.maxTokens,
-    maxToolRounds: config?.maxToolRounds ?? DEFAULT_AI_CHAT_SETTINGS.maxToolRounds,
     currency: config?.currency ?? DEFAULT_AI_CHAT_SETTINGS.currency,
     // Token 优化设置
     maxHistoryMessages: config?.maxHistoryMessages ?? DEFAULT_AI_CHAT_SETTINGS.maxHistoryMessages,
     maxToolResultChars: config?.maxToolResultChars ?? DEFAULT_AI_CHAT_SETTINGS.maxToolResultChars,
     maxContextChars: config?.maxContextChars ?? DEFAULT_AI_CHAT_SETTINGS.maxContextChars,
-    // 流式超时设置
-    streamTimeout: config?.streamTimeout ?? DEFAULT_AI_CHAT_SETTINGS.streamTimeout,
   };
 
   merged.temperature = Math.max(0, Math.min(2, merged.temperature));
   merged.maxTokens = Math.max(1, Math.floor(merged.maxTokens));
-  merged.maxToolRounds = normalizeToolRoundLimit(merged.maxToolRounds);
   // Token 优化设置范围限制
   merged.maxHistoryMessages = Math.max(0, Math.floor(merged.maxHistoryMessages));
   merged.maxToolResultChars = Math.max(0, Math.floor(merged.maxToolResultChars));
   merged.maxContextChars = Math.max(5000, Math.floor(merged.maxContextChars));
-  merged.streamTimeout = Math.max(10000, Math.floor(merged.streamTimeout)); // 最小 10 秒
 
   return merged;
 }
@@ -500,14 +486,11 @@ export async function updateAiChatSettings(
     selectedModelId: next.selectedModelId,
     temperature: next.temperature,
     maxTokens: next.maxTokens,
-    maxToolRounds: next.maxToolRounds,
     currency: next.currency,
     // Token 优化设置
     maxHistoryMessages: next.maxHistoryMessages,
     maxToolResultChars: next.maxToolResultChars,
     maxContextChars: next.maxContextChars,
-    // 流式超时设置
-    streamTimeout: next.streamTimeout,
   };
   
   // 保存到 data 存储
@@ -558,7 +541,7 @@ export function getModelRuntimeConfig(settings: AiChatSettings, modelId?: string
   const maxTokens = model?.maxTokens ?? settings.maxTokens;
   const maxToolRounds = model?.maxToolRoundsOverride === true && typeof model.maxToolRounds === "number"
     ? model.maxToolRounds
-    : settings.maxToolRounds;
+    : 0;
 
   return {
     temperature: Math.max(0, Math.min(2, temperature)),

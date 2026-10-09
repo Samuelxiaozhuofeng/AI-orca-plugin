@@ -144,9 +144,6 @@ export async function load(pluginName: string) {
   registerAiChatUI(pluginName);
   registerAiChatRenderer();
   
-  // 4. 加载视觉模型配置
-  await loadVisionModelConfig(pluginName);
-  
   // 5. 初始化命令目录
   await initCommands();
   

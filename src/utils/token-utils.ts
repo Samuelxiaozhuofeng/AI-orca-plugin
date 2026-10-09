@@ -45,6 +45,14 @@ export function estimateTokens(text: string, modelName?: string): number {
   return tokenizerEstimate(text, modelName);
 }
 
+/** 回复输出速度，如 "50 tok/s"；没计时、计时太短（<300ms）或没内容时返回 null */
+export function formatTokenSpeed(content: string, reasoning: string | undefined, durationMs: number | undefined): string | null {
+  if (!durationMs || durationMs < 300) return null;
+  const tokens = estimateTokens(content + (reasoning || ""));
+  if (tokens <= 0) return null;
+  return `${Math.round(tokens / (durationMs / 1000))} tok/s`;
+}
+
 /**
  * 简单估算（不使用校准，用于快速计算）
  * 保留原有的简单启发式方法，用于向后兼容

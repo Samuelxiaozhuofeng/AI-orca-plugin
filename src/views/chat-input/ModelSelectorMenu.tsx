@@ -475,7 +475,7 @@ function ModelEditPanel({
           if (!inherit && maxToolRounds === "") setMaxToolRounds("0");
         },
       }),
-      "工具轮数继承全局设置；取消勾选后，填 0 表示该模型无限轮"
+      "默认不限制工具轮数；取消勾选后可为该模型单独设上限，填 0 表示无限轮"
     ),
 
     // 能力标签

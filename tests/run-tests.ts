@@ -19,6 +19,7 @@ import "./branch-switch.test";
 import "./session-select-race.test";
 import "./workdir.test";
 import "./local-image-paths.test";
+import "./token-speed.test";
 import { run } from "./test-harness";
 
 await run();

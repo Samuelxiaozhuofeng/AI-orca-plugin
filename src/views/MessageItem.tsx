@@ -26,7 +26,8 @@ import {
 } from "../styles/ai-chat-styles";
 import type { Message } from "../services/session-service";
 import type { ToolCallInfo } from "../services/ai/chat-stream-handler";
-import { formatTokenCount } from "../utils/token-utils";
+import { formatTokenSpeed } from "../utils/token-utils";
+import { BANNER_RE } from "../services/ai/local-cli-client";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
 import { groupSourcesByDomain, normalizeWebSearchResults, type SourceGroup, type WebSearchSource } from "../utils/source-attribution";
 import {
@@ -758,20 +759,6 @@ interface MessageItemProps {
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
 
-  // Token statistics for this message
-  tokenStats?: {
-    messageTokens: number;      // 当前消息的 token 数
-    cumulativeTokens: number;   // 累计到此消息的 token 数
-    cost?: number;              // 本条消息费用
-    cumulativeCost?: number;    // 累计费用
-    currencySymbol?: string;    // 货币符号
-    // 新增：输入/输出分开统计（用于最后一条消息显示总计）
-    totalInputTokens?: number;  // 总输入 token
-    totalOutputTokens?: number; // 总输出 token
-    totalInputCost?: number;    // 总输入费用
-    totalOutputCost?: number;   // 总输出费用
-    isLastMessage?: boolean;    // 是否是最后一条消息
-  };
   // Branch management (对话分支功能)
   onCreateBranch?: (messageId: string) => void;
   onSwitchBranch?: (messageId: string, branchId: string) => void;
@@ -1102,7 +1089,6 @@ export default function MessageItem({
   onRollback,
   onTogglePinned,
   toolResults,
-  tokenStats,
   // Branch management
   onCreateBranch,
   onSwitchBranch,
@@ -1116,6 +1102,7 @@ export default function MessageItem({
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
+  const tokenSpeed = isAssistant ? formatTokenSpeed((message.content || "").replace(BANNER_RE, ""), message.reasoning, message.durationMs) : null;
   const isPinned = (message as any).pinned === true;
   // Display settings from store
   const displaySettings = useSnapshot(displaySettingsStore);
@@ -1654,8 +1641,8 @@ export default function MessageItem({
           )
         ),
 
-      // Message Time and Token Stats
-      (message.createdAt || tokenStats || (isAssistant && message.model)) &&
+      // Message Time and Speed
+      ((showTimestamp && message.createdAt) || tokenSpeed) &&
         createElement(
           "div",
           { 
@@ -1669,9 +1656,9 @@ export default function MessageItem({
           },
           // 时间 (controlled by showTimestamps setting)
           showTimestamp && message.createdAt && formatMessageTime(message.createdAt),
-          // Token 统计
-          tokenStats && withTooltip(
-            tooltipText(`本条消息: ${tokenStats.messageTokens} tokens${tokenStats.cost ? ` (${tokenStats.currencySymbol || '$'}${tokenStats.cost.toFixed(4)})` : ''}\n累计上下文: ${tokenStats.cumulativeTokens} tokens${tokenStats.cumulativeCost ? ` (${tokenStats.currencySymbol || '$'}${tokenStats.cumulativeCost.toFixed(4)})` : ''}`),
+          // 输出速度
+          tokenSpeed && withTooltip(
+            tooltipText("输出速度（估算）"),
             createElement(
               "span",
               {
@@ -1686,92 +1673,8 @@ export default function MessageItem({
                   borderRadius: "4px",
                 },
               },
-              createElement("i", {
-                className: "ti ti-chart-bar",
-                style: { fontSize: "10px" },
-              }),
-              `${formatTokenCount(tokenStats.messageTokens)}`,
-              createElement(
-                "span",
-                { style: { opacity: 0.6 } },
-                `/ ${formatTokenCount(tokenStats.cumulativeTokens)}`
-              ),
-              // 显示本条消息费用（如果有）
-              tokenStats.cost !== undefined && tokenStats.cost > 0 && createElement(
-                "span",
-                { 
-                  style: { 
-                    marginLeft: "4px",
-                    color: "var(--orca-color-warning)",
-                    fontWeight: 500,
-                  } 
-                },
-                `${tokenStats.currencySymbol || '$'}${tokenStats.cost < 0.001 ? tokenStats.cost.toFixed(5) : tokenStats.cost < 0.01 ? tokenStats.cost.toFixed(4) : tokenStats.cost.toFixed(3)}`
-              )
-            )
-          ),
-          // 模型名称（仅 AI 消息，显示在最右边）
-          isAssistant && message.model && createElement(
-            "span",
-            {
-              style: {
-                fontSize: "11px",
-                color: "var(--orca-color-primary)",
-                background: "var(--orca-color-bg-3)",
-                padding: "2px 6px",
-                borderRadius: "4px",
-              },
-            },
-            message.model
-          ),
-          // 最后一条消息显示总计统计
-          tokenStats?.isLastMessage && createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                fontSize: "11px",
-                color: "var(--orca-color-text-2)",
-                background: "var(--orca-color-bg-3)",
-                padding: "4px 8px",
-                borderRadius: "4px",
-                marginTop: "4px",
-                width: "100%",
-              },
-            },
-            createElement("i", { className: "ti ti-calculator", style: { fontSize: "12px" } }),
-            createElement("span", { style: { fontWeight: 500 } }, "总计:"),
-            // 输入
-            createElement(
-              "span",
-              { style: { display: "flex", alignItems: "center", gap: "2px" } },
-              createElement("i", { className: "ti ti-arrow-up", style: { fontSize: "10px", color: "var(--orca-color-success)" } }),
-              `${formatTokenCount(tokenStats.totalInputTokens || 0)}`,
-              tokenStats.totalInputCost !== undefined && tokenStats.totalInputCost > 0 && createElement(
-                "span",
-                { style: { color: "var(--orca-color-success)", marginLeft: "2px" } },
-                `(${tokenStats.currencySymbol || '$'}${tokenStats.totalInputCost < 0.001 ? tokenStats.totalInputCost.toFixed(5) : tokenStats.totalInputCost.toFixed(4)})`
-              )
-            ),
-            // 输出
-            createElement(
-              "span",
-              { style: { display: "flex", alignItems: "center", gap: "2px" } },
-              createElement("i", { className: "ti ti-arrow-down", style: { fontSize: "10px", color: "var(--orca-color-primary)" } }),
-              `${formatTokenCount(tokenStats.totalOutputTokens || 0)}`,
-              tokenStats.totalOutputCost !== undefined && tokenStats.totalOutputCost > 0 && createElement(
-                "span",
-                { style: { color: "var(--orca-color-primary)", marginLeft: "2px" } },
-                `(${tokenStats.currencySymbol || '$'}${tokenStats.totalOutputCost < 0.001 ? tokenStats.totalOutputCost.toFixed(5) : tokenStats.totalOutputCost.toFixed(4)})`
-              )
-            ),
-            // 总费用
-            tokenStats.cumulativeCost !== undefined && tokenStats.cumulativeCost > 0 && createElement(
-              "span",
-              { style: { fontWeight: 600, color: "var(--orca-color-warning)", marginLeft: "4px" } },
-              `= ${tokenStats.currencySymbol || '$'}${tokenStats.cumulativeCost < 0.01 ? tokenStats.cumulativeCost.toFixed(4) : tokenStats.cumulativeCost.toFixed(3)}`
+              createElement("i", { className: "ti ti-bolt", style: { fontSize: "10px" } }),
+              tokenSpeed
             )
           )
         ),

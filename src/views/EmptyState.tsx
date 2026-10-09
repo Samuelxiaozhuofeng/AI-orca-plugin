@@ -27,12 +27,6 @@ const SUGGESTIONS = [
     prompt: "请总结当前笔记的主要内容。",
   },
   {
-    icon: "ti ti-search",
-    title: "搜索我的笔记",
-    desc: "查找包含特定关键词的笔记块",
-    prompt: "请帮我搜索关于[关键词]的笔记。",
-  },
-  {
     icon: "ti ti-wand",
     title: "润色这段文字",
     desc: "优化选中文字的表达和流畅度",

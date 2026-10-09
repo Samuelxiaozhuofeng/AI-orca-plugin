@@ -17,20 +17,6 @@ const React = window.React as unknown as {
 };
 const { createElement } = React;
 
-/** Token 统计信息 */
-export interface TokenStats {
-  messageTokens: number;
-  cumulativeTokens: number;
-  cost?: number;
-  cumulativeCost?: number;
-  currencySymbol?: string;
-  totalInputTokens?: number;
-  totalOutputTokens?: number;
-  totalInputCost?: number;
-  totalOutputCost?: number;
-  isLastMessage?: boolean;
-}
-
 /** MessageList Props */
 export interface MessageListProps {
   /** 消息列表 */
@@ -39,8 +25,6 @@ export interface MessageListProps {
   streamingMessageId?: string | null;
   /** 工具调用结果映射 */
   toolResultsMap?: Map<string, { content: string; name: string }>;
-  /** Token 统计映射 */
-  tokenStatsMap?: Map<string, TokenStats>;
   /** 是否只读模式（保存的对话块使用） */
   readonly?: boolean;
   /** 自定义容器样式 */
@@ -76,7 +60,6 @@ export default function MessageList({
   messages,
   streamingMessageId,
   toolResultsMap,
-  tokenStatsMap,
   readonly = false,
   style,
   className,
@@ -126,7 +109,6 @@ export default function MessageList({
         onRollback: readonly ? undefined : (i > 0 && onRollbackToMessage ? () => onRollbackToMessage(m.id) : undefined),
         onTogglePinned: readonly ? undefined : (onTogglePinned ? () => onTogglePinned(m.id) : undefined),
         toolResults: m.tool_calls ? toolResultsMap : undefined,
-        tokenStats: tokenStatsMap?.get(m.id),
       })
     );
   });

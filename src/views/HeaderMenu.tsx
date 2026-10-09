@@ -13,8 +13,6 @@ const { Button } = orca.components;
 interface HeaderMenuProps {
   onClearChat: () => void;
   onOpenSettings: () => void;
-  onOpenStreamSettings?: () => void;
-  onOpenVisionModelSettings?: () => void;
   onOpenMcpSettings?: () => void;
   onExportMarkdown?: () => void;
   onSaveToJournal?: () => void;
@@ -27,8 +25,6 @@ interface HeaderMenuProps {
 export default function HeaderMenu({
   onClearChat,
   onOpenSettings,
-  onOpenStreamSettings,
-  onOpenVisionModelSettings,
   onOpenMcpSettings,
   onExportMarkdown,
   onSaveToJournal,
@@ -160,28 +156,6 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-settings" }),
           "Settings"
-        ),
-        // Stream Settings
-        onOpenStreamSettings && createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onOpenStreamSettings),
-            className: "header-menu-item",
-          },
-          createElement("i", { className: "ti ti-clock" }),
-          "流式 / 工具设置"
-        ),
-        // Vision Model Settings
-        onOpenVisionModelSettings && createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onOpenVisionModelSettings),
-            className: "header-menu-item",
-          },
-          createElement("i", { className: "ti ti-eye" }),
-          "视觉模型"
         ),
         // MCP Server Settings
         onOpenMcpSettings && createElement(

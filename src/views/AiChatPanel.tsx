@@ -16,8 +16,6 @@ import ScrollToBottomButton from "../components/ScrollToBottomButton";
 import ErrorMessage from "../components/ErrorMessage";
 import ChatHistoryMenu from "./ChatHistoryMenu";
 import HeaderMenu from "./HeaderMenu";
-import StreamSettingsModal from "./StreamSettingsModal";
-import VisionModelSettingsModal from "./VisionModelSettingsModal";
 import EmptyState from "./EmptyState";
 import TypingIndicator from "../components/TypingIndicator";
 import ChatNavigation from "../components/ChatNavigation";
@@ -354,14 +352,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
-
-  // Stream settings modal state
-  const [showStreamSettings, setShowStreamSettings] = useState(false);
-
-  // Web search settings modal state
-
-  // Vision model settings modal state
-  const [showVisionModelSettings, setShowVisionModelSettings] = useState(false);
 
   // MCP server settings modal state
   const [showMcpSettings, setShowMcpSettings] = useState(false);
@@ -1148,6 +1138,17 @@ graph TD
     let ccAssistantId: string | null = null;
     let ccPartial = false;
     let ccErrored = false;
+    // 本次流里创建的助手消息（思考 / 正文各一条时各记一条），流结束时写 durationMs
+    const streamedMsgs: Array<{ id: string; createdAt: number }> = [];
+    const stampDurations = () => {
+      const pending = streamedMsgs.splice(0);
+      if (pending.length === 0) return;
+      const now = Date.now();
+      setMessages((prev) => prev.map((m) => {
+        const hit = pending.find((p) => p.id === m.id);
+        return hit ? { ...m, durationMs: now - hit.createdAt } : m;
+      }));
+    };
 
     try {
       // Build context (now returns text + assets)
@@ -1335,7 +1336,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           maxTokens: runtimeConfig.maxTokens,
           signal: aborter.signal,
           tools: toolsToUse,
-          timeoutMs: settings.streamTimeout,
+          timeoutMs: 30000,
           maxContextTokens: modelContextLength,
           localCli: apiConfig.protocol === "local-cli"
             ? buildLocalCliContext(currentSession.id, {
@@ -1356,6 +1357,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           if (!reasoningMessageId) {
             reasoningMessageId = nowId();
             reasoningCreatedAt = Date.now();
+            streamedMsgs.push({ id: reasoningMessageId, createdAt: reasoningCreatedAt });
             setStreamingMessageId(reasoningMessageId);
             currentReasoning = chunk.reasoning;
             setMessages((prev) => [...prev, { 
@@ -1377,6 +1379,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             // 没有 reasoning，直接创建 assistant 消息
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
+            streamedMsgs.push({ id: assistantId, createdAt: assistantCreatedAt });
             setStreamingMessageId(assistantId);
             setMessages((prev) => [...prev, {
               id: assistantId,
@@ -1391,8 +1394,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           } else if (currentContent === "") {
             // reasoning 完成，创建新的 assistant 消息
             setStreamingMessageId(null); // 停止 reasoning 的流式状态
+            stampDurations(); // 思考消息到此结束
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
+            streamedMsgs.push({ id: assistantId, createdAt: assistantCreatedAt });
             setStreamingMessageId(assistantId);
             setMessages((prev) => [...prev, {
               id: assistantId,
@@ -1426,6 +1431,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         ccAssistantId = reasoningMessageId;
       }
 
+      stampDurations();
       setStreamingMessageId(null);
 
       const hasAssistantMessage = Boolean(reasoningMessageId);
@@ -1735,7 +1741,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               maxTokens: runtimeConfig.maxTokens,
               signal: aborter.signal,
               tools: enableTools ? toolsToUse : undefined,
-              timeoutMs: settings.streamTimeout,
+              timeoutMs: 30000,
               maxContextTokens: toolContextLength,
             },
             standard,
@@ -1746,6 +1752,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               if (!nextReasoningMessageId) {
                 nextReasoningMessageId = nowId();
                 nextReasoningCreatedAt = Date.now();
+                streamedMsgs.push({ id: nextReasoningMessageId, createdAt: nextReasoningCreatedAt });
                 setStreamingMessageId(nextReasoningMessageId);
                 nextReasoning = chunk.reasoning;
                 setMessages((prev) => [...prev, { 
@@ -1767,6 +1774,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 // 没有 reasoning，直接创建 assistant 消息
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
+                streamedMsgs.push({ id: nextAssistantId, createdAt: nextAssistantCreatedAt });
                 setStreamingMessageId(nextAssistantId);
                 setMessages((prev) => [...prev, {
                   id: nextAssistantId,
@@ -1781,8 +1789,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               } else if (nextContent === "") {
                 // reasoning 完成，创建新的 assistant 消息
                 setStreamingMessageId(null);
+                stampDurations(); // 思考消息到此结束
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
+                streamedMsgs.push({ id: nextAssistantId, createdAt: nextAssistantCreatedAt });
                 setStreamingMessageId(nextAssistantId);
                 setMessages((prev) => [...prev, {
                   id: nextAssistantId,
@@ -1817,6 +1827,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           throw streamErr;
         }
 
+        stampDurations();
         setStreamingMessageId(null);
 
         // 确定 assistant 消息的 ID
@@ -1925,6 +1936,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         return prev;
       });
     } finally {
+      stampDurations(); // 停止 / 出错时流没走到正常结尾，这里补写
       // 新中转报了会话（正常 / 停止 / 出错都算）：记到本轮回复上，并记为对话的续接点；续接失败且没新会话 → 清掉续接点
       const ccSid = ccRun.sid;
       const ccMsgId = ccAssistantId;
@@ -2207,113 +2219,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     // 上下文 token 在 ChatInput 中已经显示，这里只计算基础开销
     const baseOverheadTokens = systemPromptTokens;
 
-    // 货币符号
-    const currencySymbol = settingsForUi.currency === 'CNY' ? '¥' : 
-                          settingsForUi.currency === 'EUR' ? '€' : 
-                          settingsForUi.currency === 'JPY' ? '¥' : '$';
-
-    // 辅助函数：根据模型名获取价格
-    const getModelPrices = (modelName?: string) => {
-      const model = modelName || selectedModel;
-      // 从 providers 中查找模型价格
-      for (const provider of settingsForUi.providers) {
-        const found = provider.models.find(m => m.id === model);
-        if (found) {
-          return {
-            inputPrice: found.inputPrice || 0,
-            outputPrice: found.outputPrice || 0,
-          };
-        }
-      }
-      return { inputPrice: 0, outputPrice: 0 };
-    };
-
-    // 计算每条消息的 token 统计和费用
-    const tokenStatsMap = new Map<string, { 
-      messageTokens: number; 
-      cumulativeTokens: number;
-      cost: number;
-      cumulativeCost: number;
-      currencySymbol: string;
-      totalInputTokens?: number;
-      totalOutputTokens?: number;
-      totalInputCost?: number;
-      totalOutputCost?: number;
-      isLastMessage?: boolean;
-    }>();
-    let cumulativeTokens = baseOverheadTokens;
-    let cumulativeCost = 0;
-    
-    // 输入/输出分开统计
-    let totalInputTokens = baseOverheadTokens; // 系统开销算作输入
-    let totalOutputTokens = 0;
-    let totalInputCost = 0;
-    let totalOutputCost = 0;
-    
-    // 系统开销按当前模型的输入价格计算
-    const currentPrices = getModelPrices(selectedModel);
-    const systemOverheadCost = (baseOverheadTokens / 1_000_000) * currentPrices.inputPrice;
-    cumulativeCost += systemOverheadCost;
-    totalInputCost += systemOverheadCost;
-    
-    // 过滤掉 tool 消息和 localOnly 消息，获取有效消息列表
-    const validMessages = messages.filter(m => m.role !== "tool" && !m.localOnly);
-    // 找到最后一条 AI 消息（总统计只显示在 AI 输出上，不显示在用户输入上）
-    const lastAiMessage = [...validMessages].reverse().find(m => m.role === "assistant");
-    const lastAiMessageId = lastAiMessage?.id || null;
-    
-    // 遍历有效消息计算 Token（排除 localOnly）
-    validMessages.forEach((m) => {
-      const messageTokens = estimateTokens(m.content || "") + 
-        (m.reasoning ? estimateTokens(m.reasoning) : 0);
-      
-      // 获取该消息使用的模型价格
-      const prices = getModelPrices(m.model);
-      const isInput = m.role === "user";
-      
-      // 计算本条消息费用（用户消息用输入价，AI消息用输出价）
-      const messageCost = isInput 
-        ? (messageTokens / 1_000_000) * prices.inputPrice
-        : (messageTokens / 1_000_000) * prices.outputPrice;
-      
-      cumulativeTokens += messageTokens;
-      cumulativeCost += messageCost;
-      
-      // 累计输入/输出
-      if (isInput) {
-        totalInputTokens += messageTokens;
-        totalInputCost += messageCost;
-      } else {
-        totalOutputTokens += messageTokens;
-        totalOutputCost += messageCost;
-      }
-      
-      // 只在最后一条 AI 消息上显示总统计
-      const isLastAi = m.id === lastAiMessageId;
-      
-      // 用户消息不显示 token 统计，只有 AI 消息显示
-      if (isInput) {
-        // 用户消息不添加 tokenStats
-        return;
-      }
-      
-      tokenStatsMap.set(m.id, { 
-        messageTokens, 
-        cumulativeTokens,
-        cost: messageCost,
-        cumulativeCost,
-        currencySymbol,
-        // 只在最后一条 AI 消息上附加总计信息
-        ...(isLastAi ? {
-          totalInputTokens,
-          totalOutputTokens,
-          totalInputCost,
-          totalOutputCost,
-          isLastMessage: true,
-        } : {}),
-      });
-    });
-
     const messageElements: any[] = [];
     
     // 在消息列表顶部显示系统开销
@@ -2428,7 +2333,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
           onTogglePinned: () => handleTogglePinned(m.id),
           toolResults: m.tool_calls ? toolResultsMap : undefined,
-          tokenStats: tokenStatsMap.get(m.id),
           // Branch management (对话分支功能)
           onCreateBranch: handleCreateBranch,
           onSwitchBranch: handleSwitchBranch,
@@ -2581,8 +2485,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             orca.commands.invokeCommand("core.openSettings");
           }
         },
-        onOpenStreamSettings: () => setShowStreamSettings(true),
-        onOpenVisionModelSettings: () => setShowVisionModelSettings(true),
         onOpenMcpSettings: () => setShowMcpSettings(true),
         onExportMarkdown: () => {
           if (messages.length === 0) {
@@ -2664,16 +2566,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       localCliFullAccess: (getLastLocalCliMode() ?? ([...messages].reverse().map((m) => m.role === "assistant" ? bannerOf(m.content) : null).find(Boolean)?.includes("完全放开") ? "full" : null)) === "full",
       currency: settingsForUi.currency,
     }),
-    // Stream Settings Modal
-    toBody(createElement(StreamSettingsModal, {
-      isOpen: showStreamSettings,
-      onClose: () => setShowStreamSettings(false),
-    })),
-    // Vision Model Settings Modal
-    toBody(createElement(VisionModelSettingsModal, {
-      isOpen: showVisionModelSettings,
-      onClose: () => setShowVisionModelSettings(false),
-    })),
     // MCP Server Settings Modal
     toBody(createElement(McpServerSettingsModal, {
       isOpen: showMcpSettings,

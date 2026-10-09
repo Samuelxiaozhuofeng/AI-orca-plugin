@@ -4,7 +4,6 @@ import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-c
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
 
 import { initCommands } from "./services/commands-loader";
-import { loadVisionModelConfig } from "./services/ai/vision-model-service";
 import { initMcpServers } from "./services/external/mcp-server-manager";
 import { loadMcpSettings, ensureDefaultMcpServer } from "./store/mcp-store";
 
@@ -134,9 +133,6 @@ export async function load(_name: string) {
       );
     }
   }
-
-  // 加载视觉模型配置
-  await loadVisionModelConfig(pluginName);
 
   // 初始化 Commands 目录（确保默认命令模板存在）
   await initCommands();
