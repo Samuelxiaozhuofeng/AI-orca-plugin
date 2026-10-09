@@ -1088,25 +1088,6 @@ function CollapsibleToolCalls({
 function ToolResultItem({ message }: { message: Message }) {
   const toolName = message.name || "Unknown Tool";
   
-  // 如果包含 journal-export 代码块，使用 MarkdownMessage 渲染
-  const hasJournalExport = message.content.includes("```journal-export");
-  console.log("[ToolResultItem] content:", message.content.substring(0, 100), "hasJournalExport:", hasJournalExport);
-  
-  if (hasJournalExport) {
-    return createElement(
-      "div",
-      { style: { ...messageRowStyle("assistant"), justifyContent: "flex-start" } },
-      createElement(
-        "div",
-        { style: { maxWidth: "90%", width: "100%" } },
-        createElement(MarkdownMessage, {
-          content: message.content,
-          role: "tool",
-        })
-      )
-    );
-  }
-
   return createElement(
     "div",
     { style: { ...messageRowStyle("tool"), justifyContent: "flex-start" } },

@@ -3,7 +3,6 @@ import { autostartLocalCli } from "./services/ai/local-cli-autostart";
 import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-chat-ui";
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
 import { loadMemoryStore } from "./store/memory-store";
-import { AiChatPluginAPI } from "./services/plugin-api";
 
 import { initCommands } from "./services/commands-loader";
 import { loadVisionModelConfig } from "./services/ai/vision-model-service";
@@ -153,8 +152,6 @@ export async function load(_name: string) {
   ensureDefaultMcpServer();
   initMcpServers().catch((err) => console.warn("[MCP] 初始化出错:", err));
 
-  // 挂载 Plugin API 到全局，供外部插件调用
-  (window as any).AiChatPluginAPI = AiChatPluginAPI;
 
   // 启动 hideable 子元素标记
   startHideableObserver();

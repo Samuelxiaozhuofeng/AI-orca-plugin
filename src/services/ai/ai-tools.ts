@@ -13,23 +13,6 @@ import {
   isExternalMcpTool,
   callRemoteTool,
 } from "../external/mcp-server-manager";
-import type {
-  QueryCondition,
-  QueryCombineMode
-} from "../../utils/query-types";
-
-type JournalExportCacheEntry = {
-  rangeLabel: string;
-  entries: any[];
-  cachedAt: number;
-};
-
-const JOURNAL_EXPORT_CACHE_TTL = 30 * 60 * 1000;
-const JOURNAL_EXPORT_CACHE_MAX = 5;
-
-// 全局缓存：存储大型日记导出数据（供前端使用）
-export const journalExportDataCache = new Map<string, JournalExportCacheEntry>();
-
 // 全局缓存：Skill 工具名称到 Skill ID 的映射（兼容性导出）
 export const skillToolNameToSkillIdCache = new Map<string, string>();
 
@@ -102,33 +85,6 @@ function parseSearchResultsFromContent(content: string): any[] {
   }
   
   return results;
-}
-
-function pruneJournalExportCache(now: number): void {
-  for (const [key, entry] of journalExportDataCache.entries()) {
-    if (now - entry.cachedAt > JOURNAL_EXPORT_CACHE_TTL) {
-      journalExportDataCache.delete(key);
-    }
-  }
-}
-
-function setJournalExportCache(cacheId: string, rangeLabel: string, entries: any[]): void {
-  const now = Date.now();
-  pruneJournalExportCache(now);
-
-  journalExportDataCache.set(cacheId, { rangeLabel, entries, cachedAt: now });
-
-  if (journalExportDataCache.size <= JOURNAL_EXPORT_CACHE_MAX) {
-    return;
-  }
-
-  const sorted = Array.from(journalExportDataCache.entries()).sort(
-    (a, b) => a[1].cachedAt - b[1].cachedAt
-  );
-  const excess = sorted.length - JOURNAL_EXPORT_CACHE_MAX;
-  for (let i = 0; i < excess; i++) {
-    journalExportDataCache.delete(sorted[i][0]);
-  }
 }
 
 function extractBlocksFromTree(tree: any, depth: number = 0, maxBlocks: number = 200): BlockInfo[] {

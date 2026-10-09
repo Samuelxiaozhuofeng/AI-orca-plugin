@@ -1949,34 +1949,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           toolResultMessages.push(...parallelResults);
         }
 
-        // 检查并行结果中是否有直接渲染的（如日记导出）
-        const hasDirectRender = toolResultMessages.some(m => m.content.includes("```journal-export"));
-        if (hasDirectRender) {
-          allToolResultMessages.push(...toolResultMessages);
-          conversation.push(...toolResultMessages);
-          setMessages((prev) => [...prev, ...toolResultMessages]);
-          queueMicrotask(scrollToBottom);
-          currentToolCalls = [];
-          break;
-        }
-
         // ── 顺序执行需确认的工具 ────────────────────────────────────────
         for (const tc of confirmTools) {
           const msg = await executeSingleToolCall(tc);
           toolResultMessages.push(msg);
-          if (msg.content.includes("```journal-export")) {
-            allToolResultMessages.push(...toolResultMessages);
-            conversation.push(...toolResultMessages);
-            setMessages((prev) => [...prev, ...toolResultMessages]);
-            queueMicrotask(scrollToBottom);
-            currentToolCalls = [];
-            break;
-          }
-        }
-
-        // 如果直接渲染触发了，跳出
-        if (currentToolCalls.length === 0) {
-          break;
         }
 
         captureSearchResults(toolResultMessages);
@@ -2711,8 +2687,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         if (banner) prevBanner = banner;
       }
       // 跳过普通 tool 消息，它们会被合并到 assistant 消息的工具调用区域
-      // 但保留包含 journal-export 的 tool 消息，需要单独渲染导出按钮
-      if (m.role === "tool" && !m.content.includes("```journal-export")) return;
+      if (m.role === "tool") return;
 
       // 添加日期分隔符（如果是新的一天）
       // **Feature: chat-ui-enhancement**
