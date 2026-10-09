@@ -2248,6 +2248,7 @@ export default function MessageItem({
         // Branch Button (从此处创建分支 - 仅 AI 消息)
         isAssistant &&
           !isStreaming &&
+          !message.localOnly && // 本地提示（如欢迎语）不进存档，挂在它上面的分支会整个丢
           onCreateBranch &&
           withTooltip(
             "从此处创建分支",

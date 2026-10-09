@@ -2364,6 +2364,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // createBranch(messages, messageId, branchName?) -> { messages: Message[]; branchId: string }
       // 已在某个分支里：先把它的内容存回去，再开新分支
       const result = createBranch(stashCurrentBranch(messages, messageId), messageId);
+      // 换掉分支点之后的内容前停掉生成，免得后面的回复写进另一个分支
+      abandonCurrentRequest();
       console.log("[Branch] Result:", {
         branchId: result.branchId,
         messagesCount: result.messages.length,
@@ -2383,6 +2385,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     try {
       // 先把离开的分支存回去，再换成目标分支的内容
       const updatedMessages = switchBranch(stashCurrentBranch(messages, messageId), messageId, branchId);
+      abandonCurrentRequest();
       invalidateCcHead();
       setMessages(updatedMessages);
       orca.notify("success", "已切换分支");
@@ -2399,6 +2402,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       const point = updatedMessages.find((m) => m.id === messageId);
       if (point?.activeBranchId === branchId && point.branches?.length && point.branches.every((b) => b.id !== branchId)) {
         updatedMessages = switchBranch(updatedMessages, messageId, point.branches[0].id);
+        abandonCurrentRequest();
       }
       invalidateCcHead();
       setMessages(updatedMessages);
