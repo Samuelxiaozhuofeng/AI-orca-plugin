@@ -5,6 +5,7 @@ import { contextKey, contextStore, type ContextRef } from "../store/context-stor
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { memoryStore } from "../store/memory-store";
+import type { ExtractedMemory } from "../services/ai/memory-extraction";
 import { getMode } from "../store/chat-mode-store";
 import { findViewPanelById } from "../utils/panel-tree";
 import { generateSuggestedReplies } from "../services/ai/suggestion-service";
@@ -2466,6 +2467,12 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
   }, []);
 
   // 切换消息的重要标记（pinned）
+  // 提取出的记忆写进记忆管理（当前用户），与记忆管理里手动添加同一条路
+  const handleExtractMemory = useCallback((memories: ExtractedMemory[]) => {
+    const added = memories.filter(mem => memoryStore.addMemory(mem.content)).length;
+    orca.notify(added > 0 ? "success" : "info", added > 0 ? `已添加 ${added} 条记忆` : "没有可添加的记忆");
+  }, []);
+
   const handleTogglePinned = useCallback((messageId: string) => {
     setMessages((prev) => prev.map((m) => {
       if (m.id === messageId) {
@@ -2870,6 +2877,14 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           onSwitchBranch: handleSwitchBranch,
           onDeleteBranch: handleDeleteBranch,
           onRenameBranch: handleRenameBranch,
+          // 提取记忆：本轮「用户提问 + AI 回答」交给 ExtractMemoryButton
+          conversationContext: m.role === "assistant" && m.content
+            ? (() => {
+                const prevUser = messages.slice(0, i).reverse().find(pm => pm.role === "user");
+                return `${prevUser?.content ? `用户: ${prevUser.content}\n` : ""}AI: ${m.content}`;
+              })()
+            : undefined,
+          onExtractMemory: handleExtractMemory,
         })
       );
     });
