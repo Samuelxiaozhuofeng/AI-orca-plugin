@@ -138,8 +138,6 @@ export async function load(_name: string) {
   // 加载视觉模型配置
   await loadVisionModelConfig(pluginName);
 
-  // 内置 Skills 已从代码常量加载，无需文件初始化
-
   // 初始化 Commands 目录（确保默认命令模板存在）
   await initCommands();
 

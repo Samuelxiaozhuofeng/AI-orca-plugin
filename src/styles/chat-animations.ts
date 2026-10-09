@@ -1437,15 +1437,6 @@ br + .md-block-dot {
     opacity: 1;
 }
 
-/* Skill Recommendation Button Hover */
-.skill-rec-btn {
-    background: var(--orca-color-bg-1);
-    transition: all 0.15s ease;
-}
-.skill-rec-btn:hover {
-    background: rgba(16, 185, 129, 0.1);
-}
-
 `;
 
 let styleElement: HTMLStyleElement | null = null;

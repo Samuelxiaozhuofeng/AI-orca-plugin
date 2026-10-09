@@ -63,18 +63,9 @@ export type Message = {
   // 自动增强相关
   searchResults?: WebSearchSource[]; // 搜索结果（用于自动增强）
   autoEnhanced?: boolean; // 是否已自动增强
-  // Skill-related UI metadata (localOnly messages)
-  skillConfirm?: {
-    skillId: string;
-    skillName: string;
-    steps: string[];
-    status: "pending" | "approved" | "denied";
-  };
-  skillDraft?: {
-    status: "generating" | "saving" | "draft" | "saved" | "discarded" | "error";
-    folderName?: string;
-    error?: string;
-  };
+  // 旧数据兼容，仅用于识别并隐藏旧技能卡片
+  skillConfirm?: unknown;
+  skillDraft?: unknown;
   // 分支功能
   branchId?: string;           // 分支 ID（主分支为 undefined）
   parentMessageId?: string;    // 父消息 ID（分支点）

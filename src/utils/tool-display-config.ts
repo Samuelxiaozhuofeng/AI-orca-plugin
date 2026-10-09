@@ -5,21 +5,7 @@
  * Maps tool names to user-friendly icons, animations, and text.
  */
 
-import { skillToolNameToSkillIdCache } from "../services/ai/ai-tools";
 import { TOOL_DISPLAY_NAMES } from "../store/tool-store";
-
-function isSkillToolName(toolName: string): boolean {
-  return toolName.startsWith("skill_");
-}
-
-function getSkillDisplayName(toolName: string): string {
-  if (!isSkillToolName(toolName)) return toolName;
-  const skillId = skillToolNameToSkillIdCache.get(toolName);
-  if (skillId) return skillId;
-  const parts = toolName.split("_");
-  if (parts.length >= 3) return parts[1] || "技能";
-  return "技能";
-}
 
 export type ToolCategory = "create" | "search" | "query";
 export type AnimationType = "sparkle" | "pulse" | "flip";
@@ -44,16 +30,6 @@ const DEFAULT_CONFIG: ToolDisplayConfig = {
   displayName: "工具",
   loadingText: "正在执行...",
   successText: "已完成",
-  successIcon: "✅",
-};
-
-const SKILL_CONFIG: ToolDisplayConfig = {
-  category: "query",
-  icon: "✨",
-  animation: "sparkle",
-  displayName: "技能",
-  loadingText: "正在执行技能...",
-  successText: "技能已完成",
   successIcon: "✅",
 };
 
@@ -86,9 +62,6 @@ const MCP_CONFIG: ToolDisplayConfig = {
  * Get display configuration for a tool
  */
 export function getToolDisplayConfig(toolName: string): ToolDisplayConfig {
-  if (isSkillToolName(toolName)) {
-    return { ...SKILL_CONFIG, displayName: getSkillDisplayName(toolName) };
-  }
   if (toolName.startsWith("mcp__")) {
     const registeredName = TOOL_DISPLAY_NAMES[toolName];
     if (registeredName) {

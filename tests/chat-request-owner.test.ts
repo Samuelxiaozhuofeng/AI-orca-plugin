@@ -1,5 +1,5 @@
 import { test, assert, assertEqual } from "./test-harness";
-import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../src/utils/chat-request-owner";
+import { createChatRequestOwner, shouldReportFailure } from "../src/utils/chat-request-owner";
 
 // 第二轮 G3：请求归属补全（中止器登记、生成状态写入、内联技能确认）
 
@@ -52,14 +52,6 @@ test("G3 准备阶段 await 恢复后能察觉已失效", async () => {
   })();
   owner.invalidate();
   assertEqual(await pending, false);
-});
-
-test("G3 换对话时未决的技能确认按拒绝结算并删除 resolver", async () => {
-  const resolvers = new Map<string, (approved: boolean) => void>();
-  const waiting = new Promise<boolean>((resolve) => resolvers.set("m1", resolve));
-  settlePendingConfirms(resolvers);
-  assertEqual(await waiting, false);
-  assertEqual(resolvers.size, 0);
 });
 
 // 第三轮 H2：同一对话里每次发送都是新身份，接替时作废上一请求；H4：中止 / 失效不报错

@@ -42,13 +42,6 @@ export function createChatRequestOwner() {
   };
 }
 
-/** 新对话 / 切换对话时：未决的确认一律按拒绝结算并清掉，等待它的旧请求得以收尾 */
-export function settlePendingConfirms(resolvers: Map<string, (approved: boolean) => void>): void {
-  const pending = [...resolvers.values()];
-  resolvers.clear();
-  for (const resolve of pending) resolve(false);
-}
-
 /** 失败要不要报给用户：请求已失效或是中止（AbortError）都不报 */
 export function shouldReportFailure(isCurrent: () => boolean, err: unknown): boolean {
   return isCurrent() && String((err as any)?.name) !== "AbortError";

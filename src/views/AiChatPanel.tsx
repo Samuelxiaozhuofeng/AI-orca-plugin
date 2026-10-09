@@ -5,7 +5,6 @@ import { contextKey, contextStore, type ContextRef } from "../store/context-stor
 import { closeAiChatPanel, getAiChatPluginName } from "../ui/ai-chat-ui";
 import { uiStore } from "../store/ui-store";
 import { findViewPanelById } from "../utils/panel-tree";
-import { generateSuggestedReplies } from "../services/ai/suggestion-service";
 import { estimateTokens, formatTokenCount } from "../utils/token-utils";
 import { isSameDay, formatDateSeparator, getTimeGreeting } from "../utils/chat-ui-utils";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -24,7 +23,6 @@ import TypingIndicator from "../components/TypingIndicator";
 import ChatNavigation from "../components/ChatNavigation";
 import GlobalImagePreview from "../components/GlobalImagePreview";
 import { toBody } from "../utils/modal-dismiss";
-import SkillManagerModal from "./SkillManagerModal";
 import McpServerSettingsModal from "./McpServerSettingsModal";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
@@ -57,17 +55,14 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
-import { listSkills, getSkill } from "../services/ai/skills-manager";
-import type { Skill, SkillRef } from "../types/skills";
-import { getAutoTriggerSkill } from "../services/ai/skill-recommender";
+import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults } from "../services/ai/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE, BANNER_RE, bannerOf, getLastLocalCliMode, type LocalCliRun } from "../services/ai/local-cli-client";
 import { pickLocalCliResume } from "../services/ai/local-cli-resume";
-import { createChatRequestOwner, loadIfLatest, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
+import { createChatRequestOwner, loadIfLatest, shouldReportFailure } from "../utils/chat-request-owner";
 import { createPendingSave } from "../utils/pending-save";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
@@ -368,9 +363,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // Vision model settings modal state
   const [showVisionModelSettings, setShowVisionModelSettings] = useState(false);
 
-  // Skill manager modal state
-  const [showSkillManager, setShowSkillManager] = useState(false);
-
   // MCP server settings modal state
   const [showMcpSettings, setShowMcpSettings] = useState(false);
 
@@ -397,7 +389,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const setLastErrorUnguarded = setLastError;
   const setSendingUnguarded = setSending;
   const setStreamingMessageIdUnguarded = setStreamingMessageId;
-  const skillConfirmResolversRef = useRef(new Map<string, (approved: boolean) => void>());
   // 追踪用户是否在底部附近，用于决定流式输出时是否自动滚动
   const isNearBottomRef = useRef(true);
   const scrollAnimationStateRef = useRef<ScrollAnimationState>({ rafId: null, cancelToken: 0 });
@@ -471,58 +462,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     } catch {
       return null;
     }
-  }, []);
-
-  const requestSkillConfirm = useCallback((skill: Skill): Promise<boolean> => {
-    return new Promise((resolve) => {
-      const messageId = nowId();
-      const createdAt = Date.now();
-      const stepSummary = [skill.description || skill.instruction.slice(0, 200)];
-      skillConfirmResolversRef.current.set(messageId, resolve);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: messageId,
-          role: "assistant",
-          content: "",
-          createdAt,
-          localOnly: true,
-          skillConfirm: {
-            skillId: skill.id,
-            skillName: skill.name,
-            steps: stepSummary,
-            status: "pending",
-          },
-        },
-      ]);
-    });
-  }, []);
-
-  const handleSkillConfirmAction = useCallback((messageId: string, approved: boolean) => {
-    const resolver = skillConfirmResolversRef.current.get(messageId);
-    if (resolver) {
-      resolver(approved);
-      skillConfirmResolversRef.current.delete(messageId);
-    }
-
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id !== messageId || !m.skillConfirm) return m;
-        return {
-          ...m,
-          skillConfirm: {
-            ...m.skillConfirm,
-            status: approved ? "approved" : "denied",
-          },
-        };
-      })
-    );
-  }, []);
-
-  const handleSkillSlashCommand = useCallback(async (rawContent: string, requestText: string) => {
-    // Skill slash command is no longer supported in the new system
-    // This function is kept for compatibility but does nothing
-    orca.notify("info", "技能编写功能暂不可用，请使用技能管理器创建新技能");
   }, []);
 
   const displaySessionTitle = useMemo(() => {
@@ -613,13 +552,12 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   // 新建 / 切换对话的序号：切换中途等待时又点了别的，只认最后一次
   const switchSeqRef = useRef(0);
 
-  // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
+  // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、
   // 清掉生成状态；旧请求之后的界面写入一律丢弃
   const abandonCurrentRequest = () => {
     chatOwnerRef.current.invalidate();
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = null;
-    settlePendingConfirms(skillConfirmResolversRef.current);
     setSending(false);
     setStreamingMessageId(null);
   };
@@ -937,13 +875,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       if (!req.isCurrent()) return;
     }
 
-    // /skill - 生成技能草稿（不发送给 AI 对话流）
-    if (trimmedContent === "/skill" || trimmedContent.startsWith("/skill ")) {
-      const requestText = trimmedContent.replace(/^\/skill\s*/, "").trim();
-      await handleSkillSlashCommand(content, requestText);
-      return;
-    }
-
 	    const pluginName = getAiChatPluginName();
 	    const settings = getAiChatSettings(pluginName);
 	    const model = (currentSession.model || "").trim() || settings.selectedModelId;
@@ -958,91 +889,15 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    const toolRoundLimit = runtimeConfig.maxToolRounds;
 	    const toolRoundController = createToolRoundLimit(toolRoundLimit);
 
-	    // 加载已启用的技能，注入系统提示词让 AI 自动识别并调用
-	    const enabledSkills: Array<{ name: string; description: string; instruction: string }> = [];
-	    try {
-	      const allSkillRefs = await listSkills();
-	      for (const ref of allSkillRefs) {
-	        const skill = await getSkill(ref.id, ref.scope === "global");
-	        if (skill && skill.mode !== "disabled") {
-	          enabledSkills.push({
-	            name: skill.name || skill.id,
-	            description: skill.description || "",
-	            instruction: skill.instruction,
-	          });
-	        }
-	      }
-	    } catch (err) {
-	      console.warn("[handleSend] Failed to load skills:", err);
-	    }
-	    if (!req.isCurrent()) return;
-
-	    // 自动触发检测：高置信度匹配时自动激活技能
-	    let autoActivatedSkill: { name: string; instruction: string } | undefined;
-	    if (!content.startsWith("#") && !content.startsWith("/")) {
-	      try {
-	        const matched = await getAutoTriggerSkill(content, 0.5);
-	        if (matched) {
-	          autoActivatedSkill = {
-	            name: matched.name,
-	            instruction: matched.instruction,
-	          };
-	          console.log(`[handleSend] Auto-activated skill: ${matched.name}`);
-	        }
-	      } catch (err) {
-	        console.warn("[handleSend] Auto-trigger check failed:", err);
-	      }
-	      if (!req.isCurrent()) return;
-	    }
-
 	    // 系统提示词
 	    let systemPrompt = buildDynamicSystemPrompt({
       hasMcpTools: getDiscoveredTools().length > 0,
       hasDraggedContext: contextStore.selected.length > 0,
-      skills: enabledSkills,
-      autoActivatedSkill,
       repoId: getCurrentRepoId(),
     });
 
 	    // 检测用户指令并追加格式要求
 	    let processedContent = content;
-	    
-	    // Skill 加载逻辑：如果用户输入 #skillname，尝试加载 Skill
-	    if (content.startsWith("#")) {
-	      const spaceIndex = content.indexOf(" ");
-	      const skillName = spaceIndex > 0 ? content.slice(1, spaceIndex) : content.slice(1);
-	      const restText = spaceIndex > 0 ? content.slice(spaceIndex + 1).trim() : "";
-	      
-	      // 尝试加载 Skill
-	      try {
-	        const { listSkills, getSkill } = await import("../services/ai/skills-manager");
-	        const allSkills = await listSkills();
-	        
-		// 查找匹配的 Skill（优先按名称匹配，其次按 ID）
-		const skillRef = allSkills.find(s => s.name === skillName) || allSkills.find(s => s.id === skillName);
-
-		let foundSkill = null;
-		if (skillRef) {
-		  foundSkill = await getSkill(skillRef.id, skillRef.scope === "global");
-		}
-	        
-	        if (foundSkill) {
-	          // 使用现有的 requestSkillConfirm 机制显示确认对话框
-	          const confirmed = req.isCurrent() && await requestSkillConfirm(foundSkill) && req.isCurrent();
-	          
-	          if (!confirmed) {
-	            // 用户取消，不继续执行
-	            return;
-	          }
-	          
-	          // 用户确认，加载 Skill 指令
-	          processedContent = restText ? `${foundSkill.instruction}\n\n## 用户输入\n${restText}` : foundSkill.instruction;
-	        }
-	      } catch (err) {
-	        console.error("[handleSend] Failed to load skill:", err);
-	      }
-	      if (!req.isCurrent()) return;
-	    }
 	    
 	    // Commands 加载逻辑：如果用户输入 /commandname，尝试加载命令文件
 	    if (content.startsWith("/")) {
@@ -1053,8 +908,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      // 检查是否是内置 UI 命令（如 /table, /brief 等）
 	      const builtinCommands = [
 	        "table", "timeline", "compare", "list", "steps", "brief", "detail", "summary", "eli5", "formal", "diagram",
-	        "skill",
-	      ];
+		      ];
 	      const isBuiltinCommand = builtinCommands.includes(commandName);
 	      
 	      if (!isBuiltinCommand) {
@@ -1275,20 +1129,6 @@ graph TD
         setMessages((prev) => [...prev, userMsg]);
     }
 
-    // 自动激活技能时显示系统通知
-    if (autoActivatedSkill) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: nowId(),
-          role: "assistant" as const,
-          content: `📋 已激活技能: **${autoActivatedSkill.name}**`,
-          createdAt: Date.now(),
-          localOnly: true,
-        },
-      ]);
-    }
-
     // 用户发送消息时，重置为自动滚动状态并滚动到底部
     isNearBottomRef.current = true;
     queueMicrotask(scrollToBottom);
@@ -1394,7 +1234,7 @@ graph TD
 
 ## MCP Tool Routing
 - MCP tools in the allowlist are available external tools. Do not claim MCP tools are unavailable when an allowlisted mcp__ name matches the task.
-- For Orca Note notes, journals, pages, blocks, tags, timeline extraction, or local repository content, prefer the matching mcp__orca-note__* tool over skill_* tools.
+- For Orca Note notes, journals, pages, blocks, tags, timeline extraction, or local repository content, prefer the matching mcp__orca-note__* tool.
 - Copy the complete MCP tool name exactly, including server prefix and any suffix. Do not add "s", change singular/plural, translate, abbreviate, or infer a missing tool name.
 - If no allowlisted tool matches the requested action, answer directly instead of inventing a function name.
 ${orcaNoteNames.length ? `\nAvailable Orca Note MCP tools:\n${orcaNoteNames.join("\n")}` : ""}`
@@ -1442,20 +1282,9 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // 有拖入块时禁用搜索类工具，强制 AI 使用已提供的上下文
       const hasHighPriorityContext = highPriorityContexts.length > 0;
 
-      let baseTools = hasHighPriorityContext
+      const baseTools = hasHighPriorityContext
         ? getToolsForDraggedContext()
         : getTools();
-
-      // 合并技能工具：将已启用的技能注册为 function calling 工具
-      try {
-        const skillTools = await getSkillToolsAsync();
-        if (skillTools.length > 0) {
-          baseTools = [...baseTools, ...skillTools];
-          console.log(`[AiChatPanel] 已注册 ${skillTools.length} 个技能工具`);
-        }
-      } catch (err) {
-        console.warn("[AiChatPanel] 加载技能工具失败:", err);
-      }
 
       
       // 检查模型是否支持原生 function calling
@@ -1464,7 +1293,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // 调试日志：显示加载的工具数量
       if (baseTools.length > 0) {
         if (supportsTools) {
-          console.log(`[AiChatPanel] Tool-as-Skill 架构: ${baseTools.length} 个工具`);
+          console.log(`[AiChatPanel] 工具: ${baseTools.length} 个工具`);
         } else {
           console.log(`[AiChatPanel] 模型 ${model} 不支持 tools 能力，跳过工具加载`);
         }
@@ -1511,7 +1340,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           localCli: apiConfig.protocol === "local-cli"
             ? buildLocalCliContext(currentSession.id, {
                 contextText,
-                instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix }),
+                instructions: buildLocalCliInstructions({ formatSuffix }),
                 workDir: currentSession.workDir,
                 resume: ccResume,
                 run: ccRun,
@@ -1818,67 +1647,16 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           if (parseError) {
             result = `Error: ${parseError}\n\nRaw arguments received:\n${toolCall.function.arguments}\n\nPlease provide valid JSON arguments.`;
           } else {
-            const isSkillCall = toolName.startsWith("skill_");
-
-            if (isSkillCall) {
-              try {
-                const resolvedSkillId = await resolveSkillIdFromToolName(toolName);
-                if (!resolvedSkillId) {
-                  result = `Error: Skill not found for tool: ${toolName}`;
-                } else {
-                  const skillMode = getSkillToolMode(toolName) || "auto";
-
-                  if (skillMode === "disabled") {
-                    result = `Error: Skill is disabled: ${resolvedSkillId.id}`;
-                  } else if (skillMode === "auto") {
-                    // 自动执行：无需确认，直接加载指令
-                    const instructions = await getSkillInstructionsAsync(resolvedSkillId);
-                    if (!instructions) {
-                      result = `Error: Skill not found: ${resolvedSkillId.id}`;
-                    } else {
-                      const userInput = args.input || "";
-                      result = `${instructions}\n\n## 用户输入\n${userInput}`;
-                    }
-                  } else {
-                    // ask 模式：在对话中内联确认（非模态弹窗）
-                    try {
-                      const skill = await getSkill(resolvedSkillId.id, (resolvedSkillId as any).isGlobal);
-                      if (!skill) {
-                        result = `Error: Skill not found: ${resolvedSkillId.id}`;
-                      } else {
-                        const userApproved = req.isCurrent() && await requestSkillConfirm(skill) && req.isCurrent();
-                        if (!userApproved) {
-                          result = `用户拒绝执行技能「${skill.name}」。请尝试其他方式或直接回答用户的问题。`;
-                        } else {
-                          const instructions = await getSkillInstructionsAsync(resolvedSkillId);
-                          if (!instructions) {
-                            result = `Error: Skill not found: ${resolvedSkillId.id}`;
-                          } else {
-                            const userInput = args.input || "";
-                            result = `${instructions}\n\n## 用户输入\n${userInput}`;
-                          }
-                        }
-                      }
-                    } catch (err: any) {
-                      result = `Error: Failed to execute skill ${resolvedSkillId.id}: ${err?.message || "Unknown error"}`;
-                    }
-                  }
-                }
-              } catch (err: any) {
-                result = `Error: Failed to resolve skill for tool ${toolName}: ${err?.message || "Unknown error"}`;
-              }
-            } else {
-              try {
-                const timeoutPromise = new Promise<string>((_, reject) => {
-                  setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
-                });
-                result = await Promise.race([
-                  executeTool(toolName, args),
-                  timeoutPromise
-                ]);
-              } catch (err: any) {
-                result = `Error: ${err.message || "Tool execution failed"}`;
-              }
+            try {
+              const timeoutPromise = new Promise<string>((_, reject) => {
+                setTimeout(() => reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS);
+              });
+              result = await Promise.race([
+                executeTool(toolName, args),
+                timeoutPromise
+              ]);
+            } catch (err: any) {
+              result = `Error: ${err.message || "Tool execution failed"}`;
             }
           }
 
@@ -1900,35 +1678,13 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           };
         };
 
-        // ── 分组：需确认 vs 无需确认 ────────────────────────────────────
-        const confirmTools: ToolCallInfo[] = [];
-        const parallelTools: ToolCallInfo[] = [];
-        for (const tc of executableToolCalls) {
-          if (tc.function.name.startsWith("skill_")) {
-            const mode = getSkillToolMode(tc.function.name);
-            if (mode === "ask") {
-              confirmTools.push(tc);  // 需内联确认，顺序执行
-            } else {
-              parallelTools.push(tc); // auto 模式，无需确认，可并行
-            }
-          } else {
-            parallelTools.push(tc);
-          }
-        }
-
         // ── 并行执行无需确认的工具 ──────────────────────────────────────
         const toolResultMessages: Message[] = [...preToolResultMessages];
-        if (parallelTools.length > 0) {
+        if (executableToolCalls.length > 0) {
           const parallelResults = await Promise.all(
-            parallelTools.map(tc => executeSingleToolCall(tc))
+            executableToolCalls.map(tc => executeSingleToolCall(tc))
           );
           toolResultMessages.push(...parallelResults);
-        }
-
-        // ── 顺序执行需确认的工具 ────────────────────────────────────────
-        for (const tc of confirmTools) {
-          const msg = await executeSingleToolCall(tc);
-          toolResultMessages.push(msg);
         }
 
         captureSearchResults(toolResultMessages);
@@ -2302,17 +2058,13 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
   // Branch Management Callbacks (对话分支功能)
   // ─────────────────────────────────────────────────────────────────────────
 
-  // 分支操作会停掉进行中的回复：存进分支的技能确认卡片随之按拒绝结算，切回来不再显示可点的「允许」
-  const settleConfirmCards = (ms: Message[]) =>
-    ms.map((m) => (m.skillConfirm?.status === "pending" ? { ...m, skillConfirm: { ...m.skillConfirm, status: "denied" as const } } : m));
-
   const handleCreateBranch = useCallback((messageId: string) => {
     try {
       console.log("[Branch] Creating branch at message:", messageId);
       console.log("[Branch] Current messages:", messages.length);
       // createBranch(messages, messageId, branchName?) -> { messages: Message[]; branchId: string }
       // 已在某个分支里：先把它的内容存回去，再开新分支
-      const result = createBranch(stashCurrentBranch(settleConfirmCards(messages), messageId), messageId);
+      const result = createBranch(stashCurrentBranch(messages, messageId), messageId);
       // 换掉分支点之后的内容前停掉生成，免得后面的回复写进另一个分支
       abandonCurrentRequest();
       console.log("[Branch] Result:", {
@@ -2335,7 +2087,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // 先把离开的分支存回去，再换成目标分支的内容
       // 点的就是正显示的分支：什么都不做，也不打断生成
       if (messages.find((m) => m.id === messageId)?.activeBranchId === branchId) return;
-      const updatedMessages = switchBranch(stashCurrentBranch(settleConfirmCards(messages), messageId), messageId, branchId);
+      const updatedMessages = switchBranch(stashCurrentBranch(messages, messageId), messageId, branchId);
       abandonCurrentRequest();
       invalidateCcHead();
       setMessages(updatedMessages);
@@ -2373,15 +2125,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       orca.notify("error", err?.message || "重命名分支失败");
     }
   }, [messages]);
-
-  // 生成建议回复 - 根据指定的 AI 消息内容生成
-  const createSuggestionGenerator = useCallback(
-    (messageContent: string) => async (): Promise<string[]> => {
-      const suggestions = await generateSuggestedReplies(messageContent);
-      return suggestions;
-    },
-    []
-  );
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derived State
@@ -2645,6 +2388,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       }
       // 跳过普通 tool 消息，它们会被合并到 assistant 消息的工具调用区域
       if (m.role === "tool") return;
+      // 旧数据兼容：隐藏旧版技能确认 / 草稿卡片（只跳过渲染，不改存档）
+      if (m.skillConfirm || m.skillDraft) return;
 
       // 添加日期分隔符（如果是新的一天）
       // **Feature: chat-ui-enhancement**
@@ -2683,10 +2428,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           onRollback: i > 0 ? () => handleRollbackToMessage(m.id) : undefined,
           onTogglePinned: () => handleTogglePinned(m.id),
           toolResults: m.tool_calls ? toolResultsMap : undefined,
-          onSuggestedReply: isLastAi ? (text: string) => handleSend(text) : undefined,
-          onGenerateSuggestions: isLastAi && m.content ? createSuggestionGenerator(m.content) : undefined,
           tokenStats: tokenStatsMap.get(m.id),
-          onSkillConfirmAction: m.skillConfirm ? handleSkillConfirmAction : undefined,
           // Branch management (对话分支功能)
           onCreateBranch: handleCreateBranch,
           onSwitchBranch: handleSwitchBranch,
@@ -2819,18 +2561,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           createElement("i", { className: "ti ti-plus" })
         )
       ),
-      // Skill Manager Button
-      withTooltip(
-        "技能管理",
-        createElement(
-          Button,
-          {
-            variant: "plain",
-            onClick: () => setShowSkillManager(true),
-          },
-          createElement("i", { className: "ti ti-stars" })
-        )
-      ),
       // Chat History
       createElement(ChatHistoryMenu, {
         sessions,
@@ -2934,11 +2664,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       localCliFullAccess: (getLastLocalCliMode() ?? ([...messages].reverse().map((m) => m.role === "assistant" ? bannerOf(m.content) : null).find(Boolean)?.includes("完全放开") ? "full" : null)) === "full",
       currency: settingsForUi.currency,
     }),
-    // Skill Manager Modal
-    toBody(createElement(SkillManagerModal, {
-      isOpen: showSkillManager,
-      onClose: () => setShowSkillManager(false),
-    })),
     // Stream Settings Modal
     toBody(createElement(StreamSettingsModal, {
       isOpen: showStreamSettings,

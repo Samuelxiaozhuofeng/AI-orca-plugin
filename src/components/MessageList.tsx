@@ -67,9 +67,7 @@ export interface MessageListProps {
   /** 切换消息置顶回调 */
   onTogglePinned?: (messageId: string) => void;
   /** 建议回复点击回调 */
-  onSuggestedReply?: (text: string) => void;
   /** 生成建议回调 */
-  onGenerateSuggestions?: (content: string) => () => Promise<string[]>;
 }
 
 /**
@@ -91,8 +89,6 @@ export default function MessageList({
   onDeleteMessage,
   onRollbackToMessage,
   onTogglePinned,
-  onSuggestedReply,
-  onGenerateSuggestions,
 }: MessageListProps) {
   const containerStyle: React.CSSProperties = {
     ...messageListStyle,
@@ -104,6 +100,8 @@ export default function MessageList({
   messages.forEach((m: Message, i: number) => {
     // 跳过 tool 消息，它们会被合并到 assistant 消息的工具调用区域
     if (m.role === "tool") return;
+    // 旧数据兼容：隐藏旧版技能确认 / 草稿卡片
+    if (m.skillConfirm || m.skillDraft) return;
 
     const isLastAi = m.role === "assistant" && i === messages.length - 1;
     const isStreaming = readonly ? false : streamingMessageId === m.id;
@@ -130,8 +128,6 @@ export default function MessageList({
         onRollback: readonly ? undefined : (i > 0 && onRollbackToMessage ? () => onRollbackToMessage(m.id) : undefined),
         onTogglePinned: readonly ? undefined : (onTogglePinned ? () => onTogglePinned(m.id) : undefined),
         toolResults: m.tool_calls ? toolResultsMap : undefined,
-        onSuggestedReply: readonly ? undefined : (isLastAi ? onSuggestedReply : undefined),
-        onGenerateSuggestions: readonly ? undefined : (isLastAi && m.content && onGenerateSuggestions ? onGenerateSuggestions(m.content) : undefined),
         tokenStats: tokenStatsMap?.get(m.id),
       })
     );

@@ -15,11 +15,6 @@
 ### 1.1 核心工具列表 (`TOOLS`)
 
 **基础工具**（始终可用）：
-- `searchBlocksByTag` - 按标签搜索笔记
-- `searchBlocksByText` - 全文搜索
-- `query_blocks_by_tag` - 标签属性查询
-- `query_blocks` - 高级查询（支持复杂条件）
-- `searchBlocksByReference` - 反链搜索
 - `getPage` - 读取页面内容
 - `getBlockMeta` - 获取块元数据
 - `getBlockLinks` - 获取块的链接关系
@@ -49,10 +44,6 @@
 
 **Todoist 工具** (`enableTodoistTools`)：
 - Todoist 任务管理工具（从 `todoist-tools.ts` 加载）
-
-**Skill 工具** (旧版本已移除)：
-- ⚠️ 当前回档版本不支持 Skill 工具
-- 兼容性导出函数返回空数组
 
 ---
 
@@ -155,26 +146,7 @@ try {
 
 ### 3.3 工具执行分支
 
-#### 分支 A：Skill 工具（`toolName.startsWith("skill_")`）
-
-```typescript
-const resolvedSkillId = await resolveSkillIdFromToolName(toolName);
-const skill = await getSkill(resolvedSkillId.id, resolvedSkillId.isGlobal);
-
-// 用户确认
-const userApproved = await createToolConfirmPromise(
-  `skill: ${skill.metadata.name}`,
-  { skillId: resolvedSkillId.id, input: args.input }
-);
-
-// 加载详细指令
-const instructions = await getSkillInstructionsAsync(resolvedSkillId);
-result = `${instructions}\n\n## 用户输入\n${userInput}`;
-```
-
-**⚠️ 当前状态**：由于回档，Skill 相关函数返回 `null`，此分支实际不可用。
-
-#### 分支 B：需要确认的工具 (`shouldAskForTool(toolName) = true`)
+#### 分支 A：需要确认的工具 (`shouldAskForTool(toolName) = true`)
 
 ```typescript
 const needsConfirm = shouldAskForTool(toolName);
@@ -191,7 +163,7 @@ if (needsConfirm) {
 - `ask` - 每次执行前询问用户
 - `disabled` - 禁用，不加载到工具列表
 
-#### 分支 C：普通工具（自动执行）
+#### 分支 B：普通工具（自动执行）
 
 ```typescript
 // 区分 Todoist 工具和普通工具
@@ -211,11 +183,7 @@ result = await Promise.race([
 ```typescript
 // ai-tools.ts 行 1691+
 export async function executeTool(toolName: string, args: any): Promise<string> {
-  if (toolName === "searchBlocksByTag") {
-    // 调用 search-service.ts
-    const results = await searchBlocksByTag(tagQuery, limit);
-    return formatBlockResult(results);
-  }
+  if (toolName === "webSearch") {
   else if (toolName === "webSearch") {
     // 调用 web-search-service.ts
     const response = await searchWithFallback(query, instances, maxResults);
@@ -247,18 +215,7 @@ toolResultMessages.push({
 });
 ```
 
-### 4.2 特殊结果处理
-
-**日记导出** (直接渲染，跳过 AI 处理)：
-```typescript
-if (result.includes("```journal-export")) {
-  // 直接显示结果，不再调用 AI
-  setMessages((prev) => [...prev, ...toolResultMessages]);
-  break; // 结束工具循环
-}
-```
-
-### 4.3 搜索结果聚合
+### 4.2 搜索结果聚合
 
 ```typescript
 // 从工具结果中提取搜索结果
@@ -295,55 +252,12 @@ while (roundCount < MAX_ROUNDS) {
 - AI 不再返回 Tool Calls
 - 达到最大轮数 (`MAX_ROUNDS = 5`)
 - 用户拒绝工具执行
-- 遇到直接渲染的结果（如日记导出）
-
-### 5.2 工具链示例
-
-```
-用户: "搜索关于AI的笔记，并总结第一条"
-  ↓
-Round 1: searchBlocksByText("AI") → 返回3条笔记
-  ↓
-Round 2: getBlocksText(blockId: 12345) → 返回详细内容
-  ↓
-AI 总结内容并返回最终回复
-```
 
 ---
 
-## 6. Agentic RAG 模式（深度检索）
+## 6. 工具状态管理 (`tool-store.ts`)
 
-### 6.1 触发条件
-
-```typescript
-if (isAgenticRAGEnabled() && includeTools && !hasHighPriorityContext) {
-  // 启用 Agentic RAG
-}
-```
-
-### 6.2 工作流程
-
-```
-用户查询
-  ↓
-RAG 规划器（LLM）生成检索计划
-  ↓
-多轮迭代执行检索工具（笔记搜索 + 联网搜索）
-  ↓
-反思评估（可选）：结果是否充分？
-  ↓
-最终答案生成
-```
-
-**配置**：
-- `maxIterations`: 最大迭代次数（默认 5）
-- `enableReflection`: 是否启用反思机制（默认 true）
-
----
-
-## 7. 工具状态管理 (`tool-store.ts`)
-
-### 7.1 工具开关
+### 6.1 工具开关
 
 ```typescript
 // 全局开关
@@ -352,21 +266,18 @@ toolStore.imageSearchEnabled    // 图片搜索
 toolStore.wikipediaEnabled      // Wikipedia
 toolStore.currencyEnabled       // 汇率查询
 toolStore.scriptAnalysisEnabled // 脚本分析
-toolStore.agenticRAGEnabled     // Agentic RAG
 
 // 工具级别状态
 toolStore.toolStatus = {
-  "searchNotes": "auto",     // 自动执行
   "createBlock": "ask",      // 询问确认
   "webSearch": "disabled",   // 禁用
 }
 ```
 
-### 7.2 工具分类
+### 6.2 工具分类
 
 ```typescript
 TOOL_CATEGORIES = [
-  { name: "search", label: "搜索", tools: ["searchNotes", "queryByTagProperty", ...] },
   { name: "read",   label: "读取", tools: ["getPage", "getBlocksText", ...] },
   { name: "journal", label: "日记", tools: ["getTodayJournal", ...] },
   { name: "write",  label: "写入", tools: ["createBlock", "createPage", ...] },
@@ -376,20 +287,9 @@ TOOL_CATEGORIES = [
 
 ---
 
-## 8. 已知限制与兼容性问题
+## 7. 已知限制与兼容性问题
 
-### 8.1 Skill 工具（已禁用）
-
-由于回档到旧版本，以下函数返回空值：
-- `getSkillToolsAsync()` → 返回 `[]`
-- `getSkillInstructionsAsync()` → 返回 `null`
-- `resolveSkillIdFromToolName()` → 返回 `null`
-
-**影响**：
-- `AiChatPanel.tsx` 中的 Skill 工具调用分支不可用
-- 不会加载任何 Skill 工具
-
-### 8.2 智能工具检测（已降级）
+### 7.1 智能工具检测（已降级）
 
 - `detectToolCategories()` → 始终返回所有类别
 - `getToolsByCategories()` → 等同于 `getTools()`
@@ -398,7 +298,7 @@ TOOL_CATEGORIES = [
 - 所有对话都会加载全部工具（性能略有下降）
 - 失去智能工具过滤能力
 
-### 8.3 Tool-Prompt 系统（已移除）
+### 7.2 Tool-Prompt 系统（已移除）
 
 - ✅ 已移除 `tool-prompt-loader.ts` 和 `tool-prompt-defaults.ts`
 - ✅ 已从 `main.ts` 中移除 `initToolPrompts()` 调用
@@ -410,21 +310,21 @@ TOOL_CATEGORIES = [
 
 ---
 
-## 9. 调试要点
+## 8. 调试要点
 
-### 9.1 工具加载日志
+### 8.1 工具加载日志
 
 ```typescript
 console.log(`[AiChatPanel] 智能工具加载: ${filteredTools.length} 个工具`);
 ```
 
-### 9.2 工具执行日志
+### 8.2 工具执行日志
 
 查看浏览器控制台：
 - JSON 修复警告：`[Tool Call] Repaired malformed JSON`
 - 工具超时错误：`Tool execution timed out after 60s`
 
-### 9.3 常见问题
+### 8.3 常见问题
 
 **问题 1**：工具未被调用
 - 检查 `modelSupportsTools()` - 模型是否支持 Function Calling
@@ -440,7 +340,7 @@ console.log(`[AiChatPanel] 智能工具加载: ${filteredTools.length} 个工具
 
 ---
 
-## 10. 文件关系图
+## 9. 文件关系图
 
 ```
 AiChatPanel.tsx (用户交互)
@@ -448,7 +348,6 @@ AiChatPanel.tsx (用户交互)
 ai-tools.ts (工具定义与执行)
      ↓
 ┌────────────────────────────────────┐
-│ search-service.ts (笔记搜索)        │
 │ web-search-service.ts (联网搜索)    │
 │ script-analysis-tool.ts (脚本分析)  │
 │ todoist-tools.ts (Todoist 工具)    │

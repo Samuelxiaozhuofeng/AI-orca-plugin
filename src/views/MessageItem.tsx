@@ -14,7 +14,6 @@
 import MarkdownMessage from "../components/MarkdownMessage";
 import EnhancedMarkdownMessage from "../components/EnhancedMarkdownMessage";
 import ToolStatusIndicator from "../components/ToolStatusIndicator";
-import SuggestedReplies from "../components/SuggestedReplies";
 import { getFileDisplayUrl, getFileIcon, getFileFullPath } from "../services/file-service";
 import { saveSingleMessageToJournal } from "../services/export-service";
 import {
@@ -758,14 +757,7 @@ interface MessageItemProps {
   onTogglePinned?: () => void; // 切换消息的重要标记
   // Tool result mapping: toolCallId -> result content
   toolResults?: Map<string, { content: string; name: string }>;
-  // Callback when user clicks a suggested reply
-  onSuggestedReply?: (text: string) => void;
-  // Callback to generate AI-powered suggestions
-  onGenerateSuggestions?: () => Promise<string[]>;
-  // Skill confirm actions (inline)
-  onSkillConfirmAction?: (messageId: string, approved: boolean) => void;
-  // Skill draft actions (save/discard)
-  onSkillDraftAction?: (messageId: string, action: "save" | "discard") => void;
+
   // Token statistics for this message
   tokenStats?: {
     messageTokens: number;      // 当前消息的 token 数
@@ -1110,10 +1102,6 @@ export default function MessageItem({
   onRollback,
   onTogglePinned,
   toolResults,
-  onSuggestedReply,
-  onGenerateSuggestions,
-  onSkillConfirmAction,
-  onSkillDraftAction,
   tokenStats,
   // Branch management
   onCreateBranch,
@@ -1129,52 +1117,12 @@ export default function MessageItem({
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
   const isPinned = (message as any).pinned === true;
-  const skillConfirm = message.skillConfirm;
-  const skillDraft = message.skillDraft;
-
-  const handleSkillConfirm = useCallback(
-    (approved: boolean) => {
-      if (onSkillConfirmAction) {
-        onSkillConfirmAction(message.id, approved);
-      }
-    },
-    [message.id, onSkillConfirmAction]
-  );
-
-  const handleSkillDraft = useCallback(
-    (action: "save" | "discard") => {
-      if (onSkillDraftAction) {
-        onSkillDraftAction(message.id, action);
-      }
-    },
-    [message.id, onSkillDraftAction]
-  );
-
   // Display settings from store
   const displaySettings = useSnapshot(displaySettingsStore);
   const showTimestamp = shouldRenderTimestamp(displaySettings.showTimestamps);
 
   // Keep action bar visible when dropdown is open
   const showActionBar = isHovered;
-
-  const skillDraftStatusLabel = useMemo(() => {
-    switch (skillDraft?.status) {
-      case "generating":
-        return "生成中";
-      case "saving":
-        return "保存中";
-      case "draft":
-        return "待确认";
-      case "saved":
-        return "已保存";
-      case "discarded":
-        return "已放弃";
-      case "error":
-        return "保存失败";
-      default:
-        return "";
-    }
-  }, [skillDraft?.status]);
 
   const handleCopy = useCallback(() => {
     if (message.content) {
@@ -1590,243 +1538,8 @@ export default function MessageItem({
         ))
       ),
 
-      // Skill Confirm (inline)
-      skillConfirm &&
-        createElement(
-          "div",
-          {
-            style: {
-              padding: "12px 16px",
-              background: "var(--orca-color-bg-2)",
-              borderRadius: 8,
-              border: "1px solid var(--orca-color-warning, #ffc107)",
-              marginBottom: 8,
-            },
-          },
-          createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 8,
-                color: "var(--orca-color-warning, #ffc107)",
-                fontWeight: 500,
-                fontSize: 13,
-              },
-            },
-            createElement("i", { className: "ti ti-alert-triangle", style: { fontSize: 16 } }),
-            `AI 请求执行技能: ${skillConfirm.skillName}`
-          ),
-          createElement(
-            "pre",
-            {
-              style: {
-                margin: "8px 0",
-                padding: 8,
-                background: "var(--orca-color-bg-1)",
-                borderRadius: 4,
-                fontSize: 11,
-                fontFamily: "monospace",
-                color: "var(--orca-color-text-2)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-all",
-                maxHeight: 120,
-                overflow: "auto",
-              },
-            },
-            skillConfirm.steps.join("\n")
-          ),
-          skillConfirm.status === "pending"
-            ? createElement(
-                "div",
-                {
-                  style: {
-                    display: "flex",
-                    gap: 8,
-                    justifyContent: "flex-end",
-                    marginTop: 8,
-                  },
-                },
-                createElement(
-                  "button",
-                  {
-                    onClick: () => handleSkillConfirm(false),
-                    style: {
-                      padding: "6px 12px",
-                      borderRadius: 4,
-                      border: "1px solid var(--orca-color-border)",
-                      background: "var(--orca-color-bg-1)",
-                      color: "var(--orca-color-text-2)",
-                      cursor: "pointer",
-                      fontSize: 12,
-                    },
-                  },
-                  "拒绝"
-                ),
-                createElement(
-                  "button",
-                  {
-                    onClick: () => handleSkillConfirm(true),
-                    style: {
-                      padding: "6px 12px",
-                      borderRadius: 4,
-                      border: "1px solid var(--orca-color-border)",
-                      background: "var(--orca-color-bg-3)",
-                      color: "var(--orca-color-text-1)",
-                      cursor: "pointer",
-                      fontSize: 12,
-                    },
-                  },
-                  "允许"
-                )
-              )
-            : createElement(
-                "div",
-                {
-                  style: {
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    marginTop: 8,
-                    fontSize: 12,
-                    color:
-                      skillConfirm.status === "approved"
-                        ? "var(--orca-color-success)"
-                        : "var(--orca-color-danger)",
-                  },
-                },
-                skillConfirm.status === "approved" ? "已允许" : "已拒绝"
-              )
-        ),
-
-      // Skill Draft (inline)
-      skillDraft &&
-        createElement(
-          "div",
-          {
-            style: {
-              padding: "12px 16px",
-              background: "var(--orca-color-bg-2)",
-              borderRadius: 8,
-              border: "1px solid var(--orca-color-border)",
-              marginBottom: 8,
-            },
-          },
-          createElement(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: 8,
-                fontWeight: 500,
-                fontSize: 13,
-                color: "var(--orca-color-text-1)",
-              },
-            },
-            createElement(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: 8 } },
-              createElement("i", { className: "ti ti-wand", style: { fontSize: 16 } }),
-              "技能草稿"
-            ),
-            skillDraftStatusLabel &&
-              createElement(
-                "span",
-                {
-                  style: {
-                    fontSize: 11,
-                    padding: "2px 6px",
-                    borderRadius: 10,
-                    background: "var(--orca-color-bg-1)",
-                    color: "var(--orca-color-text-3)",
-                  },
-                },
-                skillDraftStatusLabel
-              )
-          ),
-          createElement(
-            "pre",
-            {
-              style: {
-                margin: "8px 0",
-                padding: 8,
-                background: "var(--orca-color-bg-1)",
-                borderRadius: 4,
-                fontSize: 11,
-                fontFamily: "monospace",
-                color: "var(--orca-color-text-2)",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-                maxHeight: 260,
-                overflow: "auto",
-              },
-            },
-            message.content || ""
-          ),
-          skillDraft.error &&
-            createElement(
-              "div",
-              { style: { color: "var(--orca-color-danger)", fontSize: 12, marginTop: 6 } },
-              skillDraft.error
-            ),
-          skillDraft.status === "saved" &&
-            createElement(
-              "div",
-              { style: { color: "var(--orca-color-success)", fontSize: 12, marginTop: 6 } },
-              skillDraft.folderName ? `已保存：${skillDraft.folderName}` : "已保存"
-            ),
-          (skillDraft.status === "draft" || skillDraft.status === "error") &&
-            createElement(
-              "div",
-              {
-                style: {
-                  display: "flex",
-                  gap: 8,
-                  justifyContent: "flex-end",
-                  marginTop: 8,
-                },
-              },
-              createElement(
-                "button",
-                {
-                  onClick: () => handleSkillDraft("discard"),
-                  style: {
-                    padding: "6px 12px",
-                    borderRadius: 4,
-                    border: "1px solid var(--orca-color-border)",
-                    background: "var(--orca-color-bg-1)",
-                    color: "var(--orca-color-text-2)",
-                    cursor: "pointer",
-                    fontSize: 12,
-                  },
-                },
-                "放弃"
-              ),
-              createElement(
-                "button",
-                {
-                  onClick: () => handleSkillDraft("save"),
-                  style: {
-                    padding: "6px 12px",
-                    borderRadius: 4,
-                    border: "1px solid var(--orca-color-border)",
-                    background: "var(--orca-color-bg-3)",
-                    color: "var(--orca-color-text-1)",
-                    cursor: "pointer",
-                    fontSize: 12,
-                  },
-                },
-                "保存"
-              )
-            )
-        ),
-
       // Content - 使用增强版Markdown组件支持图片和引用
-      !skillDraft &&
-        createElement(EnhancedMarkdownMessage, { 
+      createElement(EnhancedMarkdownMessage, { 
           content: message.content || "", 
           role: message.role,
           autoParseEnhancements: true,
@@ -1875,18 +1588,6 @@ export default function MessageItem({
           toolCalls: message.tool_calls,
           toolResults,
           isStreaming,
-        }),
-
-      // Suggested Replies (only for last AI message, after streaming completes)
-      isAssistant &&
-        isLastAiMessage &&
-        !isStreaming &&
-        message.content &&
-        onSuggestedReply &&
-        onGenerateSuggestions &&
-        createElement(SuggestedReplies, {
-          onReplyClick: onSuggestedReply,
-          onGenerate: onGenerateSuggestions,
         }),
 
       // Branch Indicator (显示该消息的分支)

@@ -11,10 +11,8 @@
 - [状态管理](#状态管理)
 - [UI组件](#ui组件)
 - [工具系统](#工具系统)
-- [技能系统](#技能系统)
 - [文件处理](#文件处理)
 - [多模型支持](#多模型支持)
-- [记忆管理](#记忆管理)
 - [数据流](#数据流)
 - [开发指南](#开发指南)
 
@@ -28,9 +26,7 @@
 
 - 🤖 **多模型支持** - OpenAI、Anthropic Claude、Google Gemini、本地 Ollama 等
 - 🔧 **丰富的 AI 工具** - 23+ 内置工具，支持搜索、创建、更新笔记
-- 🎯 **技能系统** - 用户自定义可复用的 AI 行为模式
 - 💾 **会话管理** - 支持分支、收藏、导出、历史记录
-- 🧠 **记忆系统** - 用户画像生成、长期记忆管理
 - 📁 **多文件支持** - PDF、Word、Excel、图片、视频处理
 - 🌐 **联网搜索** - 集成 Web 搜索、Wikipedia、货币转换
 - 🔄 **流式输出** - SSE 实时流式响应
@@ -83,8 +79,6 @@ AI-orca-plugin/
 │   │   ├── ChatInput.tsx         # 聊天输入框
 │   │   ├── MessageItem.tsx       # 消息项渲染
 │   │   ├── ContextPicker.tsx     # 上下文选择器
-│   │   ├── MemoryManager.tsx     # 记忆管理界面
-│   │   ├── SkillManagerModal.tsx # 技能管理器
 │   │   └── ...                   # 其他 UI 组件
 │   │
 │   ├── components/               # 可复用组件
@@ -96,17 +90,13 @@ AI-orca-plugin/
 │   │   ├── openai-client.ts      # OpenAI API 客户端
 │   │   ├── chat-stream-handler.ts # 流式响应处理
 │   │   ├── ai-tools.ts           # AI 工具定义
-│   │   ├── search-service.ts     # 搜索服务
 │   │   ├── session-service.ts    # 会话管理
-│   │   ├── memory-extraction.ts  # 记忆提取
-│   │   ├── skills-manager.ts     # 技能管理
 │   │   ├── file-service.ts       # 文件处理
 │   │   └── ...                   # 40+ 服务文件
 │   │
 │   ├── store/                    # 状态管理（Valtio）
 │   │   ├── context-store.ts      # 上下文状态
 │   │   ├── session-store.ts      # 会话状态
-│   │   ├── memory-store.ts       # 记忆状态
 │   │   ├── tool-store.ts         # 工具状态
 │   │   ├── ui-store.ts           # UI 状态
 │   │   └── ...
@@ -115,7 +105,6 @@ AI-orca-plugin/
 │   │   └── ai-chat-settings.ts   # 设置模式定义
 │   │
 │   ├── utils/                    # 工具函数
-│   │   ├── query-builder.ts      # 查询构建器
 │   │   ├── markdown-renderer.ts  # Markdown 解析
 │   │   ├── token-utils.ts        # Token 计算
 │   │   └── ...
@@ -155,20 +144,12 @@ export async function load(pluginName: string) {
   registerAiChatUI(pluginName);
   registerAiChatRenderer();
   
-  // 4. 加载记忆存储
-  await loadMemoryStore();
-  
-  // 5. 加载视觉模型配置
+  // 4. 加载视觉模型配置
   await loadVisionModelConfig(pluginName);
   
-  // 6. 初始化内置技能
-  await ensureBuiltInSkills();
-  
-  // 7. 初始化命令目录
+  // 5. 初始化命令目录
   await initCommands();
   
-  // 8. 挂载 Plugin API
-  (window as any).AiChatPluginAPI = AiChatPluginAPI;
 }
 
 export async function unload() {
@@ -235,7 +216,6 @@ export default function MyComponent({ prop }: Props) {
 - **工具调用** - AI 自动调用 23+ 工具
 - **文件上传** - 支持图片、PDF、Word、Excel、视频
 - **分支管理** - 对话分支切换
-- **建议回复** - 智能生成建议
 - **代码执行** - Python/JavaScript 代码解释器
 
 **核心流程**：
@@ -285,51 +265,12 @@ export async function buildContextForSend(
   - messages: [...] (压缩存储)
 ```
 
-### 4. 记忆系统
-
-**用户画像**：
-- 自动从对话中提取用户信息
-- 生成标签（兴趣、技能、偏好）
-- 分类整理（工作、生活、学习等）
-
-**记忆提取流程**：
-```
-对话内容 → AI 分析 → 提取关键信息 
-→ 生成画像 → 持久化存储 → 后续对话使用
-```
-
-### 5. 技能系统
-
-**技能类型**：
-
-1. **Prompt 型** - 追加系统提示词
-   ```
-   #skill 翻译助手
-     - 类型: prompt
-     - 提示词: 你是专业翻译助手...
-     - 变量: 目标语言
-   ```
-
-2. **Tools 型** - 限制可用工具
-   ```
-   #skill 任务管理
-     - 类型: tools
-     - 工具: searchTasks, createBlock
-     - 提示词: 专注任务管理...
-   ```
-
-**使用方式**：
-- 输入 `/` 触发技能选择器
-- 选择后显示为芯片
-- 点击 X 取消激活
-
-### 6. 工具系统
+### 4. 工具系统
 
 **内置工具（23个）**：
 
 | 类别 | 工具 |
 |---|---|
-| 搜索 | searchNotes, searchBlocksByTag, searchBlocksByReference, queryBlocks |
 | 读取 | getBlockLinks, getBlockMeta, getBlocksText, getPage |
 | 日记 | getTodayJournal, getJournalByDate, getJournals |
 | 写入 | createBlock, createPage, insertTag, updateTagProperties |
@@ -343,10 +284,9 @@ export async function buildContextForSend(
 - `disabled` - 临时禁用
 
 **动态工具**：
-- **Skills** - 用户自定义技能工具
 - **Code Interpreter** - 代码执行
 
-### 7. 多模型支持
+### 5. 多模型支持
 
 **支持的提供商**：
 - OpenAI (GPT-4, GPT-4 Turbo, GPT-4o, o1, o3)
@@ -360,7 +300,7 @@ export async function buildContextForSend(
 - 并行显示响应
 - 对比不同模型的回答质量
 
-### 8. 文件处理
+### 6. 文件处理
 
 **支持的文件类型**：
 
@@ -405,39 +345,12 @@ OpenAI API 客户端，支持：
 - 工具执行逻辑
 - 结果格式化
 
-#### search-service.ts
-搜索服务：
-- 文本搜索（全文索引）
-- 标签搜索
-- 属性过滤
-- 高级查询（AND/OR 组合）
-- 重排序（reranking）
-
 #### session-service.ts
 会话持久化：
 - 会话创建和更新
 - 自动压缩大会话
 - 会话列表管理
 - 导出功能
-
-#### memory-extraction.ts
-记忆提取：
-- 从对话提取关键信息
-- 识别用户特征
-- 生成结构化数据
-
-#### portrait-generation.ts
-用户画像生成：
-- 标签生成（兴趣、技能）
-- 分类整理（工作、生活）
-- 增量更新
-
-#### skills-manager.ts
-技能管理：
-- 扫描 `#skill` 标签块
-- 解析技能定义
-- 验证技能配置
-- 提供技能列表
 
 #### file-service.ts
 文件处理：
@@ -462,12 +375,9 @@ OpenAI API 客户端，支持：
 
 - **context-builder.ts** - 上下文文本构建
 - **message-builder.ts** - OpenAI 消息格式构建
-- **query-builder.ts** - 查询 DSL 构建
 - **citation-service.ts** - 引用管理
 - **export-service.ts** - 会话导出
-- **suggestion-service.ts** - 建议回复生成
 - **branch-service.ts** - 会话分支管理
-- **reranking-service.ts** - 搜索结果重排序
 - **web-search-service.ts** - 网页搜索
 - **utility-tools.ts** - Wikipedia、货币转换等
 
@@ -496,22 +406,11 @@ OpenAI API 客户端，支持：
 }
 ```
 
-### memoryStore
-```typescript
-{
-  users: Map<userId, UserInfo>,
-  activeUserId: string,
-  memories: Memory[],
-  portrait: UserPortrait,
-}
-```
-
 ### toolStore
 ```typescript
 {
   toolStatus: Map<toolName, Status>,
   webSearchEnabled: boolean,
-  agenticRAGEnabled: boolean,
   // ...其他工具开关
 }
 ```
@@ -543,7 +442,7 @@ OpenAI API 客户端，支持：
 智能输入框：
 - 多行输入
 - 文件拖拽上传
-- 技能触发（/）
+- 斜杠命令（/）
 - 快捷键支持
 
 #### MessageItem.tsx
@@ -562,21 +461,6 @@ OpenAI API 客户端，支持：
 - 时间线
 - 对比视图
 - 图片画廊
-
-#### MemoryManager.tsx
-记忆管理界面：
-- 用户列表
-- 记忆卡片
-- 画像展示
-- 标签管理
-- 分类编辑
-
-#### SkillManagerModal.tsx
-技能管理器：
-- 技能列表
-- 创建/编辑
-- 启用/禁用
-- 导入/导出
 
 ---
 
@@ -616,12 +500,6 @@ AI 决定调用工具 → 解析工具调用
 
 ### 工具分类
 
-**搜索类**：
-- `searchNotes` - 全文搜索
-- `searchBlocksByTag` - 标签搜索
-- `searchBlocksByReference` - 引用搜索
-- `queryBlocks` - 高级查询
-
 **读取类**：
 - `getBlockLinks` - 获取块的链接
 - `getBlockMeta` - 获取块元数据
@@ -644,54 +522,6 @@ AI 决定调用工具 → 解析工具调用
 - `imageSearch` - 图片搜索
 - `wikipedia` - Wikipedia 查询
 - `currency` - 货币转换
-
----
-
-## 技能系统
-
-### 技能定义
-
-技能存储为带 `#skill` 标签的块：
-
-```
-#skill 翻译助手
-  - 类型: prompt
-  - 描述: 专业翻译助手
-  - 提示词: 你是一位专业翻译，请将内容翻译为{目标语言}
-  - 变量: 目标语言
-```
-
-### 技能解析
-
-```typescript
-// src/services/skills-manager.ts
-export async function loadSkills(): Promise<Skill[]> {
-  // 1. 搜索 #skill 标签
-  const results = await searchBlocksByTag("skill");
-  
-  // 2. 解析每个技能块
-  const skills = results.map(parseSkillBlock);
-  
-  // 3. 验证技能配置
-  return skills.filter(validateSkill);
-}
-```
-
-### 技能应用
-
-**Prompt 型**：
-```typescript
-// 追加到系统提示词
-systemPrompt += `\n\n${skill.prompt}`;
-```
-
-**Tools 型**：
-```typescript
-// 过滤工具列表
-const allowedTools = allTools.filter(
-  tool => skill.tools.includes(tool.function.name)
-);
-```
 
 ---
 
@@ -782,54 +612,6 @@ export async function streamMultiModelChat(
 
 ---
 
-## 记忆管理
-
-### 记忆提取
-
-```typescript
-// src/services/memory-extraction.ts
-export async function extractMemory(
-  messages: Message[]
-): Promise<Memory[]> {
-  // 1. 识别对话中的用户信息
-  const userInfo = await analyzeConversation(messages);
-  
-  // 2. 提取关键事实
-  const facts = extractFacts(userInfo);
-  
-  // 3. 生成记忆对象
-  return facts.map(fact => ({
-    id: generateId(),
-    type: fact.type,
-    content: fact.content,
-    timestamp: Date.now(),
-    confidence: fact.confidence
-  }));
-}
-```
-
-### 用户画像生成
-
-```typescript
-// src/services/portrait-generation.ts
-export async function generatePortrait(
-  memories: Memory[]
-): Promise<UserPortrait> {
-  // 1. 聚合记忆信息
-  const aggregated = aggregateMemories(memories);
-  
-  // 2. 生成标签
-  const tags = await generateTags(aggregated);
-  
-  // 3. 生成分类
-  const categories = await generateCategories(aggregated);
-  
-  return { tags, categories };
-}
-```
-
----
-
 ## 数据流
 
 ### 聊天流程
@@ -850,8 +632,6 @@ export async function generatePortrait(
 生成最终回复
   ↓
 保存会话
-  ↓
-提取记忆（可选）
 ```
 
 ### 工具调用流程
@@ -1021,9 +801,9 @@ createElement(MyComponent, { prop: "value" })
 **Orca AI Chat Plugin** 是一个功能丰富、架构清晰的 AI 增强插件，核心特点：
 
 ✅ **模块化设计** - 清晰的服务层、状态管理、UI 组件分离  
-✅ **可扩展性强** - 易于添加新工具、技能、模型支持  
-✅ **用户体验好** - 流式输出、智能建议、多文件支持  
-✅ **功能完善** - 搜索、创建、记忆、技能、多模型等  
+✅ **可扩展性强** - 易于添加新工具、模型支持  
+✅ **用户体验好** - 流式输出、多文件支持  
+✅ **功能完善** - 创建、多模型等  
 ✅ **类型安全** - 全面的 TypeScript 类型定义  
 
 适合作为构建智能笔记助手的参考项目。

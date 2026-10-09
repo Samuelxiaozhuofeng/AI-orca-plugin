@@ -40,24 +40,9 @@ const DRAGGED_CONTEXT_SECTION = `## 上下文优先
 - 如果用户只拖入上下文但没有额外问题，请主动总结、分析或回答这些上下文，而不是说没有收到内容
 - 不需要再搜索笔记库，除非用户明确要求补充检索`;
 
-export interface SkillPromptInfo {
-  name: string;
-  description: string;
-  instruction: string;
-}
-
-/** 自动激活的技能信息 */
-export interface AutoActivatedSkill {
-  name: string;
-  instruction: string;
-}
-
 export interface PromptOptions {
   hasMcpTools?: boolean;
   hasDraggedContext?: boolean;
-  skills?: SkillPromptInfo[];
-  /** 自动激活的技能（高置信度匹配时自动注入指令） */
-  autoActivatedSkill?: AutoActivatedSkill;
   repoId?: string;
 }
 
@@ -74,16 +59,6 @@ export function buildDynamicSystemPrompt(options: PromptOptions = {}): string {
   // 引用格式
   sections.push(CITATION_SECTION);
 
-  // 自动激活的技能（高置信度匹配，强制注入完整指令）
-  if (options.autoActivatedSkill) {
-    sections.push(buildAutoActivatedSkillSection(options.autoActivatedSkill));
-  }
-
-  // 可用技能（注入到系统提示词，AI 自动识别并按需遵循）
-  if (options.skills && options.skills.length > 0) {
-    sections.push(buildSkillsSection(options.skills));
-  }
-
   // Technical Notes（动态值，如 repoId）
   if (options.repoId) {
     sections.push(buildTechnicalNotes(options.repoId));
@@ -97,74 +72,11 @@ export function buildDynamicSystemPrompt(options: PromptOptions = {}): string {
   return sections.join("\n\n");
 }
 
-function buildAutoActivatedSkillSection(skill: AutoActivatedSkill): string {
-  return `## 🔔 已自动激活技能: ${skill.name}
-
-系统已根据你的请求自动匹配并激活了此技能。你必须严格遵循以下指令来完成任务：
-
-${skill.instruction}`;
-}
-
-function buildSkillsSection(skills: SkillPromptInfo[]): string {
-  const header = `## 可用技能 (Skills)
-以下是已启用的专业技能。当用户请求与某个技能描述高度匹配时，你**必须**在函数列表中查找并调用对应的 \`skill_*\` 工具。
-
-【关键规则】
-- 识别到匹配技能后，立即调用对应的 skill 工具
-- 调用工具后，严格按返回的完整指令执行任务
-- 技能工具名称格式为 \`skill_<技能ID>\`，可在可用函数列表中查找
-
-可用技能列表：
-
-`;
-  return [header, ...skillListItems(skills)].join("\n");
-}
-
-/** 每个技能一行：名称、描述、指令前 5 行要点 */
-function skillListItems(skills: SkillPromptInfo[]): string[] {
-  const parts: string[] = [];
-
-  for (const skill of skills) {
-    // 只取指令的前 5 行核心要点，避免 token 浪费
-    const instructionLines = skill.instruction.split("\n");
-    const keyPoints: string[] = [];
-    for (const line of instructionLines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---")) continue;
-      keyPoints.push(trimmed);
-      if (keyPoints.length >= 5) break;
-    }
-
-    parts.push(`- **${skill.name}**：${skill.description}
-  核心要求：${keyPoints.join("；")}`);
-  }
-
-  return parts;
-}
-
-/**
- * 本机 AI（Claude Code）用的个人设定：自动激活技能 + 已启用技能 + 本条格式要求。
- * 不含插件工具调用说明（Claude Code 用自己的工具）；技能的写法与直连 API 的系统提示词一致。
- */
+/** 本机 AI（Claude Code）用的个人设定：只有本条格式要求；不含插件工具调用说明。 */
 export function buildLocalCliInstructions(options: {
-  skills?: SkillPromptInfo[];
-  autoActivatedSkill?: AutoActivatedSkill;
   formatSuffix?: string;
 }): string {
-  const sections: string[] = [];
-  if (options.autoActivatedSkill) {
-    sections.push(buildAutoActivatedSkillSection(options.autoActivatedSkill));
-  }
-  if (options.skills && options.skills.length > 0) {
-    sections.push(`## 可用技能 (Skills)
-以下是已启用的专业技能。当用户请求与某个技能描述高度匹配时，按该技能的要求完成任务。
-
-可用技能列表：
-
-${skillListItems(options.skills).join("\n")}`);
-  }
-  if (options.formatSuffix?.trim()) sections.push(options.formatSuffix.trim());
-  return sections.join("\n\n");
+  return options.formatSuffix?.trim() ?? "";
 }
 
 function buildTechnicalNotes(repoId: string): string {
