@@ -25,7 +25,7 @@ export type LocalCliConfirm = (
 export interface LocalCliContext {
   /** 插件对话 id，用于续接 claude 会话 */
   conversationId: string;
-  /** 本次发出时的可见历史（含最新一条用户消息），用于判断能否续接 claude 会话 */
+  /** 本次发出时的可见历史（末条为新用户消息），其前的 id 序列须与上轮结束时记下的一致才续接 */
   history: Array<{ id: string; role: string }>;
   /** 用户拖入的笔记/页面等上下文；每轮都拼进 prompt（含续接时） */
   contextText?: string;
@@ -36,13 +36,28 @@ export interface LocalCliContext {
 export interface LocalCliStreamOptions {
   apiUrl: string;
   apiKey: string;
+  /** 所选模型 id，随 /chat 发给 bridge（claude = 用 Claude Code 默认） */
+  model?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   localCli: LocalCliContext;
 }
 
-/** 插件对话 id → claude sessionId + 历史指纹（仅内存，插件重载后丢失，届时用压缩历史重来） */
-const claudeSessions = new Map<string, { id: string; fingerprint: string }>();
+/**
+ * 插件对话 id → claude sessionId + 本轮结束后的可见消息 id 序列（仅内存，插件重载后丢失，届时用压缩历史重来）。
+ * fingerprint 为 null = 本轮还没结束（或被中途作废），下次一律不续接。
+ */
+const claudeSessions = new Map<string, { id: string; fingerprint: string | null }>();
+
+function idSequence(list: Array<{ id: string; localOnly?: boolean }>): string {
+  return list.filter((m) => !m.localOnly).map((m) => m.id).join(",");
+}
+
+/** 本轮结束（含出错、中止）后由界面调用：记下此刻全部可见消息的 id 序列，下次发送据此判断能否续接 */
+export function finishLocalCliRound(conversationId: string, visible: Array<{ id: string; localOnly?: boolean }>): void {
+  const saved = claudeSessions.get(conversationId);
+  if (saved && saved.fingerprint === null) saved.fingerprint = idSequence(visible);
+}
 
 class BridgeError extends Error {
   constructor(message: string, readonly retryable = false) {
@@ -88,17 +103,16 @@ function lastUserIndex(list: Array<{ role: string }>): number {
   return -1;
 }
 
-/** 截至最后一条用户消息的 id 序列（其后的助手回复不计，它们由 claude 会话自己产生） */
-function upToLastUser(list: Array<{ id: string; role: string }>): string {
-  return list.slice(0, lastUserIndex(list) + 1).map((m) => m.id).join(",");
+/** 新用户消息之前的可见消息 id 序列（回档、删/换助手回复、切分支后与上轮记下的对不上） */
+export function priorFingerprint(history: Array<{ id: string; role: string }>): string {
+  return idSequence(history.slice(0, Math.max(lastUserIndex(history), 0)));
 }
 
-/**
- * 续接指纹。current：本轮发出后 claude 会话里对应的可见历史，随 sessionId 记下；
- * prior：本轮之前的可见历史，须与上次记下的 current 一致才能续接（清空、回档、切分支后对不上）。
- */
-export function historyFingerprints(history: Array<{ id: string; role: string }>): { current: string; prior: string } {
-  return { current: upToLastUser(history), prior: upToLastUser(history.slice(0, Math.max(lastUserIndex(history), 0))) };
+/** session 事件 → 回复开头一行模式说明；老 bridge 不带 mode 时不显示 */
+export function sessionBanner(ev: any): string | null {
+  if (ev?.mode !== "safe" && ev?.mode !== "full") return null;
+  const model = ev.model ? String(ev.model) : "claude";
+  return `本机 AI · 模型 ${model} · ${ev.mode === "full" ? "⚠ 完全放开模式" : "安全模式"}\n`;
 }
 
 /** 有 claude 会话就只发最新一条用户消息；没有就把历史压成文字一并发。用户上下文每轮都带 */
@@ -216,7 +230,8 @@ export async function* streamLocalCli(
   let permissionError: BridgeError | null = null;
   // 权限请求串行排队，一次只显示一个弹窗
   let permissionQueue: Promise<void> = Promise.resolve();
-  const fingerprints = historyFingerprints(ctx.history);
+  const prior = priorFingerprint(ctx.history);
+  let bannerShown = false;
   let content = "";
   let reasoning = "";
 
@@ -227,16 +242,25 @@ export async function* streamLocalCli(
       .catch(() => false);
     if (dialogs.signal.aborted) return;
     let status = 0;
+    // 手写合并中止信号（旧 Chromium 没有 AbortSignal.any）：弹窗作废或超时都中止提交
+    const post = new AbortController();
+    const onDialogsAbort = () => post.abort();
+    dialogs.signal.addEventListener("abort", onDialogsAbort);
+    const timer = setTimeout(() => post.abort(), PERMISSION_POST_TIMEOUT_MS);
     try {
       const res = await fetch(`${base}/permission`, {
         method: "POST",
         headers: { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ requestId: ev.requestId, allow }),
-        signal: AbortSignal.any([dialogs.signal, AbortSignal.timeout(PERMISSION_POST_TIMEOUT_MS)]),
+        signal: post.signal,
       });
       if (res.ok) return;
       status = res.status;
-    } catch {}
+    } catch {
+    } finally {
+      clearTimeout(timer);
+      dialogs.signal.removeEventListener("abort", onDialogsAbort);
+    }
     if (dialogs.signal.aborted) return;
     permissionError = new BridgeError(`本机 AI 确认结果提交失败${status ? `（${status}）` : ""}，本次回复已终止`);
     run.abort();
@@ -245,20 +269,27 @@ export async function* streamLocalCli(
   try {
     for (let attempt = 0; ; attempt++) {
       const saved = claudeSessions.get(ctx.conversationId);
-      // 可见历史与会话记下的不一致（清空、回档、切分支）→ 丢掉，按当前历史重建
-      if (saved && saved.fingerprint !== fingerprints.prior) claudeSessions.delete(ctx.conversationId);
-      const resumeId = saved?.fingerprint === fingerprints.prior ? saved.id : undefined;
+      // 可见历史与上轮结束时记下的不一致（清空、回档、删回复、切分支、上轮没正常收尾）→ 丢掉，按当前历史重建
+      if (saved && saved.fingerprint !== prior) claudeSessions.delete(ctx.conversationId);
+      const resumeId = saved?.fingerprint === prior ? saved.id : undefined;
       let gotOutput = false;
       let done = false;
       try {
         const body = {
           prompt: buildLocalCliPrompt(messages, Boolean(resumeId), ctx.contextText),
           sessionId: resumeId,
+          model: options.model,
           orcaMcp: ctx.orcaMcp,
         };
         for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
           if (ev.type === "session" && ev.id) {
-            claudeSessions.set(ctx.conversationId, { id: String(ev.id), fingerprint: fingerprints.current });
+            claudeSessions.set(ctx.conversationId, { id: String(ev.id), fingerprint: null });
+            const banner = bannerShown ? null : sessionBanner(ev);
+            if (banner) {
+              bannerShown = true;
+              reasoning += banner;
+              yield { type: "reasoning", reasoning: banner };
+            }
           } else if (ev.type === "permission") {
             permissionQueue = permissionQueue.then(() => answerPermission(ev));
           } else if (ev.type === "error") {

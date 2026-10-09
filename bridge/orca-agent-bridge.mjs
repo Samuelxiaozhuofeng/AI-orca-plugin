@@ -12,16 +12,23 @@ const BRIDGE_HOME = process.env.ORCA_BRIDGE_HOME || path.join(os.homedir(), ".or
 const CLAUDE_BIN = process.env.ORCA_BRIDGE_CLAUDE || "claude";
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
-// init 里出现这些权限模式说明权限被放宽，立即终止
+const EXIT_GRACE_MS = 3000;
+const MANAGED_SETTINGS = process.env.ORCA_BRIDGE_MANAGED_SETTINGS || "/Library/Application Support/ClaudeCode/managed-settings.json";
+const MODELS = ["claude", "fable", "opus", "sonnet", "haiku"]; // claude = 不指定，用 Claude Code 默认
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._\-\[\]]{0,99}$/;
+// 安全模式下 init 里出现这些权限模式说明权限被放宽，立即终止
 const BAD_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk"];
 // Orca MCP 只读工具白名单（自动放行）；实测 tools/list 后再填，先为空 = 一律弹确认
 const AUTO_ALLOW_MCP_TOOLS = [];
-const BASE_ARGS = [
+const COMMON_ARGS = [
   "-p",
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
   "--include-partial-messages",
+];
+const SAFE_ARGS = [
+  ...COMMON_ARGS,
   "--restricted",
   "--tools", "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch",
   "--strict-mcp-config",
@@ -29,13 +36,17 @@ const BASE_ARGS = [
   "--permission-prompts", "host",
   "--permission-prompt-tool", "stdio",
 ];
+// 完全放开：只由启动参数 --full-access 决定（实测 init 报 permissionMode=bypassPermissions）
+const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", "default", "--strict-mcp-config"];
 
 function parseArgs(argv) {
   const dirs = [];
   let port = 18673;
+  let fullAccess = false;
   for (let i = 0; i < argv.length; i++) {
     const value = argv[i + 1];
-    if (argv[i] === "--dir" || argv[i] === "--port") {
+    if (argv[i] === "--full-access") fullAccess = true;
+    else if (argv[i] === "--dir" || argv[i] === "--port") {
       if (!value) throw new Error(`${argv[i]} 缺少参数值`);
       if (argv[i] === "--dir") dirs.push(path.resolve(value));
       else port = Number(value);
@@ -43,7 +54,7 @@ function parseArgs(argv) {
     }
   }
   if (dirs.length === 0) dirs.push(path.join(os.homedir(), "OrcaAgent"));
-  return { dirs, port };
+  return { dirs, port, fullAccess };
 }
 
 function loadToken() {
@@ -58,7 +69,9 @@ function loadToken() {
   return { token, file, created: true };
 }
 
-const { dirs, port } = parseArgs(process.argv.slice(2));
+const { dirs, port, fullAccess } = parseArgs(process.argv.slice(2));
+const BASE_ARGS = fullAccess ? FULL_ARGS : SAFE_ARGS;
+const MODE = fullAccess ? "full" : "safe";
 const cwd = dirs[0];
 fs.mkdirSync(cwd, { recursive: true });
 const addDirArgs = dirs.slice(1).flatMap((d) => ["--add-dir", d]);
@@ -66,6 +79,40 @@ const { token, file: tokenFile, created } = loadToken();
 const expectedAuth = Buffer.from(`Bearer ${token}`);
 
 const running = new Map(); // claude sessionId -> child
+const children = new Set(); // 所有在跑的 claude 子进程（bridge 退出时一并杀掉）
+const mcpDirs = new Set(); // 所有临时 MCP 配置目录（内含令牌，结束即删）
+// 临时目录名带 bridge pid，启动时只清扫 pid 已不在的残留，不误删另一个在跑的 bridge 的
+const MCP_DIR_PREFIX = `orca-bridge-${process.pid}-`;
+
+function removeMcpDir(dir) {
+  if (!dir || !mcpDirs.has(dir)) return;
+  mcpDirs.delete(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function sweepStaleMcpDirs() {
+  const tmp = os.tmpdir();
+  for (const name of fs.readdirSync(tmp)) {
+    const m = /^orca-bridge-(\d+)-/.exec(name);
+    if (!m) continue;
+    try { process.kill(Number(m[1]), 0); continue; } catch (err) { if (err.code === "EPERM") continue; }
+    fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
+  }
+}
+
+function shutdown() {
+  for (const dir of [...mcpDirs]) removeMcpDir(dir);
+  for (const child of children) { child.orcaTerminated = true; child.kill("SIGTERM"); }
+  process.exit(0);
+}
+
+/** 受管配置里的 allow 规则会在 host 确认之前放行工具，安全模式下也拦不住，启动时醒目提示 */
+function managedAllowRules() {
+  try {
+    const allow = JSON.parse(fs.readFileSync(MANAGED_SETTINGS, "utf8"))?.permissions?.allow;
+    return Array.isArray(allow) ? allow.map(String) : [];
+  } catch { return []; }
+}
 const pending = new Map(); // requestId -> { child, input }；child.orcaTerminated 后一律作废
 
 function authorized(req) {
@@ -117,6 +164,8 @@ function writeControl(child, requestId, response) {
 function handleChat(req, res, body) {
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt.trim()) return sendJson(res, 400, { error: "prompt 为空" });
+  const model = body.model == null || body.model === "" ? "claude" : body.model;
+  if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
   const resume = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : null;
   if (resume && running.has(resume)) return sendJson(res, 409, { error: "该对话上一条还在进行" });
 
@@ -125,12 +174,14 @@ function handleChat(req, res, body) {
   const mcp = body.orcaMcp;
   if (mcp && typeof mcp.url === "string" && mcp.url) {
     // 令牌直接写进 0600 文件（目录 mkdtemp 为 0700，结束即删）；不放环境变量，claude 的 Bash 子进程读不到
-    mcpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orca-bridge-"));
+    mcpDir = fs.mkdtempSync(path.join(os.tmpdir(), MCP_DIR_PREFIX));
+    mcpDirs.add(mcpDir);
     const mcpFile = path.join(mcpDir, "mcp.json");
     const config = { mcpServers: { "orca-note": { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${String(mcp.token || "")}` } } } };
     fs.writeFileSync(mcpFile, JSON.stringify(config), { mode: 0o600 });
     args.push("--mcp-config", mcpFile);
   }
+  if (model !== "claude") args.push("--model", model);
   if (resume) args.push("--resume", resume);
 
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -146,6 +197,7 @@ function handleChat(req, res, body) {
   };
 
   const child = spawn(CLAUDE_BIN, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  children.add(child);
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -163,7 +215,8 @@ function handleChat(req, res, body) {
   const cleanup = () => {
     for (const [id, p] of pending) if (p.child === child) pending.delete(id);
     releaseSessions();
-    if (mcpDir) fs.rmSync(mcpDir, { recursive: true, force: true });
+    children.delete(child);
+    removeMcpDir(mcpDir);
   };
   child.on("error", (err) => {
     cleanup();
@@ -171,12 +224,16 @@ function handleChat(req, res, body) {
   });
   // exit 时 stdout 可能还没读完；等 close（stdio 全部读完）再判断结束
   let exitStatus = null;
-  child.on("exit", (code, signal) => { exitStatus = code ?? signal; });
-  child.on("close", (code, signal) => {
+  let exitTimer = null;
+  const ended = () => {
+    clearTimeout(exitTimer);
     cleanup();
     const tail = stderrTail.trim().slice(-500);
-    finish({ type: "error", message: `claude 异常退出（${exitStatus ?? code ?? signal}）${tail ? "：" + tail : ""}` });
-  });
+    finish({ type: "error", message: `claude 异常退出（${exitStatus}）${tail ? "：" + tail : ""}` });
+  };
+  // 后代进程继承了 stdout 时 close 可能一直不来：exit 后 3 秒仍未 close 就强制结束
+  child.on("exit", (code, signal) => { exitStatus = code ?? signal; exitTimer = setTimeout(ended, EXIT_GRACE_MS); });
+  child.on("close", (code, signal) => { exitStatus ??= code ?? signal; ended(); });
   res.on("close", () => {
     if (finished) return;
     // 客户端断开：先标记终止、释放会话、撤销未决权限（之后的 /permission 一律 410、不写 stdin），再杀子进程
@@ -184,6 +241,7 @@ function handleChat(req, res, body) {
     clearInterval(heartbeat);
     child.orcaTerminated = true;
     releaseSessions();
+    removeMcpDir(mcpDir);
     child.kill("SIGTERM");
   });
 
@@ -192,13 +250,13 @@ function handleChat(req, res, body) {
     let m;
     try { m = JSON.parse(line); } catch { return; }
     if (m.type === "system" && m.subtype === "init") {
-      if (BAD_MODES.includes(m.permissionMode)) {
+      if (fullAccess ? m.permissionMode !== "bypassPermissions" : BAD_MODES.includes(m.permissionMode)) {
         finish({ type: "error", message: `claude 权限模式异常（${m.permissionMode}），已终止` });
         child.kill("SIGTERM");
         return;
       }
       if (m.session_id) { sessionIds.add(m.session_id); running.set(m.session_id, child); }
-      send({ type: "session", id: m.session_id });
+      send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model });
     } else if (m.type === "stream_event" && !m.parent_tool_use_id) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
       if (delta?.type === "text_delta") send({ type: "text", delta: delta.text });
@@ -235,6 +293,8 @@ function handleChat(req, res, body) {
       } else {
         finish({ type: "done" });
       }
+      // 正常结束即释放会话，紧接着再发不会 409（子进程退出慢也不影响）
+      releaseSessions();
       child.stdin.end();
     }
   });
@@ -260,7 +320,7 @@ const server = http.createServer(async (req, res) => {
   if (!authorized(req)) return sendJson(res, 401, { error: "令牌不对" });
   try {
     if (req.method === "GET" && (req.url === "/models" || req.url === "/v1/models")) {
-      return sendJson(res, 200, { object: "list", data: [{ id: "claude", object: "model" }] });
+      return sendJson(res, 200, { object: "list", data: MODELS.map((id) => ({ id, object: "model" })) });
     }
     if (req.method === "POST" && req.url === "/chat") return handleChat(req, res, await readJson(req));
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
@@ -275,9 +335,25 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
+sweepStaleMcpDirs();
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
+
 server.listen(port, HOST, () => {
   console.log(`Orca Agent Bridge 已启动：http://${HOST}:${server.address().port}`);
   console.log(`工作目录：${cwd}${dirs.length > 1 ? `（另可访问：${dirs.slice(1).join("，")}）` : ""}`);
   // 不打印令牌本身（它等于以你身份执行命令的凭证）
   console.log(`${created ? "已生成新令牌" : "令牌"}保存在：${tokenFile}（复制：pbcopy < ${tokenFile}，填到插件「API 密钥」）`);
+  if (fullAccess) {
+    console.warn("\n⚠⚠⚠ 完全放开模式（--full-access）⚠⚠⚠");
+    console.warn("AI 将不经任何确认直接改文件、跑命令、改笔记。");
+    console.warn("令牌泄露 = 任何人都能以你的身份在本机执行命令。不用时请关掉本进程。\n");
+  } else {
+    console.log("安全模式：改文件、跑命令、改笔记前都会在插件里弹确认。");
+  }
+  const rules = managedAllowRules();
+  if (rules.length) {
+    console.warn(`\n⚠ 受管配置里的允许规则会让这些操作跳过确认（${MANAGED_SETTINGS}）：`);
+    for (const r of rules) console.warn(`  - ${r}`);
+  }
 });

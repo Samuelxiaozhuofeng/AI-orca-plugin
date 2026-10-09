@@ -16,12 +16,16 @@ export function createChatRequestOwner() {
         guard<F extends (...args: any[]) => void>(fn: F): F {
           return ((...args: any[]) => { if (isCurrent()) fn(...args); }) as F;
         },
-        /** 新建本次请求的中止器；所属对话被换掉时随之中止（已换掉则生来即中止） */
-        newAborter(): AbortController {
+        /**
+         * 新建本次请求的中止器；所属对话被换掉时随之中止（已换掉则生来即中止）。
+         * 传 ref 时仅在仍属当前对话时登记进去，失效请求不覆盖当前请求的中止器。
+         */
+        newAborter(ref?: { current: AbortController | null }): AbortController {
           const aborter = new AbortController();
           // ponytail: 正常结束的请求不摘监听，同一对话内随发送次数累积，换对话时随旧 signal 一起释放
           if (epochSignal.aborted) aborter.abort();
           else epochSignal.addEventListener("abort", () => aborter.abort(), { once: true });
+          if (ref && isCurrent()) ref.current = aborter;
           return aborter;
         },
       };
@@ -33,4 +37,11 @@ export function createChatRequestOwner() {
       ctrl = new AbortController();
     },
   };
+}
+
+/** 新对话 / 切换对话时：未决的确认一律按拒绝结算并清掉，等待它的旧请求得以收尾 */
+export function settlePendingConfirms(resolvers: Map<string, (approved: boolean) => void>): void {
+  const pending = [...resolvers.values()];
+  resolvers.clear();
+  for (const resolve of pending) resolve(false);
 }

@@ -1,6 +1,7 @@
 import { test, assert, assertEqual, assertDeepEqual } from "./test-harness";
 import {
   buildLocalCliPrompt,
+  finishLocalCliRound,
   mapBridgeEvent,
   streamLocalCli,
   type LocalCliContext,
@@ -82,6 +83,7 @@ test("local-cli：正常流 → content/done，无 tool_calls，记住会话", a
   ]);
   try {
     const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-a") }, msgs));
+    finishLocalCliRound("conv-a", H2.slice(0, 4));
     assertDeepEqual(out[0], { type: "content", content: "你好" });
     const done = out[out.length - 1];
     assertEqual(done.type, "done");
@@ -106,6 +108,7 @@ test("local-cli：已收到内容后失败不重试，直接报错", async () =>
   ]);
   try {
     await collect(streamLocalCli({ ...base, localCli: ctx("conv-b") }, msgs));
+    finishLocalCliRound("conv-b", H2.slice(0, 4));
     let error: any = null;
     try {
       await collect(streamLocalCli({ ...base, localCli: ctx("conv-b", undefined, H2) }, msgs));
@@ -127,6 +130,7 @@ test("local-cli：续接会话且尚无内容时失败 → 丢 sessionId 重试�
   ]);
   try {
     await collect(streamLocalCli({ ...base, localCli: ctx("conv-c") }, msgs));
+    finishLocalCliRound("conv-c", H2.slice(0, 4));
     const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-c", undefined, H2) }, msgs));
     assertEqual(m.calls.length, 3);
     assertEqual(m.calls[1].body.sessionId, "s-3");

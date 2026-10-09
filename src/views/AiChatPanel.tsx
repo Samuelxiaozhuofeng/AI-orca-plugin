@@ -73,8 +73,8 @@ import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
-import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
-import { createChatRequestOwner } from "../utils/chat-request-owner";
+import { LOCAL_CLI_ABORT_NOTE, finishLocalCliRound } from "../services/ai/local-cli-client";
+import { createChatRequestOwner, settlePendingConfirms } from "../utils/chat-request-owner";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -422,10 +422,13 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装 setMessages / setLastError
+  // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装界面写入（消息、错误、生成状态、多模型面板）
   const chatOwnerRef = useRef(createChatRequestOwner());
   const setMessagesUnguarded = setMessages;
   const setLastErrorUnguarded = setLastError;
+  const setSendingUnguarded = setSending;
+  const setStreamingMessageIdUnguarded = setStreamingMessageId;
+  const setMultiModelResponsesUnguarded = setMultiModelResponses;
   const skillConfirmResolversRef = useRef(new Map<string, (approved: boolean) => void>());
   // 追踪用户是否在底部附近，用于决定流式输出时是否自动滚动
   const isNearBottomRef = useRef(true);
@@ -480,6 +483,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
     scrollToBottomIfNeeded();
   }, [scrollToBottomIfNeeded]);
+  const updateMessageUnguarded = updateMessage;
 
   const extractJsonPayload = useCallback((raw: string): any | null => {
     if (!raw) return null;
@@ -647,14 +651,25 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
   }, []);
 
+  // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
+  // 清掉生成状态和多模型面板；旧请求之后的界面写入一律丢弃
+  const abandonCurrentRequest = () => {
+    chatOwnerRef.current.invalidate();
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = null;
+    settlePendingConfirms(skillConfirmResolversRef.current);
+    setSending(false);
+    setStreamingMessageId(null);
+    setIsMultiModelMode(false);
+    setMultiModelResponses([]);
+  };
+
   const handleNewSession = useCallback(() => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
-    // 新对话：中止进行中的生成（本机 AI 会随之结束子进程、关闭确认弹窗），旧请求的后续写入一律丢弃
-    chatOwnerRef.current.invalidate();
-    if (abortRef.current) abortRef.current.abort();
+    abandonCurrentRequest();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -684,7 +699,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
     // 切换对话：中止进行中的生成，旧请求的后续写入一律丢弃
-    if (sessionId !== currentSession.id) chatOwnerRef.current.invalidate();
+    if (sessionId !== currentSession.id) abandonCurrentRequest();
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
@@ -962,10 +977,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
     if (!content && (!files || files.length === 0)) return;
-    // 归属登记：换对话后，本次请求的消息 / 错误写入一律丢弃，中止器生来即中止
+    // 归属登记：换对话后，本次请求的界面写入一律丢弃，中止器生来即中止、不登记进 abortRef
     const req = chatOwnerRef.current.begin();
     const setMessages = req.guard(setMessagesUnguarded);
     const setLastError = req.guard(setLastErrorUnguarded);
+    const setSending = req.guard(setSendingUnguarded);
+    const setStreamingMessageId = req.guard(setStreamingMessageIdUnguarded);
+    const setMultiModelResponses = req.guard(setMultiModelResponsesUnguarded);
+    const updateMessage = req.guard(updateMessageUnguarded);
     
     // ─────────────────────────────────────────────────────────────────────
     // Todoist 命令拦截（不发送给 AI，直接执行）
@@ -1011,6 +1030,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       if (abortRef.current) abortRef.current.abort();
       // 等待一小段时间让 abort 生效
       await new Promise(resolve => setTimeout(resolve, 100));
+      if (!req.isCurrent()) return;
     }
 
     // /skill - 生成技能草稿（不发送给 AI 对话流）
@@ -1029,6 +1049,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    } catch (err) {
 	      console.warn("[handleSend] MCP readiness check failed:", err);
 	    }
+	    if (!req.isCurrent()) return;
 	    // 0 表示不设置固定工具轮数上限，依靠重复/错误/取消等状态退出（Codex 式 agent loop）。
 	    const toolRoundLimit = runtimeConfig.maxToolRounds;
 	    const toolRoundController = createToolRoundLimit(toolRoundLimit);
@@ -1050,6 +1071,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    } catch (err) {
 	      console.warn("[handleSend] Failed to load skills:", err);
 	    }
+	    if (!req.isCurrent()) return;
 
 	    // 自动触发检测：高置信度匹配时自动激活技能
 	    let autoActivatedSkill: { name: string; instruction: string } | undefined;
@@ -1066,6 +1088,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      } catch (err) {
 	        console.warn("[handleSend] Auto-trigger check failed:", err);
 	      }
+	      if (!req.isCurrent()) return;
 	    }
 
 	    // 系统提示词
@@ -1103,7 +1126,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        
 	        if (foundSkill) {
 	          // 使用现有的 requestSkillConfirm 机制显示确认对话框
-	          const confirmed = req.isCurrent() && await requestSkillConfirm(foundSkill);
+	          const confirmed = req.isCurrent() && await requestSkillConfirm(foundSkill) && req.isCurrent();
 	          
 	          if (!confirmed) {
 	            // 用户取消，不继续执行
@@ -1116,6 +1139,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      } catch (err) {
 	        console.error("[handleSend] Failed to load skill:", err);
 	      }
+	      if (!req.isCurrent()) return;
 	    }
 	    
 	    // Commands 加载逻辑：如果用户输入 /commandname，尝试加载命令文件
@@ -1136,6 +1160,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        // 尝试从 Commands 文件夹加载命令
 	        const { loadCommand } = await import("../services/commands-loader");
 	        const commandContent = await loadCommand(commandName);
+	        if (!req.isCurrent()) return;
 	        if (commandContent) {
 	          // 拼接命令内容和用户输入（发送给 AI）
 	          processedContent = restText ? `${commandContent}\n\n${restText}` : commandContent;
@@ -1458,12 +1483,12 @@ graph TD
 	        chatMode: "agent", // 使用工具模式
 	        modelId: model,
 	      });
+	      if (!req.isCurrent()) return;
 	      
 	      // 获取模型特定的 API 配置
 	      const apiConfig = getModelApiConfig(settings, model);
 	      
-	      const aborter = req.newAborter();
-	      abortRef.current = aborter;
+	      const aborter = req.newAborter(abortRef);
 	      
 	      try {
 	        let toolCallResult: any = null;
@@ -1592,6 +1617,7 @@ graph TD
         contextPreviewMap.set(key, `Context preview failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
     }));
+    if (!req.isCurrent()) return;
 
     const highPriorityContexts = highPrioritySourceContexts.map(c => ({
         title: c.kind === 'tag' ? `#${c.tag}` : c.title,
@@ -1646,8 +1672,7 @@ graph TD
       const initialResponses = createInitialResponses(selectedModels);
       setMultiModelResponses(initialResponses);
       
-      const aborter = req.newAborter();
-      abortRef.current = aborter;
+      const aborter = req.newAborter(abortRef);
       
       try {
         // 构建上下文
@@ -1710,8 +1735,7 @@ graph TD
       files: userMsg.files,
     };
 
-    const aborter = req.newAborter();
-    abortRef.current = aborter;
+    const aborter = req.newAborter(abortRef);
 
     try {
       // Build context (now returns text + assets)
@@ -2376,7 +2400,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                       if (!skill) {
                         result = `Error: Skill not found: ${resolvedSkillId.id}`;
                       } else {
-                        const userApproved = req.isCurrent() && await requestSkillConfirm(skill);
+                        const userApproved = req.isCurrent() && await requestSkillConfirm(skill) && req.isCurrent();
                         if (!userApproved) {
                           result = `用户拒绝执行技能「${skill.name}」。请尝试其他方式或直接回答用户的问题。`;
                         } else {
@@ -2739,6 +2763,10 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       });
     } finally {
       if (abortRef.current === aborter) abortRef.current = null;
+      // 本机 AI：记下本轮结束后的可见消息 id 序列，下次据此判断能否续接（setMessages 已校验归属）
+      if (getModelApiConfig(settings, model).protocol === "local-cli") {
+        setMessages((prev) => { finishLocalCliRound(currentSession.id, prev); return prev; });
+      }
       setSending(false);
       setStreamingMessageId(null);
       queueMicrotask(scrollToBottom);

@@ -12,6 +12,8 @@ import "./mcp-client.test";
 import "./mcp-tool-names.test";
 import "./local-cli-client.test";
 import "./local-cli-fixes.test";
+import "./local-cli-round2.test";
+import "./chat-request-owner.test";
 import { run } from "./test-harness";
 
 await run();

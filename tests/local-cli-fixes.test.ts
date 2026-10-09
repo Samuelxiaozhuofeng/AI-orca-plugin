@@ -1,14 +1,14 @@
 import { test, assert, assertEqual } from "./test-harness";
 import {
   buildLocalCliPrompt,
-  historyFingerprints,
+  finishLocalCliRound,
   streamLocalCli,
   LOCAL_CLI_ABORT_NOTE,
   type LocalCliContext,
 } from "../src/services/ai/local-cli-client";
 import { createChatRequestOwner } from "../src/utils/chat-request-owner";
 
-// 审查返修 F2a / F3 / F5 / F6 / F9 的检查
+// 审查返修 F2a / F3 / F5 / F9 的检查
 
 type Step = any | (() => Promise<void>);
 
@@ -155,31 +155,7 @@ test("F5 /permission 网络失败 → 明确报错并终止本次生成", async 
   }
 });
 
-test("F6 历史指纹：只计到最后一条用户消息", () => {
-  assertEqual(historyFingerprints(H1).current, "u1,a1,u2");
-  assertEqual(historyFingerprints(H2).prior, "u1,a1,u2");
-  assertEqual(historyFingerprints([{ id: "u9", role: "user" }]).prior, "");
-});
-
-test("F6 清空 / 回档后指纹对不上 → 不续接，按当前可见历史重建", async () => {
-  const m = mockBridge([
-    [{ type: "session", id: "s-f6" }, { type: "done" }],
-    [{ type: "done" }],
-    [{ type: "done" }],
-  ]);
-  try {
-    await collect(streamLocalCli({ ...base, localCli: ctx("f6") }, msgs));
-    await collect(streamLocalCli({ ...base, localCli: ctx("f6", { history: H2 }) }, msgs));
-    assertEqual(m.calls[1].body.sessionId, "s-f6", "历史一致时应续接");
-    // 回档到 a1 后另发一条：之前的可见历史只到 u1，与记下的 u1,a1,u2 对不上
-    const rolledBack = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "u7", role: "user" }];
-    await collect(streamLocalCli({ ...base, localCli: ctx("f6", { history: rolledBack }) }, msgs));
-    assertEqual(m.calls[2].body.sessionId, undefined, "回档后不应续接");
-    assert(m.calls[2].body.prompt.includes("用户：第一问"), "应带压缩历史重建");
-  } finally {
-    m.restore();
-  }
-});
+// F6 续接指纹已按第二轮 G2 改为「本轮结束后的全部可见消息 id 序列」，检查见 local-cli-round2.test.ts
 
 test("F9 用户上下文每轮都拼进 prompt（含续接），插件 system 说明不带", async () => {
   assert(buildLocalCliPrompt(msgs, true, "笔记甲").includes("笔记甲"), "续接时应带上下文");
@@ -189,6 +165,7 @@ test("F9 用户上下文每轮都拼进 prompt（含续接），插件 system �
   ]);
   try {
     await collect(streamLocalCli({ ...base, localCli: ctx("f9", { contextText: "笔记甲正文" }) }, msgs));
+    finishLocalCliRound("f9", H2.slice(0, 4));
     await collect(streamLocalCli({ ...base, localCli: ctx("f9", { history: H2, contextText: "笔记乙正文" }) }, msgs));
     assert(m.calls[0].body.prompt.includes("笔记甲正文"), "首轮应带上下文");
     assertEqual(m.calls[1].body.sessionId, "s-f9");
