@@ -9,6 +9,7 @@
 import type { OpenAIChatMessage } from "./openai-client";
 import type { StreamChunk } from "./chat-stream-handler";
 import { summarizeToolCall, summarizeToolResult } from "./local-cli-tool-summary";
+import { collectLocalCliImages, imageNotesText } from "./local-cli-images";
 
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
@@ -100,7 +101,11 @@ function messageText(m: OpenAIChatMessage): string {
   const content: any = (m as any).content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return content.filter((p: any) => p?.type === "text").map((p: any) => p.text).join("\n");
+    // 图片在文字里用「[图片]」占位：历史里的旧图不重发，最新一条的图片另走 images 字段
+    return content
+      .filter((p: any) => p?.type === "text" || p?.type === "image_url")
+      .map((p: any) => (p.type === "text" ? p.text : "[图片]"))
+      .join("\n");
   }
   return "";
 }
@@ -303,6 +308,7 @@ export async function* streamLocalCli(
     let produced = false;
     let resume = ctx.resume;
     const workDir = ctx.workDir?.trim();
+    const { images, notes } = await collectLocalCliImages(messages.filter((m) => m.role === "user").pop());
     // 续接失败（新中转报 resume_failed 且本轮还没输出）→ 去掉 resume 整段重发一次
     for (;;) {
       let retry = false;
@@ -311,9 +317,12 @@ export async function* streamLocalCli(
         model: options.model,
         orcaMcp: ctx.orcaMcp,
         ...(workDir ? { workDir } : {}),
+        ...(images.length ? { images } : {}),
         ...(resume ? { resume: { sid: resume.sid, prompt: buildLocalCliResumePrompt(messages, ctx.contextText, ctx.instructions, resume.partialText) } } : {}),
       };
+      let imagesAcked = false;
       for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
+        if (ev.type === "images") imagesAcked = true;
         if (ev.type === "session") {
           if (ev.mode === "safe" || ev.mode === "full") lastMode = ev.mode;
           // 新中转的 session 事件总带 resumed；没有 = 旧中转，用的是整段 prompt，本轮不记续接信息
@@ -365,11 +374,23 @@ export async function* streamLocalCli(
         if (chunk.type === "reasoning") reasoning += chunk.reasoning;
         yield chunk;
       }
-      if (!retry) break;
+      if (!retry) {
+        // 旧中转不认 images 字段（不回 images 事件），图片被悄悄丢了
+        if (images.length && !imagesAcked) {
+          notes.push(`中转程序是旧版，不支持图片（本条 ${images.length} 张都没发出去），请退出中转后重新打开 Orca`);
+          orca.notify("warn", "中转程序是旧版，图片没发给本机 AI；请退出中转后重新打开 Orca");
+        }
+        break;
+      }
       resume = undefined;
       if (ctx.run) { ctx.run.resumeFailed = true; ctx.run.sid = undefined; ctx.run.uuid = undefined; }
     }
     if (!done) throw new BridgeError("本机 AI 连接中断，回复未完成");
+    if (notes.length) {
+      const note = imageNotesText(notes);
+      content += note;
+      yield { type: "content", content: note };
+    }
   } catch (err: any) {
     if (permissionError && !options.signal?.aborted) throw permissionError;
     throw err;
