@@ -7,7 +7,6 @@
 
 import MarkdownMessage from "./MarkdownMessage";
 import CitationList, { type Citation } from "./CitationList";
-import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { sanitizeContent } from "../services/ai/openai-client";
 
 const React = window.React as unknown as {
@@ -25,12 +24,6 @@ interface EnhancedMarkdownMessageProps {
   role: "user" | "assistant" | "tool";
   // 可选的引用数据
   citations?: Citation[];
-  sourceGroups?: SourceGroup[];
-  sourceResults?: WebSearchSource[];
-  activeSourceGroupId?: string | null;
-  activeBadgeKey?: string | null;
-  onHoverSourceGroup?: (groupId: string, anchorRect?: DOMRect, badgeKey?: string) => void;
-  onLeaveSourceGroup?: () => void;
   // 是否自动解析内容中的图片和引用
   autoParseEnhancements?: boolean;
 }
@@ -113,12 +106,6 @@ export default function EnhancedMarkdownMessage({
   content,
   role,
   citations: providedCitations,
-  sourceGroups,
-  sourceResults,
-  activeSourceGroupId,
-  activeBadgeKey,
-  onHoverSourceGroup,
-  onLeaveSourceGroup,
   autoParseEnhancements = true,
 }: EnhancedMarkdownMessageProps) {
   
@@ -185,12 +172,6 @@ export default function EnhancedMarkdownMessage({
     createElement(MarkdownMessage, {
       content: cleanedContent,
       role,
-      sourceGroups,
-      sourceResults,
-      activeSourceGroupId,
-      activeBadgeKey,
-      onHoverSourceGroup,
-      onLeaveSourceGroup,
     }),
     // 引用列表（在内容之后，默认折叠）
     finalCitations.length > 0 && createElement(CitationList, {

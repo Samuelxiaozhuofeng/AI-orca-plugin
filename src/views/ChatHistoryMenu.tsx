@@ -197,7 +197,6 @@ type Props = {
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onClearAll: () => void;
-  onNewSession?: () => void; // 已不使用，AiChatPanel 仍在传
   onTogglePin?: (sessionId: string) => void;
   onToggleFavorite?: (sessionId: string) => void;
   onRename?: (sessionId: string, newTitle: string) => void;

@@ -50,7 +50,7 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { updateSessionStore, clearSessionStore } from "../store/session-store";
-import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults } from "../services/ai/ai-tools";
+import { executeTool, getToolsForDraggedContext, getTools } from "../services/ai/ai-tools";
 import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
@@ -67,7 +67,6 @@ import {
 } from "../services/ai/tool-call-router";
 import { createToolRoundLimit } from "../services/ai/tool-round-limit";
 import { ensureMcpServersReady } from "../services/external/mcp-server-manager";
-import { normalizeWebSearchResults, type WebSearchSource } from "../utils/source-attribution";
 import {
   panelContainerStyle,
   headerStyle,
@@ -965,30 +964,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       
       const conversation: Message[] = [...baseMessages.filter((m) => !m.localOnly), userMsgWithContextAssets];
 
-      let aggregatedSearchResults: WebSearchSource[] = [];
-      const mergeSearchResults = (incoming: WebSearchSource[]) => {
-        if (!incoming.length) return;
-        const seen = new Set(aggregatedSearchResults.map((r) => r.url));
-        incoming.forEach((result) => {
-          if (!result.url || seen.has(result.url)) return;
-          seen.add(result.url);
-          aggregatedSearchResults.push(result);
-        });
-      };
-      const captureSearchResults = (toolMessages: Message[]) => {
-        if (!toolMessages.length) return;
-        const toolMap = new Map<string, { content: string; name: string }>();
-        toolMessages.forEach((m) => {
-          if (m.tool_call_id) {
-            toolMap.set(m.tool_call_id, { content: m.content, name: m.name || "" });
-          }
-        });
-        const results = normalizeWebSearchResults(extractSearchResultsFromToolResults(toolMap));
-        mergeSearchResults(results);
-      };
-      const getSearchResultsForMessage = () => (
-        aggregatedSearchResults.length > 0 ? aggregatedSearchResults : undefined
-      );
       const isToolErrorResult = (message: Message) => {
         const content = (message.content || "").trim();
         return /^Error[:：]/i.test(content)
@@ -1152,7 +1127,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               reasoning: currentReasoning,
               createdAt: reasoningCreatedAt!,
               model,
-              searchResults: getSearchResultsForMessage(),
             }]);
           } else {
             currentReasoning += chunk.reasoning;
@@ -1172,7 +1146,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               content: sanitizeContent(chunk.content),
               createdAt: assistantCreatedAt,
               model,
-              searchResults: getSearchResultsForMessage(),
             }]);
             currentContent = sanitizeContent(chunk.content);
             reasoningMessageId = assistantId; // 复用这个 ID 作为 assistant ID
@@ -1190,7 +1163,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               content: sanitizeContent(chunk.content),
               createdAt: assistantCreatedAt,
               model,
-              searchResults: getSearchResultsForMessage(),
             }]);
             currentContent = sanitizeContent(chunk.content);
             reasoningMessageId = assistantId; // 更新为 assistant ID
@@ -1233,7 +1205,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           content: "(empty response)", 
           createdAt: assistantCreatedAt,
           model,
-          searchResults: getSearchResultsForMessage(),
         }]);
       } else if (!hasAssistantMessage && currentContent) {
         // 有些兼容网关只在 done 阶段返回最终正文，此时也需要补建消息气泡。
@@ -1243,7 +1214,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           content: sanitizeContent(currentContent),
           createdAt: assistantCreatedAt,
           model,
-          searchResults: getSearchResultsForMessage(),
         }]);
       } else if (!hasAssistantMessage && !currentContent && toolCalls.length > 0) {
         // 只有 tool calls，创建空 content 的 assistant 消息
@@ -1253,7 +1223,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           content: "", 
           createdAt: assistantCreatedAt,
           model,
-          searchResults: getSearchResultsForMessage(),
         }]);
       }
       ccAssistantId = assistantId;
@@ -1265,7 +1234,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 	        createdAt: assistantCreatedAt,
 	        tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
 	        ...(reasoningMessageId ? { reasoning: currentReasoning } : {}),
-          searchResults: getSearchResultsForMessage(),
 	      });
 
 		      // Handle tool calls with multi-round support
@@ -1478,7 +1446,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           toolResultMessages.push(...parallelResults);
         }
 
-        captureSearchResults(toolResultMessages);
         allToolResultMessages.push(...toolResultMessages);
         conversation.push(...toolResultMessages);
         const hasToolError = toolResultMessages.some(isToolErrorResult);
@@ -1547,7 +1514,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                   reasoning: chunk.reasoning,
                   createdAt: nextReasoningCreatedAt!,
                   model,
-                  searchResults: getSearchResultsForMessage(),
                 }]);
               } else {
                 nextReasoning += chunk.reasoning;
@@ -1567,7 +1533,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                   content: sanitizeContent(chunk.content),
                   createdAt: nextAssistantCreatedAt,
                   model,
-                  searchResults: getSearchResultsForMessage(),
                 }]);
                 nextContent = sanitizeContent(chunk.content);
                 nextReasoningMessageId = nextAssistantId;
@@ -1585,7 +1550,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                   content: sanitizeContent(chunk.content),
                   createdAt: nextAssistantCreatedAt,
                   model,
-                  searchResults: getSearchResultsForMessage(),
                 }]);
                 nextContent = sanitizeContent(chunk.content);
                 nextReasoningMessageId = nextAssistantId;
@@ -1630,7 +1594,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               createdAt: nextAssistantCreatedAt,
               model,
               tool_calls: nextToolCalls,
-              searchResults: getSearchResultsForMessage(),
             }]);
           }
         } else if (nextContent.trim().length > 0 && !nextReasoningMessageId) {
@@ -1640,7 +1603,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             content: sanitizeContent(nextContent),
             createdAt: nextAssistantCreatedAt,
             model,
-            searchResults: getSearchResultsForMessage(),
           }]);
         }
 
@@ -1651,14 +1613,13 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             ? buildEmptyToolRecoveryText(recoveryReason, toolResultMessages)
             : toolFallback || "(empty response from API)";
           if (nextReasoningMessageId) {
-            updateMessage(nextReasoningMessageId, { content: fallbackText, searchResults: getSearchResultsForMessage() });
+            updateMessage(nextReasoningMessageId, { content: fallbackText });
           } else {
             setMessages((prev) => [...prev, { 
               id: nextAssistantId, 
               role: "assistant", 
               content: fallbackText, 
               createdAt: nextAssistantCreatedAt,
-              searchResults: getSearchResultsForMessage(),
             }]);
           }
           nextContent = fallbackText;
@@ -1671,7 +1632,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           createdAt: nextAssistantCreatedAt,
           tool_calls: nextToolCalls.length > 0 ? nextToolCalls : undefined,
           ...(nextReasoningMessageId ? { reasoning: nextReasoning } : {}),
-          searchResults: getSearchResultsForMessage(),
         });
 
         // Check if model wants to call more tools
@@ -2252,7 +2212,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         onSelectSession: handleSelectSession,
         onDeleteSession: handleDeleteSession,
         onClearAll: handleClearAllSessions,
-        onNewSession: handleNewSession,
         onTogglePin: handleTogglePin,
         onToggleFavorite: handleToggleFavorite,
         onRename: handleRenameSession,

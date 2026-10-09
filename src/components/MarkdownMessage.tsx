@@ -2,7 +2,6 @@ import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAl
 import { appendLocalImagePreviews, toFileUrl } from "../utils/local-image-paths";
 import { toBody } from "../utils/modal-dismiss";
 import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
-import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { withTooltip } from "../utils/orca-tooltip";
 import {
   codeBlockContainerStyle,
@@ -74,12 +73,6 @@ function resolveImageFilePath(src: string): string {
 interface Props {
   content: string;
   role: "user" | "assistant" | "tool";
-  sourceGroups?: SourceGroup[];
-  sourceResults?: WebSearchSource[];
-  activeSourceGroupId?: string | null;
-  activeBadgeKey?: string | null;
-  onHoverSourceGroup?: (groupId: string, anchorRect?: DOMRect, badgeKey?: string) => void;
-  onLeaveSourceGroup?: () => void;
 }
 
 // Helper component for Code Block with Copy
@@ -131,119 +124,6 @@ function CodeBlock({ language, content }: { language?: string; content: string }
       content,
     ),
   );
-}
-
-function SourceBadgeGroup({
-  groups,
-  activeGroupId,
-  activeBadgeKey,
-  badgeScopeId,
-  onHover,
-  onLeave,
-}: {
-  groups: SourceGroup[];
-  activeGroupId?: string | null;
-  activeBadgeKey?: string | null;
-  badgeScopeId: string;
-  onHover?: (groupId: string, anchorRect?: DOMRect, badgeKey?: string) => void;
-  onLeave?: () => void;
-}) {
-  if (!groups.length) return null;
-
-  return createElement(
-    "span",
-    {
-      style: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "6px",
-        marginLeft: "6px",
-        flexWrap: "wrap",
-        verticalAlign: "baseline",
-      },
-      onMouseLeave: () => {
-        onLeave?.();
-      },
-    },
-    ...groups.map((group) => {
-      const badgeKey = `${badgeScopeId}:${group.id}`;
-      const isActive = activeBadgeKey ? activeBadgeKey === badgeKey : false;
-      return createElement(
-        "button",
-        {
-          key: group.id,
-          style: {
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "4px",
-            padding: "2px 8px",
-            borderRadius: "999px",
-            border: "1px solid var(--orca-color-border)",
-            background: isActive ? "var(--orca-color-primary)" : "var(--orca-color-bg-3)",
-            color: isActive ? "var(--orca-color-text-inverse)" : "var(--orca-color-text-2)",
-            fontSize: "11px",
-            cursor: "pointer",
-          },
-          onMouseEnter: (e: any) => {
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            onHover?.(group.id, rect, badgeKey);
-          },
-          onClick: (e: any) => {
-            e.stopPropagation();
-            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-            onHover?.(group.id, rect, badgeKey);
-          },
-        },
-        group.label
-      );
-    })
-  );
-}
-
-function hasMeaningfulInlineText(children: MarkdownInlineNode[]): boolean {
-  return children.some((child) => {
-    switch (child.type) {
-      case "text":
-        return child.content.trim().length > 0;
-      case "code":
-        return child.content.trim().length > 0;
-      case "bold":
-      case "italic":
-      case "link":
-        return hasMeaningfulInlineText(child.children);
-      default:
-        return false;
-    }
-  });
-}
-
-function extractCitationNumbersFromInlineNodes(children: MarkdownInlineNode[]): number[] {
-  const numbers: number[] = [];
-  const seen = new Set<number>();
-  const pushNumber = (value: number) => {
-    if (seen.has(value)) return;
-    seen.add(value);
-    numbers.push(value);
-  };
-
-  const walk = (nodes: MarkdownInlineNode[]) => {
-    nodes.forEach((node) => {
-      if (node.type === "text") {
-        const matches = node.content.matchAll(/\[(\d+)\]/g);
-        for (const match of matches) {
-          const value = parseInt(match[1], 10);
-          if (!Number.isNaN(value)) pushNumber(value);
-        }
-        return;
-      }
-      if (node.type === "bold" || node.type === "italic" || node.type === "link") {
-        walk(node.children);
-      }
-    });
-  };
-
-  walk(children);
-  return numbers;
 }
 
 // Table view types
@@ -1193,8 +1073,6 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
 function renderBlockNode(
   node: MarkdownNode,
   key: number,
-  options?: { renderSourceBadges?: (citationNumbers: number[], scopeId: string) => any },
-  rawNode?: MarkdownNode
 ): any {
     switch (node.type) {
       case "heading": {
@@ -1224,15 +1102,6 @@ function renderBlockNode(
 
       case "paragraph": {
         const cleanedChildren = cleanupDotPunctuation(node.children);
-        const rawChildren =
-          rawNode && rawNode.type === "paragraph"
-            ? rawNode.children
-            : node.children;
-        const citationNumbers = extractCitationNumbersFromInlineNodes(rawChildren);
-        const badges = options?.renderSourceBadges
-          ? options.renderSourceBadges(citationNumbers, `p-${key}`)
-          : null;
-        const showBadges = !!badges && hasMeaningfulInlineText(cleanedChildren);
         return createElement(
           "p",
           {
@@ -1240,23 +1109,15 @@ function renderBlockNode(
             style: paragraphStyle,
           },
           ...cleanedChildren.map((child, i) => renderInlineNode(child, i)),
-          showBadges ? badges : null,
         );
       }
 
       case "list": {
         const ListTag = (node.ordered ? "ol" : "ul") as any;
         const listClass = node.ordered ? "md-list md-list-ordered" : "md-list md-list-unordered";
-        const rawList = rawNode && rawNode.type === "list" ? rawNode : node;
 
         // 递归渲染列表项
-        const renderListItem = (item: any, itemIndex: number, rawItem?: any, scopeId?: string): any => {
-          const rawContent = rawItem?.content || item.content;
-          const citationNumbers = extractCitationNumbersFromInlineNodes(rawContent);
-          const badges = options?.renderSourceBadges
-            ? options.renderSourceBadges(citationNumbers, scopeId || `li-${key}-${itemIndex}`)
-            : null;
-          const showBadges = !!badges && hasMeaningfulInlineText(item.content);
+        const renderListItem = (item: any, itemIndex: number): any => {
           return createElement(
             "li",
             {
@@ -1265,7 +1126,6 @@ function renderBlockNode(
             },
             // 渲染项目内容
             ...item.content.map((child: any, i: number) => renderInlineNode(child, i)),
-            showBadges ? badges : null,
             // 渲染嵌套子列表
             item.children && item.children.length > 0 && createElement(
               ListTag,
@@ -1273,12 +1133,7 @@ function renderBlockNode(
                 className: listClass + " md-list-nested",
               },
               ...item.children.map((subItem: any, subIndex: number) =>
-                renderListItem(
-                  subItem,
-                  subIndex,
-                  rawItem?.children?.[subIndex],
-                  `${scopeId || `li-${key}-${itemIndex}`}-${subIndex}`
-                )
+                renderListItem(subItem, subIndex)
               )
             )
           );
@@ -1291,7 +1146,7 @@ function renderBlockNode(
             className: listClass,
           },
           ...node.items.map((item, itemIndex) =>
-            renderListItem(item, itemIndex, rawList.items[itemIndex], `li-${key}-${itemIndex}`)
+            renderListItem(item, itemIndex)
           ),
         );
       }
@@ -1304,7 +1159,7 @@ function renderBlockNode(
             style: blockQuoteStyle,
           },
           ...node.children.map((child, i) =>
-            renderBlockNode(child, i, options, rawNode && rawNode.type === "quote" ? rawNode.children[i] : undefined)
+            renderBlockNode(child, i)
           ),
         );
 
@@ -1369,12 +1224,6 @@ function renderBlockNode(
 export default function MarkdownMessage({
   content,
   role,
-  sourceGroups,
-  sourceResults,
-  activeSourceGroupId,
-  activeBadgeKey,
-  onHoverSourceGroup,
-  onLeaveSourceGroup,
 }: Props) {
   // 预处理：清理 AI 输出中多余的标注符号
   const cleanedContent = useMemo(() => {
@@ -1414,54 +1263,13 @@ export default function MarkdownMessage({
   }, [content, role]);
   
   const nodes = useMemo(() => parseMarkdown(cleanedContent), [cleanedContent]);
-  const rawNodes = useMemo(() => parseMarkdown(content), [content]);
-  const sourceGroupByUrl = useMemo(() => {
-    const map = new Map<string, SourceGroup>();
-    if (sourceGroups) {
-      sourceGroups.forEach((group) => {
-        group.sources.forEach((source) => {
-          map.set(source.url, group);
-        });
-      });
-    }
-    return map;
-  }, [sourceGroups]);
-
-  const renderSourceBadges = (citationNumbers: number[], scopeId: string) => {
-    if (role !== "assistant") return null;
-    if (!sourceGroups || sourceGroups.length === 0) return null;
-    if (!sourceResults || sourceResults.length === 0) return null;
-    if (!citationNumbers || citationNumbers.length === 0) return null;
-
-    const groupsForBlock: SourceGroup[] = [];
-    const seenGroups = new Set<string>();
-    citationNumbers.forEach((number) => {
-      const source = sourceResults[number - 1];
-      if (!source) return;
-      const group = sourceGroupByUrl.get(source.url);
-      if (!group || seenGroups.has(group.id)) return;
-      seenGroups.add(group.id);
-      groupsForBlock.push(group);
-    });
-
-    if (groupsForBlock.length === 0) return null;
-    return createElement(SourceBadgeGroup, {
-      groups: groupsForBlock,
-      activeGroupId: activeSourceGroupId,
-      activeBadgeKey: activeBadgeKey,
-      badgeScopeId: scopeId,
-      onHover: onHoverSourceGroup,
-      onLeave: onLeaveSourceGroup,
-    });
-  };
-
   return createElement(
     "div",
     {
       style: markdownContainerStyle(role),
     },
       ...nodes.map((node: MarkdownNode, index: number) =>
-        renderBlockNode(node, index, { renderSourceBadges }, rawNodes[index])
+        renderBlockNode(node, index)
       ),
   );
 }

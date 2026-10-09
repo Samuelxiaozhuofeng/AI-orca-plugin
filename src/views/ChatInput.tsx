@@ -6,7 +6,7 @@
 import type { DbId } from "../orca.d.ts";
 import type { AiChatSettings } from "../settings/ai-chat-settings";
 import { getModelApiConfig } from "../settings/ai-chat-settings";
-import type { FileRef, VideoProcessMode } from "../services/session-service";
+import type { FileRef } from "../services/session-service";
 import { buildContextForSend } from "../services/notes/context-builder";
 import { contextStore, contextKey, addBlockById, clearHighPriorityContexts } from "../store/context-store";
 import { estimateTokens, formatTokenCount } from "../utils/token-utils";
@@ -392,16 +392,6 @@ export default function ChatInput({
     setPendingFiles(prev => prev.filter((_, i) => i !== index));
   }, []);
 
-  // 设置视频处理模式
-  const handleSetVideoMode = useCallback((index: number, mode: VideoProcessMode) => {
-    setPendingFiles(prev => prev.map((file, i) => {
-      if (i === index && file.category === "video") {
-        return { ...file, videoMode: mode };
-      }
-      return file;
-    }));
-  }, []);
-
   // 处理粘贴事件（支持图片粘贴）
   const handlePaste = useCallback(async (e: ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -724,66 +714,6 @@ export default function ChatInput({
                       className: "ti ti-player-play-filled", 
                       style: { color: "#fff", fontSize: "12px" } 
                     })),
-                    // 视频模式切换按钮
-                    createElement(
-                      "div",
-                      {
-                        key: "video-mode",
-                        style: {
-                          position: "absolute",
-                          bottom: "2px",
-                          left: "2px",
-                          display: "flex",
-                          gap: "2px",
-                        },
-                      },
-                      withTooltip(
-                        "完整识别（画面+音频）",
-                        createElement(
-                          "button",
-                          {
-                            onClick: (e: any) => {
-                              e.stopPropagation();
-                              handleSetVideoMode(index, "full");
-                            },
-                            style: {
-                              padding: "2px 5px",
-                              fontSize: "9px",
-                              border: "1px solid var(--orca-color-border)",
-                              borderRadius: "3px",
-                              cursor: "pointer",
-                              background: file.videoMode !== "audio-only" ? "var(--orca-color-bg-3)" : "rgba(0,0,0,0.6)",
-                              color: file.videoMode !== "audio-only" ? "var(--orca-color-text-1)" : "#fff",
-                              fontWeight: file.videoMode !== "audio-only" ? "600" : "400",
-                            },
-                          },
-                          "全"
-                        )
-                      ),
-                      withTooltip(
-                        "仅音频识别",
-                        createElement(
-                          "button",
-                          {
-                            onClick: (e: any) => {
-                              e.stopPropagation();
-                              handleSetVideoMode(index, "audio-only");
-                            },
-                            style: {
-                              padding: "2px 5px",
-                              fontSize: "9px",
-                              border: "1px solid var(--orca-color-border)",
-                              borderRadius: "3px",
-                              cursor: "pointer",
-                              background: file.videoMode === "audio-only" ? "var(--orca-color-bg-3)" : "rgba(0,0,0,0.6)",
-                              color: file.videoMode === "audio-only" ? "var(--orca-color-text-1)" : "#fff",
-                              fontWeight: file.videoMode === "audio-only" ? "600" : "400",
-                            },
-                          },
-                          "音"
-                        )
-                      )
-                    ),
                   ]
                 : [
                     createElement("i", {
@@ -810,65 +740,6 @@ export default function ChatInput({
                         file.name.length > 12 ? file.name.slice(0, 10) + "..." : file.name
                       )
                     ),
-                    // 视频模式切换按钮（无缩略图时）
-                    isVideo &&
-                      createElement(
-                        "div",
-                        {
-                          key: "video-mode",
-                          style: {
-                            display: "flex",
-                            gap: "2px",
-                            marginTop: "2px",
-                          },
-                        },
-                        withTooltip(
-                          "完整识别（画面+音频）",
-                          createElement(
-                            "button",
-                            {
-                              onClick: (e: any) => {
-                                e.stopPropagation();
-                                handleSetVideoMode(index, "full");
-                              },
-                              style: {
-                                padding: "2px 5px",
-                                fontSize: "9px",
-                                border: "1px solid var(--orca-color-border)",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                background: file.videoMode !== "audio-only" ? "var(--orca-color-bg-3)" : "var(--orca-color-bg-1)",
-                                color: file.videoMode !== "audio-only" ? "var(--orca-color-text-1)" : "var(--orca-color-text-2)",
-                                fontWeight: file.videoMode !== "audio-only" ? "600" : "400",
-                              },
-                            },
-                            "全"
-                          )
-                        ),
-                        withTooltip(
-                          "仅音频识别",
-                          createElement(
-                            "button",
-                            {
-                              onClick: (e: any) => {
-                                e.stopPropagation();
-                                handleSetVideoMode(index, "audio-only");
-                              },
-                              style: {
-                                padding: "2px 5px",
-                                fontSize: "9px",
-                                border: "1px solid var(--orca-color-border)",
-                                borderRadius: "3px",
-                                cursor: "pointer",
-                                background: file.videoMode === "audio-only" ? "var(--orca-color-bg-3)" : "var(--orca-color-bg-1)",
-                                color: file.videoMode === "audio-only" ? "var(--orca-color-text-1)" : "var(--orca-color-text-2)",
-                                fontWeight: file.videoMode === "audio-only" ? "600" : "400",
-                              },
-                            },
-                            "音"
-                          )
-                        )
-                      ),
                   ],
               withTooltip(
                 "移除文件",

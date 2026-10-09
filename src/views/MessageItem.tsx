@@ -29,7 +29,6 @@ import type { ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { formatTokenSpeed } from "../utils/token-utils";
 import { BANNER_RE } from "../services/ai/local-cli-client";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
-import { groupSourcesByDomain, normalizeWebSearchResults, type SourceGroup, type WebSearchSource } from "../utils/source-attribution";
 import {
   displaySettingsStore,
   fontSizeMap,
@@ -47,7 +46,7 @@ const React = window.React as unknown as {
   useRef: <T>(initial: T) => { current: T };
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback, useMemo, useEffect, useRef } = React;
+const { createElement, useState, useCallback, useMemo, useEffect } = React;
 
 const { ContextMenu, Menu, MenuText } = orca.components;
 
@@ -129,293 +128,6 @@ function parseReasoningSteps(reasoning: string): { steps: string[]; summary: str
   }
 
   return { steps, summary };
-}
-
-function openExternalUrl(url: string) {
-  if (!url) return;
-  try {
-    orca.invokeBackend("shell-open", url);
-  } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-}
-
-type SourceAnchor = {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  width: number;
-  height: number;
-  rowWidth: number;
-  rowHeight: number;
-};
-
-function SourceCardPanel({
-  group,
-  anchor,
-  onClose,
-  onHoverStart,
-  onHoverEnd,
-}: {
-  group: SourceGroup;
-  anchor: SourceAnchor | null;
-  onClose: () => void;
-  onHoverStart: () => void;
-  onHoverEnd: () => void;
-}) {
-  const isNarrow = typeof window !== "undefined" && window.innerWidth < 900;
-  const panelWidth = 260;
-  const edgePadding = 12;
-  const panelMaxHeight = 220;
-  const offsetGap = 8;
-  const totalSources = group.sources.length;
-  const [activeIndex, setActiveIndex] = useState(0);
-  const clampedIndex = totalSources > 0 ? Math.min(activeIndex, totalSources - 1) : 0;
-  const activeSource = totalSources > 0 ? group.sources[clampedIndex] : null;
-  const canNavigate = totalSources > 1;
-
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [group.id]);
-
-  let top = edgePadding;
-  let left = edgePadding;
-
-  if (anchor) {
-    const spaceBelow = anchor.rowHeight - anchor.bottom;
-    const spaceAbove = anchor.top;
-    const openAbove = !isNarrow && spaceBelow < 180 && spaceAbove > spaceBelow;
-
-    top = openAbove
-      ? Math.max(edgePadding, anchor.top - panelMaxHeight - offsetGap)
-      : anchor.bottom + offsetGap;
-
-    if (!isNarrow) {
-      left = anchor.left;
-      if (left + panelWidth > anchor.rowWidth - edgePadding) {
-        left = Math.max(edgePadding, anchor.rowWidth - panelWidth - edgePadding);
-      }
-      if (left < edgePadding) left = edgePadding;
-    }
-  }
-
-  const containerStyle: React.CSSProperties = {
-    position: "absolute",
-    top,
-    left: isNarrow ? edgePadding : left,
-    right: isNarrow ? edgePadding : "auto",
-    width: isNarrow ? `calc(100% - ${edgePadding * 2}px)` : panelWidth,
-    maxWidth: isNarrow ? `calc(100% - ${edgePadding * 2}px)` : panelWidth,
-    background: "var(--orca-color-bg-1)",
-    border: "1px solid var(--orca-color-border)",
-    borderRadius: 12,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
-    padding: 10,
-    zIndex: 20,
-  };
-
-  return createElement(
-    "div",
-    {
-      style: containerStyle,
-      onMouseEnter: onHoverStart,
-      onMouseLeave: onHoverEnd,
-      onClick: (e: any) => e.stopPropagation(),
-    },
-    createElement(
-      "div",
-      {
-        style: {
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 8,
-        },
-      },
-      withTooltip(
-        activeSource?.domain || group.label,
-        createElement(
-          "div",
-          {
-            style: {
-              fontSize: "12px",
-              fontWeight: 600,
-              color: "var(--orca-color-text-2)",
-              flex: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            },
-          },
-          activeSource?.domain || group.label
-        )
-      ),
-      canNavigate &&
-        createElement(
-          "div",
-          {
-            style: {
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              color: "var(--orca-color-text-3)",
-              fontSize: "11px",
-            },
-          },
-          withTooltip(
-            "Previous",
-            createElement(
-              "button",
-              {
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--orca-color-text-3)",
-                  cursor: "pointer",
-                  padding: 2,
-                },
-                onClick: (e: any) => {
-                  e.stopPropagation();
-                  setActiveIndex((prev) => (prev - 1 + totalSources) % totalSources);
-                },
-              },
-              createElement("i", { className: "ti ti-chevron-left", style: { fontSize: "13px" } })
-            )
-          ),
-          createElement("span", null, `${clampedIndex + 1}/${totalSources}`),
-          withTooltip(
-            "Next",
-            createElement(
-              "button",
-              {
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--orca-color-text-3)",
-                  cursor: "pointer",
-                  padding: 2,
-                },
-                onClick: (e: any) => {
-                  e.stopPropagation();
-                  setActiveIndex((prev) => (prev + 1) % totalSources);
-                },
-              },
-              createElement("i", { className: "ti ti-chevron-right", style: { fontSize: "13px" } })
-            )
-          )
-        ),
-      withTooltip(
-        "Close",
-        createElement(
-          "button",
-          {
-            style: {
-              background: "transparent",
-              border: "none",
-              color: "var(--orca-color-text-3)",
-              cursor: "pointer",
-              padding: 2,
-            },
-            onClick: onClose,
-          },
-          createElement("i", { className: "ti ti-x", style: { fontSize: "14px" } })
-        )
-      )
-    ),
-    activeSource &&
-      createElement(
-        "div",
-        {
-          style: {
-            border: "1px solid var(--orca-color-border)",
-            borderRadius: 10,
-            padding: "8px 10px",
-            background: "var(--orca-color-bg-2)",
-            maxHeight: isNarrow ? "none" : panelMaxHeight,
-            overflow: "hidden",
-          },
-        },
-        createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 8,
-              marginBottom: 6,
-            },
-          },
-          createElement(
-            "div",
-            {
-              style: {
-                flex: 1,
-                fontSize: "13px",
-                fontWeight: 600,
-                color: "var(--orca-color-text-1)",
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-              },
-            },
-            activeSource.title
-          ),
-          withTooltip(
-            "Open source",
-            createElement(
-              "button",
-              {
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  color: "var(--orca-color-text-3)",
-                  cursor: "pointer",
-                  padding: 2,
-                },
-                onClick: (e: any) => {
-                  e.stopPropagation();
-                  openExternalUrl(activeSource.url);
-                },
-              },
-              createElement("i", { className: "ti ti-external-link", style: { fontSize: "13px" } })
-            )
-          )
-        ),
-        createElement(
-          "div",
-          {
-            style: {
-              fontSize: "11px",
-              color: "var(--orca-color-text-3)",
-              marginBottom: activeSource.snippet ? 6 : 0,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            },
-          },
-          activeSource.domain || activeSource.url
-        ),
-        activeSource.snippet &&
-          createElement(
-            "div",
-            {
-              style: {
-                fontSize: "12px",
-                color: "var(--orca-color-text-2)",
-                lineHeight: 1.4,
-                display: "-webkit-box",
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-                marginBottom: 6,
-              },
-            },
-            activeSource.snippet
-          )
-      )
-  );
 }
 
 /**
@@ -1096,9 +808,6 @@ export default function MessageItem({
   onRenameBranch,
 }: MessageItemProps) {
   const [isHovered, setIsHovered] = useState(false);
-  const messageRowRef = useRef<HTMLDivElement | null>(null);
-  const sourcePanelHoverRef = useRef(false);
-  const closeSourcePanelTimerRef = useRef<number | null>(null);
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
@@ -1141,117 +850,6 @@ export default function MessageItem({
     return selection && selection.toString().length > 0;
   }, []);
 
-  // Extract search results from tool results for auto-enhancement
-  const [sourceGroups, setSourceGroups] = useState<SourceGroup[]>([]);
-  const [sourceResults, setSourceResults] = useState<WebSearchSource[]>([]);
-  const [activeSourceGroupId, setActiveSourceGroupId] = useState<string | null>(null);
-  const [sourceAnchor, setSourceAnchor] = useState<SourceAnchor | null>(null);
-  const [activeBadgeKey, setActiveBadgeKey] = useState<string | null>(null);
-  const clearSourcePanelTimer = useCallback(() => {
-    if (closeSourcePanelTimerRef.current) {
-      window.clearTimeout(closeSourcePanelTimerRef.current);
-      closeSourcePanelTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleCloseSourcePanel = useCallback(() => {
-    clearSourcePanelTimer();
-    closeSourcePanelTimerRef.current = window.setTimeout(() => {
-      if (sourcePanelHoverRef.current) return;
-      setActiveSourceGroupId(null);
-      setActiveBadgeKey(null);
-      setSourceAnchor(null);
-    }, 160);
-  }, [clearSourcePanelTimer]);
-
-  const handleHoverSourceGroup = useCallback((groupId: string, anchorRect?: DOMRect, badgeKey?: string) => {
-    clearSourcePanelTimer();
-    setActiveSourceGroupId(groupId);
-    setActiveBadgeKey(badgeKey || null);
-    const rowRect = messageRowRef.current?.getBoundingClientRect();
-    if (rowRect && anchorRect) {
-      setSourceAnchor({
-        left: anchorRect.left - rowRect.left,
-        top: anchorRect.top - rowRect.top,
-        right: anchorRect.right - rowRect.left,
-        bottom: anchorRect.bottom - rowRect.top,
-        width: anchorRect.width,
-        height: anchorRect.height,
-        rowWidth: rowRect.width,
-        rowHeight: rowRect.height,
-      });
-      return;
-    }
-    setSourceAnchor(null);
-  }, [clearSourcePanelTimer]);
-
-  const handleLeaveSourceGroup = useCallback(() => {
-    scheduleCloseSourcePanel();
-  }, [scheduleCloseSourcePanel]);
-  
-  useEffect(() => {
-    if (message.searchResults && message.searchResults.length > 0) {
-      const normalized = normalizeWebSearchResults(message.searchResults);
-      const groups = groupSourcesByDomain(normalized);
-      setSourceGroups(groups);
-      setSourceResults(normalized);
-      setActiveSourceGroupId((prev) => {
-        const next = prev && groups.some(g => g.id === prev) ? prev : null;
-        if (!next) {
-          setSourceAnchor(null);
-          setActiveBadgeKey(null);
-        }
-        return next;
-      });
-      return;
-    }
-
-    if (!message.tool_calls || !toolResults) {
-      setSourceGroups([]);
-      setSourceResults([]);
-      setActiveSourceGroupId(null);
-      setActiveBadgeKey(null);
-      setSourceAnchor(null);
-      return;
-    }
-    
-    // Import and extract search results
-    import("../services/ai/ai-tools").then(({ extractSearchResultsFromToolResults }) => {
-      const results = normalizeWebSearchResults(extractSearchResultsFromToolResults(toolResults));
-      const groups = groupSourcesByDomain(results);
-      setSourceGroups(groups);
-      setSourceResults(results);
-      setActiveSourceGroupId((prev) => {
-        const next = prev && groups.some(g => g.id === prev) ? prev : null;
-        if (!next) {
-          setSourceAnchor(null);
-          setActiveBadgeKey(null);
-        }
-        return next;
-      });
-    }).catch(() => {
-      setSourceGroups([]);
-      setSourceResults([]);
-      setActiveSourceGroupId(null);
-      setActiveBadgeKey(null);
-      setSourceAnchor(null);
-    });
-  }, [message.id, message.searchResults, message.tool_calls, toolResults]);
-  
-  useEffect(() => {
-    return () => {
-      if (closeSourcePanelTimerRef.current) {
-        window.clearTimeout(closeSourcePanelTimerRef.current);
-      }
-    };
-  }, []);
-
-  const activeSourceGroup = useMemo(
-    () => sourceGroups.find((group) => group.id === activeSourceGroupId) || null,
-    [sourceGroups, activeSourceGroupId]
-  );
-  const showSourcePanel = isAssistant && !!activeSourceGroup;
-
   // Special handling for tool result messages (standalone)
   if (isTool) {
     return createElement(ToolResultItem, { message });
@@ -1283,7 +881,6 @@ export default function MessageItem({
   return createElement(
     "div",
     {
-      ref: messageRowRef,
       style: { ...messageRowWithSettings, ...selectionModeStyle },
       "data-message-index": messageIndex,
       "data-message-id": message.id,
@@ -1525,12 +1122,6 @@ export default function MessageItem({
           role: message.role,
           autoParseEnhancements: true,
           enableAutoEnhancement: false, // 完全禁用自动增强，避免干扰流式渲染
-          sourceGroups: sourceGroups,
-          sourceResults: sourceResults,
-          activeSourceGroupId: activeSourceGroupId,
-          activeBadgeKey: activeBadgeKey,
-          onHoverSourceGroup: handleHoverSourceGroup,
-          onLeaveSourceGroup: handleLeaveSourceGroup,
         }),
 
       // Cursor for streaming - 如果内容为空，显示"正在输出"提示
@@ -1672,27 +1263,6 @@ export default function MessageItem({
             )
           )
         ),
-
-      showSourcePanel && activeSourceGroup &&
-        createElement(SourceCardPanel, {
-          group: activeSourceGroup,
-          anchor: sourceAnchor,
-          onHoverStart: () => {
-            sourcePanelHoverRef.current = true;
-            clearSourcePanelTimer();
-          },
-          onHoverEnd: () => {
-            sourcePanelHoverRef.current = false;
-            scheduleCloseSourcePanel();
-          },
-          onClose: () => {
-            sourcePanelHoverRef.current = false;
-            clearSourcePanelTimer();
-            setActiveSourceGroupId(null);
-            setActiveBadgeKey(null);
-            setSourceAnchor(null);
-          },
-        }),
 
       // Action Bar - with slide-in animation
       showActionBar && createElement(
