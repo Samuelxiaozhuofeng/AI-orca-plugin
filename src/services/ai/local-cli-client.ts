@@ -3,7 +3,7 @@
  *
  * 经本机 bridge（bridge/orca-agent-bridge.mjs）调用 Claude Code：读 SSE 事件，转成 StreamChunk。
  * 不产生 tool_calls（工具由 Claude Code 自己执行），权限请求转给确认弹窗。
- * 不续接 claude 会话：每次都新开，prompt = 当前可见历史压缩 + 用户上下文 + 最新消息。
+ * prompt = 当前可见历史压缩 + 用户上下文 + 最新消息；面板判定可直接续接时另带 resume（新中转用它 --resume）。
  */
 
 import type { OpenAIChatMessage } from "./openai-client";
@@ -23,6 +23,12 @@ export type LocalCliConfirm = (
   opts: { signal: AbortSignal },
 ) => Promise<boolean>;
 
+/** 直接续接：Claude Code 会话 id；上一轮被停止 / 出错时屏幕上的半截正文 */
+export type LocalCliResume = { sid: string; partialText?: string };
+
+/** 本轮运行结果（本函数写、调用方收尾时读）：新中转报的会话 id、最后一个 assistant uuid、续接失败已改整段重发 */
+export type LocalCliRun = { sid?: string; uuid?: string; resumeFailed?: boolean };
+
 export interface LocalCliContext {
   /** 插件对话 id：完全放开模式的提醒每个对话只弹一次 */
   conversationId: string;
@@ -33,6 +39,8 @@ export interface LocalCliContext {
   orcaMcp?: { url: string; token: string };
   /** 本对话选的工作文件夹；空 = 中转默认文件夹 */
   workDir?: string;
+  resume?: LocalCliResume;
+  run?: LocalCliRun;
   confirm: LocalCliConfirm;
 }
 
@@ -50,6 +58,8 @@ export interface LocalCliStreamOptions {
 const fullAccessWarned = new Set<string>();
 /** 已提示过「中转是旧版、选的文件夹没生效」的插件对话 id（仅内存） */
 const staleBridgeWarned = new Set<string>();
+/** 已提示过「中转是旧版、续接没生效」的插件对话 id（仅内存） */
+const staleResumeWarned = new Set<string>();
 
 class BridgeError extends Error {}
 
@@ -115,6 +125,16 @@ export function sessionBanner(ev: any): string | null {
 export function buildLocalCliPrompt(messages: OpenAIChatMessage[], contextText?: string, instructions?: string): string {
   const head = instructions?.trim() ? `以下是用户的个人设定与要求，请遵守：\n\n${instructions.trim()}\n\n---\n` : "";
   return head + buildConversationPrompt(messages, contextText);
+}
+
+/** 续接时发的文字：个人设定 + 用户上下文 +（被停止时）半截回复 + 当前问题；历史在 Claude Code 会话里，不再附 */
+export function buildLocalCliResumePrompt(messages: OpenAIChatMessage[], contextText?: string, instructions?: string, partialText?: string): string {
+  const head = instructions?.trim() ? `以下是用户的个人设定与要求，请遵守：\n\n${instructions.trim()}\n\n---\n` : "";
+  const context = contextText?.trim() ? `以下是用户提供的上下文：\n\n${contextText.trim()}\n\n---\n` : "";
+  const stopped = partialText?.trim() ? `上一轮你的回复输出到这里时被用户停止：\n\n${partialText.trim()}\n\n---\n` : "";
+  const convo = messages.filter((m) => m.role === "user");
+  const current = convo.length ? messageText(convo[convo.length - 1]) : "";
+  return `${head}${context}${stopped}当前问题：\n${current}`;
 }
 
 function buildConversationPrompt(messages: OpenAIChatMessage[], contextText?: string): string {
@@ -267,45 +287,72 @@ export async function* streamLocalCli(
 
   try {
     let done = false;
+    let produced = false;
+    let resume = ctx.resume;
     const workDir = ctx.workDir?.trim();
-    const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions), model: options.model, orcaMcp: ctx.orcaMcp, ...(workDir ? { workDir } : {}) };
-    for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
-      if (ev.type === "session") {
-        if (ev.mode === "safe" || ev.mode === "full") lastMode = ev.mode;
-        if (workDir && !ev.cwd && !staleBridgeWarned.has(ctx.conversationId)) {
-          staleBridgeWarned.add(ctx.conversationId);
-          orca.notify("warn", "中转程序是旧版，选的文件夹没生效，AI 仍在默认文件夹里运行；请退出中转后重新打开 Orca");
+    // 续接失败（新中转报 resume_failed 且本轮还没输出）→ 去掉 resume 整段重发一次
+    for (;;) {
+      let retry = false;
+      const body = {
+        prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions),
+        model: options.model,
+        orcaMcp: ctx.orcaMcp,
+        ...(workDir ? { workDir } : {}),
+        ...(resume ? { resume: { sid: resume.sid, prompt: buildLocalCliResumePrompt(messages, ctx.contextText, ctx.instructions, resume.partialText) } } : {}),
+      };
+      for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
+        if (ev.type === "session") {
+          if (ev.mode === "safe" || ev.mode === "full") lastMode = ev.mode;
+          // 新中转的 session 事件总带 resumed；没有 = 旧中转，用的是整段 prompt，本轮不记续接信息
+          if ("resumed" in ev) {
+            if (ctx.run && ev.id) ctx.run.sid = String(ev.id);
+          } else if (resume && !staleResumeWarned.has(ctx.conversationId)) {
+            staleResumeWarned.add(ctx.conversationId);
+            orca.notify("warn", "中转程序是旧版，续接没生效，请退出中转后重新打开 Orca");
+          }
+          if (workDir && !ev.cwd && !staleBridgeWarned.has(ctx.conversationId)) {
+            staleBridgeWarned.add(ctx.conversationId);
+            orca.notify("warn", "中转程序是旧版，选的文件夹没生效，AI 仍在默认文件夹里运行；请退出中转后重新打开 Orca");
+          }
+          const banner = bannerShown ? null : sessionBanner(ev);
+          if (banner) {
+            bannerShown = true;
+            content += banner;
+            yield { type: "content", content: banner };
+            if (ev.mode === "full" && !fullAccessWarned.has(ctx.conversationId)) {
+              fullAccessWarned.add(ctx.conversationId);
+              orca.notify("warn", "本机 AI 在完全放开模式下运行：会不经确认直接改文件、跑命令、改笔记");
+            }
+          }
+        } else if (ev.type === "assistant_uuid") {
+          if (ctx.run && ev.uuid) ctx.run.uuid = String(ev.uuid);
+        } else if (ev.type === "permission") {
+          produced = true;
+          permissionQueue = permissionQueue.then(() => answerPermission(ev));
+        } else if (ev.type === "error") {
+          if (ev.code === "resume_failed" && resume && !produced) { retry = true; break; }
+          throw new BridgeError(`本机 AI 出错：${String(ev.message || "未知错误")}`);
+        } else if (ev.type === "done") {
+          done = true;
         }
-        const banner = bannerShown ? null : sessionBanner(ev);
-        if (banner) {
-          bannerShown = true;
-          content += banner;
-          yield { type: "content", content: banner };
-          if (ev.mode === "full" && !fullAccessWarned.has(ctx.conversationId)) {
-            fullAccessWarned.add(ctx.conversationId);
-            orca.notify("warn", "本机 AI 在完全放开模式下运行：会不经确认直接改文件、跑命令、改笔记");
+        let chunk = mapBridgeEvent(ev);
+        if (!chunk) continue;
+        produced = true;
+        if (chunk.type === "content") {
+          content += chunk.content;
+          // 面板对累加内容 trim，模式行后单独发的 "\n\n" 会被吃掉：流式时给第一段正文补上分段（最终 content 不重复）
+          // 纯空白块会被 trim 掉，等第一段可见正文再补分段
+          if (bannerShown && !textAfterBanner && chunk.content.trim()) {
+            chunk = { ...chunk, content: `\n\n${chunk.content}` };
+            textAfterBanner = true;
           }
         }
-      } else if (ev.type === "permission") {
-        permissionQueue = permissionQueue.then(() => answerPermission(ev));
-      } else if (ev.type === "error") {
-        throw new BridgeError(`本机 AI 出错：${String(ev.message || "未知错误")}`);
-      } else if (ev.type === "done") {
-        done = true;
+        if (chunk.type === "reasoning") reasoning += chunk.reasoning;
+        yield chunk;
       }
-      let chunk = mapBridgeEvent(ev);
-      if (!chunk) continue;
-      if (chunk.type === "content") {
-        content += chunk.content;
-        // 面板对累加内容 trim，模式行后单独发的 "\n\n" 会被吃掉：流式时给第一段正文补上分段（最终 content 不重复）
-        // 纯空白块会被 trim 掉，等第一段可见正文再补分段
-        if (bannerShown && !textAfterBanner && chunk.content.trim()) {
-          chunk = { ...chunk, content: `\n\n${chunk.content}` };
-          textAfterBanner = true;
-        }
-      }
-      if (chunk.type === "reasoning") reasoning += chunk.reasoning;
-      yield chunk;
+      if (!retry) break;
+      resume = undefined;
+      if (ctx.run) { ctx.run.resumeFailed = true; ctx.run.sid = undefined; ctx.run.uuid = undefined; }
     }
     if (!done) throw new BridgeError("本机 AI 连接中断，回复未完成");
   } catch (err: any) {

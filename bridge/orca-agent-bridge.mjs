@@ -28,6 +28,7 @@ const EXIT_GRACE_MS = 3000;
 const MANAGED_SETTINGS = process.env.ORCA_BRIDGE_MANAGED_SETTINGS || "/Library/Application Support/ClaudeCode/managed-settings.json";
 const MODELS = ["claude", "fable", "opus", "sonnet", "haiku"]; // claude = 不指定，用 Claude Code 默认
 const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._\-\[\]]{0,99}$/;
+const SID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // 安全模式下 init 里出现这些权限模式说明权限被放宽，立即终止
 const BAD_MODES = ["bypassPermissions", "acceptEdits", "auto", "dontAsk"];
 // Orca MCP 只读工具白名单（自动放行）；实测 tools/list 后再填，先为空 = 一律弹确认
@@ -127,6 +128,7 @@ const { token, file: tokenFile, created } = loadToken();
 const expectedAuth = Buffer.from(`Bearer ${token}`);
 
 const children = new Set(); // 所有在跑的 claude 子进程（bridge 退出时一并杀掉）
+const bySid = new Map(); // claude 会话 id -> 正在跑它的子进程（同一会话不让两个进程同时写）
 const mcpDirs = new Set(); // 所有临时 MCP 配置目录（内含令牌，结束即删）
 // 临时目录名带 bridge pid，启动时只清扫 pid 已不在的残留，不误删另一个在跑的 bridge 的
 const MCP_DIR_PREFIX = `orca-bridge-${process.pid}-`;
@@ -235,15 +237,34 @@ function resolveWorkDir(raw) {
   } catch { return null; }
 }
 
-function handleChat(req, res, body) {
+/** SIGTERM 并等它退出；3 秒还没退就 SIGKILL */
+function stopChild(child) {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    const timer = setTimeout(() => child.kill("SIGKILL"), EXIT_GRACE_MS);
+    child.once("exit", () => { clearTimeout(timer); resolve(); });
+    child.orcaTerminated = true;
+    child.kill("SIGTERM");
+  });
+}
+
+async function handleChat(req, res, body) {
   const prompt = typeof body.prompt === "string" ? body.prompt : "";
   if (!prompt.trim()) return sendJson(res, 400, { error: "prompt 为空" });
+  // 续接：sid 必须是 UUID、续接文字非空，否则忽略 resume，照旧用整段 prompt 新开
+  const r = body.resume;
+  const resume = r && typeof r.sid === "string" && SID_RE.test(r.sid) && typeof r.prompt === "string" && r.prompt.trim() ? { sid: r.sid, prompt: r.prompt } : null;
   const model = body.model == null || body.model === "" ? "claude" : body.model;
   if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
   const workDir = resolveWorkDir(body.workDir);
   if (workDir === null) return sendJson(res, 400, { error: `文件夹 ${String(body.workDir)} 不存在或不是文件夹` });
   const claudeBin = resolveClaudeBin(CLAUDE_NAME);
   if (!claudeBin) return sendJson(res, 500, { error: `找不到 claude 命令（${CLAUDE_NAME}），请先安装 Claude Code` });
+  if (resume) {
+    // 同一会话还有进程在跑（如刚停止的上一轮还没退）：先结束它再续接，免得两个进程同时写同一会话
+    for (let old; (old = bySid.get(resume.sid)); ) await stopChild(old);
+    if (req.socket.destroyed) return; // 等待期间客户端已断开
+  }
 
   const args = [...BASE_ARGS, ...addDirArgs];
   let mcpDir = null;
@@ -258,6 +279,7 @@ function handleChat(req, res, body) {
     args.push("--mcp-config", mcpFile);
   }
   if (model !== "claude") args.push("--model", model);
+  if (resume) args.push("--resume", resume.sid);
 
   res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache", Connection: "keep-alive" });
   const send = (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); };
@@ -273,6 +295,9 @@ function handleChat(req, res, body) {
 
   const child = spawn(claudeBin, args, { cwd: workDir, env: SAFE_ENV, stdio: ["pipe", "pipe", "pipe"] });
   children.add(child);
+  if (resume) bySid.set(resume.sid, child);
+  const forgetSid = () => { for (const [sid, c] of bySid) if (c === child) bySid.delete(sid); };
+  let produced = false; // 已发出正文 / 思考 / 工具 / 确认请求
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
@@ -280,11 +305,12 @@ function handleChat(req, res, body) {
   let stderrTail = "";
 
   child.stdin.on("error", () => {});
-  child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
+  child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: resume ? resume.prompt : prompt } }) + "\n");
   child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-2000); });
   const cleanup = () => {
     for (const [id, p] of pending) if (p.child === child) pending.delete(id);
     children.delete(child);
+    forgetSid();
     removeMcpDir(mcpDir);
   };
   child.on("error", (err) => {
@@ -298,10 +324,12 @@ function handleChat(req, res, body) {
     clearTimeout(exitTimer);
     cleanup();
     const tail = stderrTail.trim().slice(-500);
-    finish({ type: "error", message: `claude 异常退出（${exitStatus}）${tail ? "：" + tail : ""}` });
+    // 续接在出任何输出前就失败（如会话记录找不到）：插件据 code 改为整段新开重试
+    const failedResume = resume && !produced && exitStatus !== 0;
+    finish({ type: "error", ...(failedResume ? { code: "resume_failed" } : {}), message: `claude 异常退出（${exitStatus}）${tail ? "：" + tail : ""}` });
   };
   // 后代进程继承了 stdout 时 close 可能一直不来：exit 后 3 秒仍未 close 就强制结束
-  child.on("exit", (code, signal) => { exitStatus = code ?? signal; exitTimer = setTimeout(ended, EXIT_GRACE_MS); });
+  child.on("exit", (code, signal) => { forgetSid(); exitStatus = code ?? signal; exitTimer = setTimeout(ended, EXIT_GRACE_MS); });
   child.on("close", (code, signal) => { exitStatus ??= code ?? signal; ended(); });
   res.on("close", () => {
     if (finished) return;
@@ -323,20 +351,25 @@ function handleChat(req, res, body) {
         child.kill("SIGTERM");
         return;
       }
-      send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model, cwd: workDir });
+      if (typeof m.session_id === "string" && m.session_id) bySid.set(m.session_id, child);
+      send({ type: "session", id: m.session_id, mode: MODE, model: m.model || model, cwd: workDir, resumed: Boolean(resume) });
     } else if (m.type === "stream_event" && !m.parent_tool_use_id) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
-      if (delta?.type === "text_delta") send({ type: "text", delta: delta.text });
-      else if (delta?.type === "thinking_delta") send({ type: "thinking", delta: delta.thinking });
+      if (delta?.type === "text_delta") { produced = true; send({ type: "text", delta: delta.text }); }
+      else if (delta?.type === "thinking_delta") { produced = true; send({ type: "thinking", delta: delta.thinking }); }
     } else if (m.type === "assistant" && !m.parent_tool_use_id) {
       for (const block of m.message?.content || []) {
         if (block.type !== "tool_use") continue;
+        produced = true;
         toolNames.set(block.id, block.name);
         send({ type: "tool", name: block.name, input: block.input });
       }
+      // 完整 assistant 消息的 uuid：插件记最后一个，日后续接 / 回退用
+      if (typeof m.uuid === "string" && m.uuid) send({ type: "assistant_uuid", uuid: m.uuid });
     } else if (m.type === "user" && !m.parent_tool_use_id && Array.isArray(m.message?.content)) {
       for (const block of m.message.content) {
         if (block.type !== "tool_result") continue;
+        produced = true;
         send({ type: "tool_result", name: toolNames.get(block.tool_use_id) || "工具", ok: !block.is_error });
       }
     } else if (m.type === "control_request") {
@@ -351,12 +384,13 @@ function handleChat(req, res, body) {
         return;
       }
       // 忽略 claude 给的永久允许建议，每次都问
+      produced = true;
       pending.set(m.request_id, { child, input: r.input });
       send({ type: "permission", requestId: m.request_id, tool: r.tool_name, input: r.input });
     } else if (m.type === "result") {
       if (m.is_error) {
         const message = m.result || (m.errors || []).join("; ") || "claude 运行出错";
-        finish({ type: "error", message: String(message) });
+        finish({ type: "error", ...(resume && !produced ? { code: "resume_failed" } : {}), message: String(message) });
       } else {
         finish({ type: "done" });
       }
@@ -394,7 +428,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && (req.url === "/models" || req.url === "/v1/models")) {
       return sendJson(res, 200, { object: "list", data: MODELS.map((id) => ({ id, object: "model" })) });
     }
-    if (req.method === "POST" && req.url === "/chat") return handleChat(req, res, await readJson(req));
+    if (req.method === "POST" && req.url === "/chat") return await handleChat(req, res, await readJson(req));
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
     sendJson(res, 404, { error: "not found" });
   } catch (err) {

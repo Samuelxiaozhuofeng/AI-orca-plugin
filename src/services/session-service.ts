@@ -79,6 +79,8 @@ export type Message = {
   branchId?: string;           // 分支 ID（主分支为 undefined）
   parentMessageId?: string;    // 父消息 ID（分支点）
   branches?: MessageBranch[];  // 此消息的其他分支
+  /** 本机 AI：这轮回复在 Claude Code 侧的会话 id 与最后一条 assistant uuid；被停止 / 出错为 partial */
+  cc?: { sid: string; uuid?: string; partial?: true };
 };
 
 /**
@@ -150,6 +152,8 @@ export type SessionFileData = {
   model?: string;
   /** 本机 AI 的工作文件夹；没有 = 中转默认文件夹 */
   workDir?: string;
+  /** 本机 AI 最近一轮对应的 Claude Code 会话与那条回复的消息 id；最后一条仍是它才直接续接 */
+  ccHead?: { sid: string; msgId: string };
   messages: Message[];
   contexts: ContextRef[];
   createdAt: number;
@@ -168,6 +172,8 @@ export type SavedSession = {
   model?: string;
   /** 本机 AI 的工作文件夹；没有 = 中转默认文件夹 */
   workDir?: string;
+  /** 本机 AI 最近一轮对应的 Claude Code 会话与那条回复的消息 id；最后一条仍是它才直接续接 */
+  ccHead?: { sid: string; msgId: string };
   messages: Message[];
   contexts: ContextRef[];
   createdAt: number;
@@ -726,6 +732,7 @@ export async function loadFullSession(sessionId: string): Promise<SavedSession |
     title: fileData.title,
     model: fileData.model,
     workDir: fileData.workDir,
+    ccHead: fileData.ccHead,
     messages: fileData.messages,
     contexts: fileData.contexts,
     createdAt: fileData.createdAt,
@@ -755,6 +762,7 @@ export async function saveSession(session: SavedSession): Promise<void> {
     title: session.title || generateSessionTitle(filteredMessages),
     model: session.model,
     workDir: session.workDir,
+    ccHead: session.ccHead,
     messages: filteredMessages,
     contexts: session.contexts,
     createdAt: session.createdAt,
@@ -1009,6 +1017,7 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     title: title || "",
     model: session.model,
     workDir: session.workDir,
+    ccHead: session.ccHead,
     messages: filteredMessages,
     contexts: session.contexts,
     createdAt: session.createdAt,

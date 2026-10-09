@@ -68,7 +68,8 @@ import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
-import { LOCAL_CLI_ABORT_NOTE, BANNER_RE, bannerOf, getLastLocalCliMode } from "../services/ai/local-cli-client";
+import { LOCAL_CLI_ABORT_NOTE, BANNER_RE, bannerOf, getLastLocalCliMode, type LocalCliRun } from "../services/ai/local-cli-client";
+import { pickLocalCliResume } from "../services/ai/local-cli-resume";
 import { createChatRequestOwner, loadIfLatest, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
 import { createPendingSave } from "../utils/pending-save";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
@@ -1309,6 +1310,11 @@ graph TD
     };
 
     const aborter = req.newAborter(abortRef);
+    // 本机 AI 续接：本轮运行结果与回复消息 id，收尾时写回（只写回仍属本请求的对话）
+    const setCurrentSessionGuarded = req.guard(setCurrentSession);
+    const ccRun: LocalCliRun = {};
+    let ccAssistantId: string | null = null;
+    let ccPartial = false;
 
     try {
       // Build context (now returns text + assets)
@@ -1513,6 +1519,8 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 contextText,
                 instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix, memoryText }),
                 workDir: currentSession.workDir,
+                resume: pickLocalCliResume(baseMessages, currentSession.ccHead),
+                run: ccRun,
                 isCurrent: req.isCurrent,
               })
             : undefined,
@@ -1592,6 +1600,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             toolCalls = chunk.result.toolCalls;
           }
         }
+        ccAssistantId = reasoningMessageId;
       }
 
       setStreamingMessageId(null);
@@ -1633,6 +1642,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           searchResults: getSearchResultsForMessage(),
         }]);
       }
+      ccAssistantId = assistantId;
 
 	      conversation.push({
 	        id: assistantId,
@@ -2158,6 +2168,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       // **Validates: Requirements 11.3**
       setLastError(null);
     } catch (err: any) {
+      ccPartial = true;
       const isAbort = String(err?.name ?? "") === "AbortError";
       const msg = String(err?.message ?? err ?? "unknown error");
       if (!isAbort) {
@@ -2188,6 +2199,15 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         return prev;
       });
     } finally {
+      // 新中转报了会话（正常 / 停止 / 出错都算）：记到本轮回复上，并记为对话的续接点；续接失败且没新会话 → 清掉续接点
+      const ccSid = ccRun.sid;
+      const ccMsgId = ccAssistantId;
+      if (ccSid && ccMsgId) {
+        updateMessage(ccMsgId, { cc: { sid: ccSid, ...(ccRun.uuid ? { uuid: ccRun.uuid } : {}), ...(ccPartial ? { partial: true as const } : {}) } });
+        setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: { sid: ccSid, msgId: ccMsgId } }));
+      } else if (ccRun.resumeFailed) {
+        setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: undefined }));
+      }
       if (abortRef.current === aborter) abortRef.current = null;
       setSending(false);
       setStreamingMessageId(null);
@@ -2257,8 +2277,11 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
   // 删除单条消息
   const handleDeleteMessage = useCallback((messageId: string) => {
+    const target = messages.find((m) => m.id === messageId);
     setMessages((prev) => prev.filter((m) => m.id !== messageId));
-  }, []);
+    // 删了 AI 看过的内容：下次本机 AI 不直接续接，整段新开
+    if (target && !target.localOnly) setCurrentSession((prev) => (prev.ccHead ? { ...prev, ccHead: undefined } : prev));
+  }, [messages]);
 
   // 提取出的记忆写进记忆管理（点按钮时的用户），与记忆管理里手动添加同一条路
   const handleExtractMemory = useCallback((memories: ExtractedMemory[], userId?: string) => {

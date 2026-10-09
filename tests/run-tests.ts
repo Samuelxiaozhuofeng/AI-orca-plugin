@@ -16,6 +16,7 @@ import "./local-cli-round2.test";
 import "./local-cli-round3.test";
 import "./local-cli-autostart.test";
 import "./local-cli-instructions.test";
+import "./local-cli-resume.test";
 import "./chat-request-owner.test";
 import "./pending-save.test";
 import "./session-select-race.test";

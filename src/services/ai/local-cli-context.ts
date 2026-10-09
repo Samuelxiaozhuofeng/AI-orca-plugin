@@ -4,7 +4,7 @@
 
 import { mcpStore } from "../../store/mcp-store";
 import { createToolConfirmPromise } from "../../components/ToolConfirmDialog";
-import type { LocalCliContext } from "./local-cli-client";
+import type { LocalCliContext, LocalCliResume, LocalCliRun } from "./local-cli-client";
 
 export function buildLocalCliContext(
   conversationId: string,
@@ -12,6 +12,8 @@ export function buildLocalCliContext(
     contextText?: string;
     instructions?: string;
     workDir?: string;
+    resume?: LocalCliResume;
+    run?: LocalCliRun;
     /** 请求是否仍属当前对话；不是就不弹窗，按拒绝处理 */
     isCurrent: () => boolean;
   },
@@ -23,6 +25,8 @@ export function buildLocalCliContext(
     contextText: opts.contextText,
     instructions: opts.instructions,
     workDir: opts.workDir,
+    resume: opts.resume,
+    run: opts.run,
     orcaMcp: orcaNote?.url ? { url: orcaNote.url, token: auth.replace(/^Bearer\s+/i, "") } : undefined,
     confirm: (tool, input, { signal }) =>
       opts.isCurrent() ? createToolConfirmPromise(tool, input, { full: true, signal }) : Promise.resolve(false),

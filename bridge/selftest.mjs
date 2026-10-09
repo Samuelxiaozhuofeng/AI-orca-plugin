@@ -1,7 +1,8 @@
 // bridge 自检：用假 claude 子进程验证令牌 401、断开杀子进程、心跳、权限回包、
 // 跨块汉字、断开后权限作废、exit 早于 stdout 读完、启动输出无令牌、/models、MCP 令牌不进环境变量；
 // 第二轮：退出/中止删临时目录、启动清扫、exit 后强制结束、受管配置警告、完全放开模式、选模型；
-// 第三轮：不续接、旧命名残留清扫、配置权限、无配置安全模式、App 的 launch.sh 写默认配置与 PATH 顺序。
+// 第三轮：不续接、旧命名残留清扫、配置权限、无配置安全模式、App 的 launch.sh 写默认配置与 PATH 顺序；
+// 续接第一段：--resume、非法 sid 忽略、resumed 标记、assistant uuid、续接早退 resume_failed、同会话先停旧进程。
 // 运行：node bridge/selftest.mjs（不需要真 claude，不碰 ~/.orca-agent-bridge）
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -43,8 +44,13 @@ function finishOk() {
 }
 function start(p) {
   log("pid.log", String(process.pid));
+  log("prompt.log", JSON.stringify(p));
+  log("order.log", "start " + process.pid);
+  const resumeAt = argv.indexOf("--resume");
+  const sid = resumeAt > 0 ? argv[resumeAt + 1] : (/sid=(\\S+)/.exec(p)?.[1] ?? "fake-sess");
+  if (sid.endsWith("dead")) { process.stderr.write("No conversation found with session ID: " + sid); process.exit(1); }
   const bypass = p.includes("badmode") || (argv.includes("bypassPermissions") && !p.includes("safemode"));
-  out({ type: "system", subtype: "init", session_id: "fake-sess", permissionMode: bypass ? "bypassPermissions" : "default", model: modelAt > 0 ? "fake-" + argv[modelAt + 1] : "fake-default" });
+  out({ type: "system", subtype: "init", session_id: sid, permissionMode: bypass ? "bypassPermissions" : "default", model: modelAt > 0 ? "fake-" + argv[modelAt + 1] : "fake-default" });
   if (p.includes("permcjk")) {
     // 把一行 JSON 从某个汉字中间切成两次写出，模拟管道按字节分块
     const line = Buffer.from(JSON.stringify({ type: "control_request", request_id: "r-cjk", request: { subtype: "can_use_tool", tool_name: "Write", input: { content: "汉".repeat(5000) } } }) + "\\n");
@@ -69,6 +75,21 @@ function start(p) {
     const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], { stdio: ["ignore", "inherit", "inherit"] });
     log("linger.log", String(g.pid));
     return process.exit(3);
+  }
+  if (p.includes("uuidrun")) {
+    out({ type: "assistant", uuid: "u-1", parent_tool_use_id: null, message: { content: [{ type: "text", text: "a" }] } });
+    out({ type: "assistant", uuid: "u-sub", parent_tool_use_id: "t1", message: { content: [{ type: "text", text: "sub" }] } });
+    out({ type: "assistant", uuid: "u-2", parent_tool_use_id: null, message: { content: [{ type: "text", text: "b" }] } });
+    return finishOk();
+  }
+  if (p.includes("textcrash")) {
+    out({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } } });
+    return setTimeout(() => process.exit(2), 50);
+  }
+  if (p.includes("termhang")) { process.on("SIGTERM", () => log("order.log", "ignore " + process.pid)); return setInterval(() => {}, 1000); }
+  if (p.includes("slowhang")) {
+    process.on("SIGTERM", () => { log("order.log", "term " + process.pid); setTimeout(() => process.exit(0), 300); });
+    return setInterval(() => {}, 1000);
   }
   if (p.includes("afterresult")) { finishOk(); return setInterval(() => {}, 1000); } // 给完 result 不退出
   if (p.includes("hang")) return setInterval(() => {}, 1000);
@@ -421,7 +442,85 @@ try {
 
   await check("V3 session 事件带 mode 与实际 model", async () => {
     const r = await chat({ prompt: "hi" });
-    assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default", cwd: path.join(tmp, "work") });
+    assert.deepEqual(r.events[0], { type: "session", id: "fake-sess", mode: "safe", model: "fake-default", cwd: path.join(tmp, "work"), resumed: false });
+  });
+
+  const SID = "11111111-2222-4333-8444-555555555555";
+  await check("R1 合法 resume：加 --resume、stdin 用 resume.prompt、session 带 resumed:true", async () => {
+    const r = await chat({ prompt: "整段文字", resume: { sid: SID, prompt: "续接文字" } });
+    assert.equal(r.events.at(-1).type, "done");
+    const a = lastArgs();
+    assert.equal(a[a.indexOf("--resume") + 1], SID);
+    assert.equal(JSON.parse(readLog("prompt.log").trim().split("\n").pop()), "续接文字");
+    assert.equal(r.events[0].resumed, true);
+    assert.equal(r.events[0].id, SID);
+  });
+
+  await check("R2 非法 sid / 空续接文字 / 不带 resume：不 --resume、stdin 用整段 prompt、resumed:false", async () => {
+    for (const resume of [{ sid: "../x", prompt: "p" }, { sid: `${SID} --x`, prompt: "p" }, { sid: SID, prompt: "  " }, { sid: 5, prompt: "p" }, "x", undefined]) {
+      const r = await chat({ prompt: "整段", resume });
+      assert.equal(r.events.at(-1).type, "done", JSON.stringify(resume));
+      assert.ok(!lastArgs().includes("--resume"), JSON.stringify(resume));
+      assert.equal(JSON.parse(readLog("prompt.log").trim().split("\n").pop()), "整段");
+      assert.equal(r.events[0].resumed, false);
+    }
+  });
+
+  await check("R3 每条主线完整 assistant 消息的 uuid 按序转发，子代理的不转发", async () => {
+    const r = await chat({ prompt: "uuidrun" });
+    assert.deepEqual(r.events.filter((e) => e.type === "assistant_uuid").map((e) => e.uuid), ["u-1", "u-2"]);
+    assert.equal(r.events.at(-1).type, "done");
+  });
+
+  await check("R4 续接在任何输出前非 0 退出 → resume_failed；有输出后退出、未续接时退出 → 普通 error", async () => {
+    const dead = "11111111-2222-4333-8444-55555555dead";
+    const r = await chat({ prompt: "整段", resume: { sid: dead, prompt: "续" } });
+    assert.equal(r.events.at(-1).type, "error");
+    assert.equal(r.events.at(-1).code, "resume_failed");
+    assert.match(r.events.at(-1).message, /No conversation found/);
+    const r2 = await chat({ prompt: "整段", resume: { sid: SID, prompt: "textcrash" } });
+    assert.equal(r2.events.at(-1).type, "error");
+    assert.equal(r2.events.at(-1).code, undefined);
+    const r3 = await chat({ prompt: "crash" });
+    assert.equal(r3.events.at(-1).code, undefined);
+  });
+
+  const waitFor = async (fn) => { for (let i = 0; i < 100 && !fn(); i++) await sleep(50); assert.ok(fn(), "等待超时"); };
+  await check("R5 同会话旧进程还在跑（未续接、按 init 登记）→ 先 SIGTERM 等它退出再起新的", async () => {
+    const S = "22222222-2222-4333-8444-555555555555";
+    fs.rmSync(path.join(tmp, "order.log"), { force: true });
+    const ac = new AbortController();
+    const first = chat({ prompt: `slowhang sid=${S}`, signal: ac.signal }, async (raw) => (raw.includes('"session"') ? "stop" : undefined));
+    await first;
+    const pidA = Number(readLog("order.log").trim().split(" ")[1]);
+    const r = await chat({ prompt: "整段", resume: { sid: S, prompt: "hi" } });
+    ac.abort();
+    assert.equal(r.events.at(-1).type, "done");
+    const lines = readLog("order.log").trim().split("\n");
+    assert.deepEqual(lines.slice(0, 2), [`start ${pidA}`, `term ${pidA}`]);
+    assert.match(lines[2], /^start \d+$/);
+    assert.ok(!alive(pidA), "旧进程应已退出");
+  });
+
+  await check("R6 旧进程不理 SIGTERM → 3 秒后 SIGKILL，新请求照常完成不卡住", async () => {
+    const S = "33333333-2222-4333-8444-555555555555";
+    fs.rmSync(path.join(tmp, "order.log"), { force: true });
+    const ac = new AbortController();
+    await chat({ prompt: "整段", resume: { sid: S, prompt: "termhang" }, signal: ac.signal }, async (raw) => (raw.includes('"session"') ? "stop" : undefined));
+    await waitFor(() => readLog("order.log").includes("start"));
+    const pidA = Number(readLog("order.log").trim().split(" ")[1]);
+    const t0 = Date.now();
+    const r = await chat({ prompt: "整段", resume: { sid: S, prompt: "hi" } });
+    const ms = Date.now() - t0;
+    ac.abort();
+    try {
+      assert.equal(r.events.at(-1).type, "done");
+      assert.ok(ms >= 2500 && ms < 6000, `用时 ${ms}ms`);
+      assert.ok(!alive(pidA), "旧进程应已被 SIGKILL");
+      assert.match(readLog("order.log"), new RegExp(`ignore ${pidA}`));
+    } finally {
+      try { process.kill(pidA, "SIGKILL"); } catch {}
+    }
   });
   await check("H8 config.json 不存在 → 安全模式、不生成文件、工作目录 ~/OrcaAgent", async () => {
     const home = path.join(tmp, "fakehome-h8");
