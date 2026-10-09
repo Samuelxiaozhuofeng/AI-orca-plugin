@@ -1,5 +1,6 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
-import { appendLocalImagePreviews, toFileUrl } from "../utils/local-image-paths";
+import { appendLocalImagePreviews } from "../utils/local-image-paths";
+import { resolveAssetPath, resolveAssetUrl } from "../utils/asset-path";
 import { toBody } from "../utils/modal-dismiss";
 import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -24,50 +25,13 @@ import {
 const React = window.React as any;
 const { createElement, useMemo, useState } = React;
 
-// 图片路径处理工具函数
-function resolveImageSrc(src: string): string {
-  if (src.startsWith("/")) return toFileUrl(src); // 本机绝对路径（本机 AI 截图/生成的图）
-  if (src.startsWith("./") || src.startsWith("../")) {
-    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${relativePath}`;
-    }
-  } else if (src.startsWith("assets/")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `file:///${repoDir.replace(/\\/g, "/")}/${src}`;
-    }
-  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `file:///${repoDir.replace(/\\/g, "/")}/assets/${src}`;
-    }
-  }
-  return src;
-}
+// 图片路径处理：附件相对路径统一走 asset-path
+const resolveImageSrc = resolveAssetUrl;
 
+/** shell-open 用的本机路径 */
 function resolveImageFilePath(src: string): string {
   if (src.startsWith("file://")) return decodeURIComponent(src.slice("file://".length));
-  if (src.startsWith("/")) return src;
-  if (src.startsWith("./") || src.startsWith("../")) {
-    const relativePath = src.replace(/^\.\//, "").replace(/^\.\.\//, "");
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `${repoDir}\\assets\\${relativePath}`;
-    }
-  } else if (src.startsWith("assets/")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `${repoDir}\\${src.replace(/\//g, "\\")}`;
-    }
-  } else if (!src.startsWith("http") && !src.startsWith("file://") && !src.startsWith("data:")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      return `${repoDir}\\assets\\${src}`;
-    }
-  }
-  return src;
+  return resolveAssetPath(src);
 }
 
 interface Props {

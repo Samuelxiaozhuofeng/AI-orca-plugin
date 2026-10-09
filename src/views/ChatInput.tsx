@@ -295,7 +295,8 @@ export default function ChatInput({
         }
         return;
       }
-      await onSend(contentToSend, pendingFiles.length > 0 ? pendingFiles : undefined);
+      // onSend 要等整轮回复结束才返回，输入框先清空，不让已发出的文字/附件留到回复结束
+      const sending = onSend(contentToSend, pendingFiles.length > 0 ? pendingFiles : undefined);
       setText("");
       setPendingFiles([]);
       // 清除拖入的高优先级上下文（发送后自动移除）
@@ -306,6 +307,7 @@ export default function ChatInput({
       // 显示发送成功动画
       setSendSuccess(true);
       setTimeout(() => setSendSuccess(false), 800);
+      await sending;
     } finally {
       setIsSending(false);
     }

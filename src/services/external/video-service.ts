@@ -14,6 +14,7 @@
  * 输出：多张图片 + 音频转文字，供 AI 理解视频内容
  */
 
+import { resolveAssetPath, resolveAssetUrl } from "../../utils/asset-path";
 import type { FileRef, VideoProcessMode } from "../session-service";
 
 /**
@@ -116,14 +117,7 @@ export async function processVideo(
  * 获取文件完整路径
  */
 async function getFullPath(filePath: string): Promise<string> {
-  if (filePath.startsWith("./") || filePath.startsWith("../")) {
-    const repoDir = orca.state.repoDir;
-    if (repoDir) {
-      const relativePath = filePath.replace(/^\.\//, "");
-      return `${repoDir}/assets/${relativePath}`;
-    }
-  }
-  return filePath;
+  return resolveAssetPath(filePath);
 }
 
 /**
@@ -223,7 +217,7 @@ async function extractFrames(
 async function loadVideoSource(videoPath: string): Promise<string> {
   // 方法1: 尝试使用 fetch + Blob URL
   try {
-    const fileUrl = `file:///${videoPath.replace(/\\/g, "/")}`;
+    const fileUrl = resolveAssetUrl(videoPath);
     const response = await fetch(fileUrl);
     if (response.ok) {
       const blob = await response.blob();
@@ -245,7 +239,7 @@ async function loadVideoSource(videoPath: string): Promise<string> {
   }
 
   // 方法3: 直接使用 file:// URL（某些环境可能支持）
-  return `file:///${videoPath.replace(/\\/g, "/")}`;
+  return resolveAssetUrl(videoPath);
 }
 
 /**
@@ -422,7 +416,7 @@ async function videoToBase64(fileRef: FileRef): Promise<string | null> {
     
     // 尝试 fetch
     try {
-      const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
+      const response = await fetch(resolveAssetUrl(fullPath));
       if (response.ok) {
         const blob = await response.blob();
         return new Promise((resolve, reject) => {
