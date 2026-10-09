@@ -2357,13 +2357,17 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
   // Branch Management Callbacks (对话分支功能)
   // ─────────────────────────────────────────────────────────────────────────
 
+  // 分支操作会停掉进行中的回复：存进分支的技能确认卡片随之按拒绝结算，切回来不再显示可点的「允许」
+  const settleConfirmCards = (ms: Message[]) =>
+    ms.map((m) => (m.skillConfirm?.status === "pending" ? { ...m, skillConfirm: { ...m.skillConfirm, status: "denied" as const } } : m));
+
   const handleCreateBranch = useCallback((messageId: string) => {
     try {
       console.log("[Branch] Creating branch at message:", messageId);
       console.log("[Branch] Current messages:", messages.length);
       // createBranch(messages, messageId, branchName?) -> { messages: Message[]; branchId: string }
       // 已在某个分支里：先把它的内容存回去，再开新分支
-      const result = createBranch(stashCurrentBranch(messages, messageId), messageId);
+      const result = createBranch(stashCurrentBranch(settleConfirmCards(messages), messageId), messageId);
       // 换掉分支点之后的内容前停掉生成，免得后面的回复写进另一个分支
       abandonCurrentRequest();
       console.log("[Branch] Result:", {
@@ -2384,7 +2388,9 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
   const handleSwitchBranch = useCallback((messageId: string, branchId: string) => {
     try {
       // 先把离开的分支存回去，再换成目标分支的内容
-      const updatedMessages = switchBranch(stashCurrentBranch(messages, messageId), messageId, branchId);
+      // 点的就是正显示的分支：什么都不做，也不打断生成
+      if (messages.find((m) => m.id === messageId)?.activeBranchId === branchId) return;
+      const updatedMessages = switchBranch(stashCurrentBranch(settleConfirmCards(messages), messageId), messageId, branchId);
       abandonCurrentRequest();
       invalidateCcHead();
       setMessages(updatedMessages);
