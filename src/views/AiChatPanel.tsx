@@ -75,6 +75,7 @@ import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stre
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
 import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
+import { createPendingSave } from "../utils/pending-save";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -651,6 +652,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
   }, []);
 
+  // 自动保存的防抖（1 秒）；离开对话前 flush，免得最后一条回复还没存就被取消
+  const [pendingSave] = useState(() => createPendingSave(1000));
+
   // 作废进行中的请求：中止（本机 AI 会随之结束子进程、关闭确认弹窗）、技能确认按拒绝结算，
   // 清掉生成状态和多模型面板；旧请求之后的界面写入一律丢弃
   const abandonCurrentRequest = () => {
@@ -669,6 +673,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
+    void pendingSave.flush();
     abandonCurrentRequest();
 
     // 创建全新的会话，确保 ID 是新的
@@ -698,8 +703,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
-    // 切换对话：中止进行中的生成，旧请求的后续写入一律丢弃
-    if (sessionId !== currentSession.id) abandonCurrentRequest();
+    // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
+    if (sessionId !== currentSession.id) {
+      abandonCurrentRequest();
+      await pendingSave.flush();
+    }
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
@@ -765,6 +773,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
+    await pendingSave.flush(); // 先存完再删，免得晚到的保存把刚删的对话写回来
     await deleteSession(sessionId);
     const data = await loadSessions();
     setSessions(data.sessions);
@@ -774,6 +783,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id, handleNewSession]);
 
   const handleClearAllSessions = useCallback(async () => {
+    await pendingSave.flush(); // 同上：收藏的当前对话不丢，被清的也不会被写回
     await clearAllSessions();
     const data = await loadSessions();
     setSessions(data.sessions);
@@ -813,7 +823,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   // Auto-cache session when messages or flashcard state change (debounced)
-  const autoCacheTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const hasRealMessages = messages.some((m) => !m.localOnly);
     const hasFlashcards = flashcardMode && pendingFlashcards.length > 0;
@@ -822,10 +831,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     if ((!hasRealMessages && !hasFlashcards) || !sessionsLoaded) return;
 
     // Debounce auto-cache to avoid too frequent saves
-    if (autoCacheTimeoutRef.current) {
-      clearTimeout(autoCacheTimeoutRef.current);
-    }
-    autoCacheTimeoutRef.current = setTimeout(async () => {
+    pendingSave.schedule(async () => {
       const flashcardState = hasFlashcards ? {
         cards: pendingFlashcards,
         currentIndex: flashcardIndex,
@@ -843,13 +849,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       await autoCacheSession(sessionToCache);
       const data = await loadSessions();
       setSessions(data.sessions);
-    }, 1000); // 1 second debounce for faster flashcard state saving
+    });
 
-    return () => {
-      if (autoCacheTimeoutRef.current) {
-        clearTimeout(autoCacheTimeoutRef.current);
-      }
-    };
+    return () => pendingSave.cancel();
   }, [messages, currentSession, sessionsLoaded, flashcardMode, pendingFlashcards, flashcardIndex, flashcardKeptCount, flashcardSkippedCount, contextSnap.selected]);
 
   // Sync state to session store for auto-save on close
