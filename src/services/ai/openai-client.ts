@@ -61,12 +61,6 @@ function joinUrl(base: string, path: string): string {
   return `${b}/${p}`;
 }
 
-function getChatCompletionsUrl(apiUrl: string): string {
-  const trimmed = apiUrl.trim().replace(/\/+$/, "");
-  if (trimmed.toLowerCase().endsWith("/chat/completions")) return trimmed;
-  return joinUrl(trimmed, "/chat/completions");
-}
-
 function getChatCompletionsUrlCandidates(apiUrl: string): string[] {
   const trimmed = apiUrl.trim().replace(/\/+$/, "");
   const lower = trimmed.toLowerCase();
@@ -74,14 +68,6 @@ function getChatCompletionsUrlCandidates(apiUrl: string): string[] {
   if (lower.endsWith("/v1")) return [joinUrl(trimmed, "/chat/completions")];
   // 兼容：很多 OpenAI 兼容网关要求 /v1 前缀
   return [joinUrl(trimmed, "/v1/chat/completions"), joinUrl(trimmed, "/chat/completions")];
-}
-
-function getAnthropicMessagesUrl(apiUrl: string): string {
-  const trimmed = apiUrl.trim().replace(/\/+$/, "");
-  const lower = trimmed.toLowerCase();
-  if (lower.endsWith("/messages")) return trimmed;
-  if (lower.endsWith("/v1")) return joinUrl(trimmed, "/messages");
-  return joinUrl(trimmed, "/v1/messages");
 }
 
 function getAnthropicMessagesUrlCandidates(apiUrl: string, anthropicApiPath?: string): string[] {

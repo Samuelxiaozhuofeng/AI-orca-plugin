@@ -13,7 +13,6 @@ import { nowId } from "../../utils/text-utils";
 import {
   compressMessages,
   estimateTotalTokens,
-  type ManagedContext,
 } from "./context-manager";
 import {
   createToolProtocolStream,
@@ -178,59 +177,6 @@ function finalizeToolProtocolContent(
     toolCalls,
     extractedToolCalls: extracted.toolCalls,
   };
-}
-
-/**
- * Stream chat completions from the API.
- * Yields chunks as they arrive for real-time UI updates.
- */
-export async function* streamChatCompletion(
-  options: StreamOptions
-): AsyncGenerator<StreamChunk, void, unknown> {
-  let content = "";
-  let reasoning = "";
-  let toolCalls: ToolCallInfo[] = [];
-  let finishReason: string | undefined;
-  const protocolStream = createToolProtocolStream();
-
-  for await (const chunk of openAIChatCompletionsStream({
-    apiUrl: options.apiUrl,
-    apiKey: options.apiKey,
-    model: options.model,
-    messages: options.messages,
-    temperature: options.temperature,
-    maxTokens: options.maxTokens,
-    signal: options.signal,
-    tools: options.tools,
-    protocol: options.protocol,
-    anthropicApiPath: options.anthropicApiPath,
-    maxContextTokens: options.maxContextTokens,
-  })) {
-    if (chunk.type === "content" && chunk.content) {
-      content += chunk.content;
-      const visibleDelta = protocolStream.append(chunk.content);
-      if (visibleDelta) {
-        yield { type: "content", content: visibleDelta };
-      }
-    } else if (chunk.type === "reasoning" && chunk.reasoning != null) {
-      reasoning += chunk.reasoning;
-      yield { type: "reasoning", reasoning: chunk.reasoning };
-    } else if (chunk.type === "tool_calls" && chunk.tool_calls) {
-      toolCalls = mergeToolCalls(toolCalls, chunk.tool_calls);
-      yield { type: "tool_calls", toolCalls };
-    } else if (chunk.type === "finish_reason" && chunk.finishReason) {
-      finishReason = chunk.finishReason;
-    }
-  }
-
-  const finalized = finalizeToolProtocolContent(content, toolCalls);
-  content = finalized.content;
-  toolCalls = finalized.toolCalls;
-  if (finalized.extractedToolCalls.length > 0) {
-    yield { type: "tool_calls", toolCalls };
-  }
-
-  yield { type: "done", result: { content, toolCalls, reasoning: reasoning != null ? reasoning : undefined, finishReason } };
 }
 
 /**
@@ -434,11 +380,6 @@ export async function* streamChatWithRetry(
 
     const continueStandard = await maybeCompressMessages([
       ...compressedStandardMessages,
-      partialAssistant,
-      continueMsg,
-    ]);
-    const continueFallback = await maybeCompressMessages([
-      ...compressedFallbackMessages,
       partialAssistant,
       continueMsg,
     ]);

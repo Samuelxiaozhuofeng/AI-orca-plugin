@@ -5,8 +5,8 @@
  * Supports multimodal messages with images, videos, and other files.
  */
 
-import type { OpenAIChatMessage, OpenAITool } from "./openai-client";
-import type { Message, ImageRef } from "../session-service";
+import type { OpenAIChatMessage } from "./openai-client";
+import type { Message } from "../session-service";
 import { buildImageContent } from "../external/image-service";
 import { buildFileContentsForApi } from "../file-service";
 import { extractOrcaImagesFromText, hasOrcaImageLinks } from "../../utils/orca-image-extractor";
@@ -31,12 +31,6 @@ export interface ConversationBuildParams {
   maxHistoryMessages?: number; // 0=不限制
   // 模型 ID（用于判断是否需要视觉模型代理）
   modelId?: string;
-}
-
-export interface ToolResultParams extends MessageBuildParams {
-  assistantContent: string;
-  toolCalls: any[];
-  toolResults: Message[];
 }
 
 

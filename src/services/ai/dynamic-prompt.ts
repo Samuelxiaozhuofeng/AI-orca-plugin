@@ -5,8 +5,6 @@
  * 只在相关功能启用时才注入对应指令，避免浪费 token。
  */
 
-import type { OpenAITool } from "./openai-client";
-
 const BASE_PROMPT = `你是笔记库智能助手。遵守工具返回的所有指令。
 
 ## 核心原则
