@@ -1021,13 +1021,14 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
             onClick: (e: any) => {
               e.preventDefault();
               // 网页/邮件链接用系统浏览器打开；本机文件只在访达里显示，不直接打开（AI 回复是外来内容，可能指向可执行程序）
-              const url = String(node.url || "");
+              let url = String(node.url || "");
+              if (/^www\./i.test(url)) url = `https://${url}`;
               if (/^(https?:|mailto:)/i.test(url)) orca.invokeBackend("shell-open", url);
               else if (/^(file:\/\/|\/)/i.test(url)) {
-                let p = url.replace(/^file:\/\//i, "");
+                let p = url.replace(/^file:\/\/(localhost)?/i, "");
                 try { p = decodeURIComponent(p); } catch { /* 保持原样 */ }
                 orca.invokeBackend("show-in-folder", p);
-              }
+              } else orca.notify("warn", "这个链接无法直接打开");
             },
           },
           ...node.children.map((child, i) => renderInlineNode(child, i)),

@@ -945,6 +945,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
       } catch (err: any) {
         orca.notify("warn", `Context build failed: ${String(err?.message ?? err ?? "unknown error")}`);
       }
+      // 等上下文期间切了对话 / 新建 / 清空：本次已作废，不清输入框（selected 已换成别的对话的）
+      if (!req.isCurrent()) return;
       // 本条消息用到的 contextStore.selected 已全部读完，通知输入框清空（之后不再读 selected）
       onAccepted?.();
 

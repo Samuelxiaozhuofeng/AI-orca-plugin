@@ -36,14 +36,18 @@ const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|tiff?)$/i;
 
 /** 用系统打开前只放行图片扩展名（按解码后的路径、去掉 ?/# 后判断），防止 AI 回复里的 .app / .command 被启动 */
 export function isImageFilePath(path: string): boolean {
+  const ok = (s: string) => IMAGE_EXT_RE.test(s.replace(/[?#].*$/, "").replace(/\/+$/, ""));
   let p = path;
   try { p = decodeURIComponent(p); } catch {}
-  return IMAGE_EXT_RE.test(p.replace(/[?#].*$/, "").replace(/\/+$/, ""));
+  // 解码前后都得是图片扩展名：调用方可能已解码过一次，只看解码后会放过 x.%70ng 这类
+  return ok(path) && ok(p);
 }
 
 /** 用系统打开图片；不是图片扩展名就不打开并提示 */
 export function openImageInSystem(path: string): void {
-  if (!isImageFilePath(path)) {
+  if (/^https?:\/\//i.test(path)) { orca.invokeBackend("shell-open", path); return; } // 网图交给浏览器，不要求扩展名
+  // 只认本机路径；smb:// 等别的协议会挂载共享或拉起程序
+  if (!/^(\/|file:\/\/)/i.test(path) || !isImageFilePath(path)) {
     orca.notify("warn", "只能用系统打开图片文件");
     return;
   }

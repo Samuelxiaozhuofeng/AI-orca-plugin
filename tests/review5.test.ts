@@ -24,7 +24,7 @@ test("用系统打开：只放行图片扩展名", () => {
   for (const p of ["/a/b.png", "/a/B.JPG", "/a/c.jpeg", "x.gif", "x.webp", "x.bmp", "x.svg", "x.avif", "x.HEIC", "x.tif", "x.tiff", "/a/%E5%9B%BE.png", "file:///a/x.png", "https://h/x.png?w=1"]) {
     assert(isImageFilePath(p), `应放行 ${p}`);
   }
-  for (const p of ["/System/Applications/Terminal.app", "/System/Applications/Terminal.app/", "file:///tmp/x.command", "/a/x.png.app", "/a/x.sh", "/a/x.command?.png", "/a/x.app#.png", "/a/x%2Eapp", "/a/png"]) {
+  for (const p of ["/System/Applications/Terminal.app", "/System/Applications/Terminal.app/", "file:///tmp/x.command", "/a/x.png.app", "/a/x.sh", "/a/x.command?.png", "/a/x.app#.png", "/a/x%2Eapp", "/a/png", "/tmp/x.%70ng"]) {
     assert(!isImageFilePath(p), `不应放行 ${p}`);
   }
 });
