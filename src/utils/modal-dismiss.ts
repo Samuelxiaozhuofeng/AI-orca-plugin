@@ -27,3 +27,11 @@ export function useModalDismiss(isOpen: boolean, onClose: () => void, onEscape: 
     },
   };
 }
+
+/**
+ * 弹窗挂到 document.body：留在面板里时，右侧（后面）的面板内容会画在遮罩上面
+ * （面板各自成层，弹窗的 zIndex 出不了本栏）。
+ */
+export function toBody(el: any) {
+  return (window as any).ReactDOM.createPortal(el, document.body);
+}

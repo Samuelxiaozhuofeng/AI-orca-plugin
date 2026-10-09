@@ -1,6 +1,7 @@
 import { parseMarkdown, type MarkdownInlineNode, type MarkdownNode, type TableAlignment, type CheckboxItem, type TimelineItem, type CompareItem, type GalleryImage } from "../utils/markdown-renderer";
 import { journalExportDataCache } from "../services/ai/ai-tools";
 import { appendLocalImagePreviews, toFileUrl } from "../utils/local-image-paths";
+import { toBody } from "../utils/modal-dismiss";
 import { openImagePreview, createImagePreviewItem } from "../services/external/image-preview-service";
 import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -1102,7 +1103,7 @@ function GalleryBlock({ images }: { images: GalleryImage[] }) {
     // Content
     viewMode === "grid" ? renderGridView() : renderListView(),
     // Lightbox
-    renderLightbox()
+    selectedIndex >= 0 && toBody(renderLightbox())
   );
 }
 

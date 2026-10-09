@@ -26,6 +26,7 @@ import TypingIndicator from "../components/TypingIndicator";
 import MemoryManager from "./MemoryManager";
 import ChatNavigation from "../components/ChatNavigation";
 import GlobalImagePreview from "../components/GlobalImagePreview";
+import { toBody } from "../utils/modal-dismiss";
 import SkillManagerModal from "./SkillManagerModal";
 import McpServerSettingsModal from "./McpServerSettingsModal";
 import { injectChatStyles } from "../styles/chat-animations";
@@ -2940,26 +2941,26 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       currency: settingsForUi.currency,
     }),
     // Skill Manager Modal
-    createElement(SkillManagerModal, {
+    toBody(createElement(SkillManagerModal, {
       isOpen: showSkillManager,
       onClose: () => setShowSkillManager(false),
-    }),
+    })),
     // Stream Settings Modal
-    createElement(StreamSettingsModal, {
+    toBody(createElement(StreamSettingsModal, {
       isOpen: showStreamSettings,
       onClose: () => setShowStreamSettings(false),
-    }),
+    })),
     // Vision Model Settings Modal
-    createElement(VisionModelSettingsModal, {
+    toBody(createElement(VisionModelSettingsModal, {
       isOpen: showVisionModelSettings,
       onClose: () => setShowVisionModelSettings(false),
-    }),
+    })),
     // MCP Server Settings Modal
-    createElement(McpServerSettingsModal, {
+    toBody(createElement(McpServerSettingsModal, {
       isOpen: showMcpSettings,
       onClose: () => setShowMcpSettings(false),
-    }),
+    })),
     // Global Image Preview Modal
-    createElement(GlobalImagePreview)
+    toBody(createElement(GlobalImagePreview))
   );
 }
