@@ -1020,8 +1020,14 @@ function renderInlineNode(node: MarkdownInlineNode, key: number): any {
             style: linkStyle,
             onClick: (e: any) => {
               e.preventDefault();
-              // Open in system default browser instead of internal webview
-              orca.invokeBackend("shell-open", node.url);
+              // 网页/邮件链接用系统浏览器打开；本机文件只在访达里显示，不直接打开（AI 回复是外来内容，可能指向可执行程序）
+              const url = String(node.url || "");
+              if (/^(https?:|mailto:)/i.test(url)) orca.invokeBackend("shell-open", url);
+              else if (/^(file:\/\/|\/)/i.test(url)) {
+                let p = url.replace(/^file:\/\//i, "");
+                try { p = decodeURIComponent(p); } catch { /* 保持原样 */ }
+                orca.invokeBackend("show-in-folder", p);
+              }
             },
           },
           ...node.children.map((child, i) => renderInlineNode(child, i)),
