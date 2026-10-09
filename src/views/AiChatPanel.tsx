@@ -707,7 +707,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
     if (sessionId !== currentSession.id) {
       abandonCurrentRequest();
-      void pendingSave.flush();
+      // 快照已当场拍下；等写完再读目标对话，快速切回时才读得到刚补存的内容
+      await pendingSave.flush();
     }
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
@@ -788,11 +789,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id, handleNewSession]);
 
   const handleClearAllSessions = useCallback(async () => {
-    // 当前对话会被清掉（没收藏）时同上先停生成；收藏的当前对话先存好不丢
-    // 收藏与否按服务里的最新索引判断，界面列表可能还没回填
-    const latest = await loadSessions();
-    if (!latest.sessions.find(s => s.id === currentSession.id)?.favorited) abandonCurrentRequest();
+    // 先存好当前对话，再按服务里的最新索引（补存可能改了收藏状态）判断它会不会被清掉；
+    // 会被清掉就先停生成再补存一次，免得删的过程中又登记保存把它写回来
     await pendingSave.flush();
+    const latest = await loadSessions();
+    if (!latest.sessions.find(s => s.id === currentSession.id)?.favorited) {
+      abandonCurrentRequest();
+      await pendingSave.flush();
+    }
     await clearAllSessions();
     const data = await loadSessions();
     setSessions(data.sessions);
