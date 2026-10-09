@@ -1,90 +1,55 @@
-# 模块：上下文读取与选择（block / page / tag）
+# 模块：上下文读取与选择（page / block / tag）
 
 ## 目标与范围
 
-完成 Step 2：让用户能在 AI 面板中选择要提供给 AI 的上下文，并生成可预览的“上下文纯文本”，包括：
+让用户把笔记内容作为上下文交给 AI：选择上下文、在输入区显示为标签（chip）、发送时转成纯文本放入请求。
 
-- block：读取指定 block 的树（含子块）并转成文本
-- page：读取当前活动页面（root block）并转成文本
-- tag：读取指定 tag 下的 blocks 并拼接成文本
-- 右键菜单：在 block/tag 的右键菜单中“一键加入 AI Context”，并自动打开 AI 面板
+- page：一个页面（根块）及其子树
+- block：一个块及其子树（主要来自拖入）
+- tag：某标签下的块及其子树
+- 入口：输入区 `@` 选择器、把块拖进输入区、页面 / 标签右键菜单
 
 ## 关联文件
 
-- `src/store/context-store.ts`：上下文选择状态（selected/preview）
-- `src/services/context-builder.ts`：读取与转文本（`get-block-tree` / `get-blocks-with-tags`）
-- `src/views/AiChatContextPane.tsx`：ContextSelector + Build Preview UI
-- `src/ui/ai-chat-context-menu.ts`：block/tag 右键菜单命令
-- `src/ui/ai-chat-ui.ts`：记录 `lastRootBlockId`，并在需要时自动打开面板
+- `src/store/context-store.ts`：已选上下文（`contextStore.selected`）与增删方法
+- `src/services/notes/context-builder.ts`：读取并转文本（`buildContextForSend`）
+- `src/views/ContextPicker.tsx`：`@` 触发的选择菜单
+- `src/views/ContextChips.tsx`：输入区上方的上下文标签（显示每项与总 token 数，可移除）
+- `src/views/ChatInput.tsx`：拖入块处理、`@` 快捷键、发送后清理高优先级上下文
+- `src/ui/ai-chat-context-menu.ts`：右键菜单命令
+- `src/ui/ai-chat-ui.ts`：记录 `lastRootBlockId`
 
 ## 数据结构
 
-`ContextRef`（简化）：
+`ContextRef`：
 
-- `block`: `{ kind: "block", blockId }`
-- `page`: `{ kind: "page", rootBlockId }`
-- `tag`: `{ kind: "tag", tag }`
+- `{ kind: "page", rootBlockId, title, priority? }`
+- `{ kind: "block", blockId, title, priority? }`
+- `{ kind: "tag", tag, priority? }`
 
-去重 key：
+去重 key（`contextKey`）：`page:${rootBlockId}` / `block:${blockId}` / `tag:${去掉 # 的标签名}`。`priority`：0 普通（`@` 选择器 / 右键菜单），1 高优先级（拖入的块）；`addContext` 按优先级排序插入，高优先级在前。
 
-- `block:${blockId}` / `page:${rootBlockId}` / `tag:${normalizedTag}`
+## 入口
 
-## 读取与转文本策略
+- **`@` 选择器**（`ContextPicker`）：在输入框空位置输入 `@` 或点 `Add Context (@)` 按钮打开；顶部搜索框，分「当前页面 / 页面 / 标签」三组（候选项通过 `get-aliased-blocks` / `get-aliases` 取得），选中后加入上下文。
+- **拖入块**：把 Orca 块拖到输入区，按块 id 以 `addBlockById(id, 1)` 加入高优先级上下文；这类上下文在发送后自动移除（`clearHighPriorityContexts`）。只要有任何已选上下文，系统提示词就会追加「上下文优先」段落（`hasDraggedContext`）。
+- **右键菜单**：页面根块菜单 `Add Page to AI Context`（只在页面根块上显示）；标签菜单 `Add Tag to AI Context`（标签名取 `aliases[0]` 或 `text`）。加入后自动打开 AI 面板。
 
-### block / page：`get-block-tree`
+## 读取与转文本（`buildContextForSend`）
 
-- 调用：`orca.invokeBackend("get-block-tree", id)`
-- 转文本：递归遍历 tree，尽可能读取 `text`，否则尝试从 `content` fragments 提取（仅做最小可读格式）
-- 注意：部分情况下 `get-block-tree` 的 children 可能是“ID 列表”（而不是完整 block 对象）；此时会额外用 `get-blocks` 批量补齐缺失 blocks，以保证预览能展示子块内容
-- 限制保护：
-  - `maxBlocks`（默认 200）
-  - `maxDepth`（默认 8）
-  - `maxChars`（默认 40k，超出截断并附带说明）
+默认限制：`maxBlocks` 300、`maxDepth` 10、`maxChars` 60000（面板发送时传入 `settings.maxContextChars`）、`maxTagRoots` 50、`maxAssets` 20；超出会截断并附说明。
 
-### tag：`get-blocks-with-tags`
-
-- 调用：`orca.invokeBackend("get-blocks-with-tags", [tagName])`
-- 转文本：对每个命中的 block 输出一行标题，并展开其子树（通过 `get-block-tree` + 必要时 `get-blocks` 补齐缺失 blocks）
-- tag 规范化：允许输入 `#tag` 或 `tag`，统一去掉 `#`
-
-## UI（ContextSelector）
-
-入口与行为：
-
-- `Add Context`：一个统一区域，通过下拉选择类型：
-  - `Block`：选择 block（若选中的是 page root，会自动作为 page context）
-  - `Page`：可直接 `Use Current Page`，或选择一个 blockId（若不是 page root，会降级为 block context）
-  - `Tag`：输入 tag 名称（支持 `#tag`）
-- `Expand more`：开关控制限制策略（默认有限制；开启后扩大 maxBlocks/maxDepth/maxChars/maxTagRoots，可能更慢）
-- `Build Preview`：调用 builder 生成 `previewText`，展示在只读文本框中（并显示当前 limitMode）
-- `Clear`：清空已选 contexts 与预览
-
-## 右键菜单
-
-- Block 菜单：`Add to AI Context`
-  - 加入 block context
-  - 记录 `rootBlockId` 到 `uiStore.lastRootBlockId`
-  - 自动打开 AI 面板
-- Tag 菜单：`Add to AI Context`
-  - 从 `tagBlock.aliases[0]` / `tagBlock.text` 推导 tag 名
-  - 加入 tag context
-  - 自动打开 AI 面板
+- page / block：`orca.invokeBackend("get-block-tree", id)`，递归转文本；子块只给 id 时用 `get-blocks` 分批（每批 200）补齐。输出标题行带块 id，如 `## Page: 标题 (blockId: 123)`。
+- tag：`get-blocks-with-tags` 取命中的块（最多 `maxTagRoots` 个），逐个展开子树。
+- 块里的图片 / 视频 / 音频 / 文件会收集为 `assets`（`FileRef`），随请求一起处理。
+- 某项读取失败时，该项输出 `## <kind> error` 加错误信息，不影响其他项。
 
 ## 已知限制
 
-- `get-block-tree` 返回结构在不同版本可能差异（当前实现做了多字段兼容与降级处理）。
-- tag 读取会对命中的 blocks 逐个请求 `get-block-tree` 并展开子树；当命中数量很大时可能较慢（建议先用默认限制，必要时再开启 `Expand more`）。
-
-## 去重规则（自动）
-
-- 如果已选择某个 page context，则再添加该 page 内部的普通 block 会被自动跳过（提示 “already covered by selected page context”）。
-
-## 下一步
-
-- Step 3：把 `previewText` 与 prompt/history 一起组装为 messages，接入 OpenAI-compatible API，并支持流式输出。
+- `get-block-tree` 返回结构在不同版本可能有差异，代码做了多字段兼容。
+- tag 命中很多时要逐个请求子树，可能较慢，受 `maxTagRoots` / `maxBlocks` 限制。
 
 ## 更新记录
 
-- 2025-12-19：完成 ContextSelector、读取与预览、block/tag 右键菜单入口
-- 2025-12-19：统一 Add Context 区域（block/page/tag）、tag 默认展开子树、增加 Expand more 开关与 page 覆盖去重
-- 2025-12-19：修复 page/block 预览可能显示 `(empty)`：当子块未加载到 `orca.state.blocks` 时，自动用 `get-blocks` 补齐后再生成预览
+- 2025-12-19：完成上下文读取与预览、右键菜单入口
+- 后续：独立的 ContextSelector / Build Preview 面板已移除，改为输入区 `@` 选择器 + 上下文标签；增加拖入块、资源提取

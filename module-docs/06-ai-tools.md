@@ -2,61 +2,66 @@
 
 ## 目标与范围
 
-定义和执行 AI 可用的工具（Tools），让 AI 能够与 Orca 笔记库进行交互，搜索和查询用户的笔记内容。
+决定 AI 能调用哪些工具、如何执行。插件自身只内置一个元工具 `tool_instructions`；操作笔记库等能力全部来自外部 MCP 服务器（默认连 Orca Note MCP）发现的工具。
 
 ## 关联文件
 
-- `src/services/ai-tools.ts`：工具定义与执行逻辑（核心）
-- `src/views/AiChatPanel.tsx`：调用工具的 UI 组件
+- `src/services/ai/ai-tools.ts`：`TOOLS`（仅 `tool_instructions`）、`getTools()`、`executeTool()`
+- `src/services/ai/tool-call-router.ts`：把模型给的工具名对到可用工具名（容错）、重复调用签名
+- `src/services/ai/tool-call-protocol.ts`：从正文里解析 / 剔除 XML、DSML 形式的工具调用
+- `src/services/ai/tool-round-limit.ts`：工具轮数上限
+- `src/services/ai/chat-stream-handler.ts`：流式请求、合并分片的 tool_calls
+- `src/services/external/mcp-server-manager.ts`、`mcp-client.ts`、`mcp-tool-names.ts`：MCP 连接、工具发现与命名
+- `src/store/mcp-store.ts`：MCP 服务器配置、被禁用的工具；`src/store/tool-store.ts`：工具显示名映射
+- `src/views/AiChatPanel.tsx`：工具循环（`handleSend` 内）；`src/views/McpServerSettingsModal.tsx`：MCP 服务器与工具开关界面
 
 ## 可用工具
 
-| 工具名称             | 功能             | 参数                                             |
-| -------------------- | ---------------- | ------------------------------------------------ |
-| `tool_instructions`  | 获取指定工具说明 | `toolName` (必填)                                |
+| 工具名称 | 功能 | 参数 |
+| --- | --- | --- |
+| `tool_instructions` | 返回指定工具的说明（描述 + 参数表） | `toolName`（必填） |
+| `mcp__<服务器>__<工具名>_<哈希>` | 外部 MCP 工具，由已连接服务器动态发现；名称由 `buildMcpOpenAIName` 生成，总长不超过 64 字符 | 由各 MCP 工具自己的 schema 决定 |
+
+`getTools()` 与 `getToolsForDraggedContext()` 目前都只返回已发现且未被禁用的 MCP 工具（`getAllDiscoveredTools()`），拖入块不会改变工具列表。`TOOLS`（含 `tool_instructions`）没有并入这个列表，所以请求里不会带上 `tool_instructions`，模型实际调不到它；`executeTool` 里的 `tool_instructions` 分支只是保留的实现（且只能查 MCP 工具）。
+
+默认 MCP 服务器：`orca-note`，`http://localhost:18672/mcp`（`mcp-store.ts` 的 `DEFAULT_MCP_SERVER`）。在头部「更多」菜单的「MCP 服务器」里可增删服务器、单独禁用某个工具。
 
 ## 核心 API
 
-### TOOLS 常量
-
 ```typescript
-export const TOOLS: OpenAITool[];
-```
-
-符合 OpenAI Function Calling 规范的工具定义数组。
-
-### executeTool 函数
-
-```typescript
+export const TOOLS: OpenAITool[];                       // 仅 tool_instructions
+export function getTools(): OpenAITool[];               // 已启用的 MCP 工具
 export async function executeTool(toolName: string, args: any): Promise<string>;
 ```
 
-执行指定工具并返回格式化的结果字符串。
+`executeTool` 分发：`mcp__` 开头走 `callRemoteTool`（断线类错误会重连一次）；`tool_instructions` 返回说明；其他返回 `Unknown tool: ...`。异常统一转成 `Error executing ...` 字符串。
 
 ## 数据流
 
+详见仓库根目录 `TOOL_CALL_LOGIC.md`。概要：
+
 ```
-用户发送消息
+handleSend → ensureMcpServersReady → 取 MCP 工具（模型支持 tools 时才传给 API）
     ↓
-AI 决定调用工具 → 返回 tool_calls
+流式请求 → 得到 tool_calls（含从正文里解析出的 XML/DSML 调用）
     ↓
-AiChatPanel 解析 tool_calls
+resolveToolCallName 纠正工具名 → 去重 → 解析（必要时修复）JSON 参数
     ↓
-调用 executeTool(toolName, args)
+executeTool（60 秒超时，并行执行）→ 工具结果截断到 maxToolResultChars
     ↓
-executeTool 执行对应工具
-    ↓
-返回结果给 AI 继续对话
+带着工具结果再请求一轮，直到没有 tool_calls / 出错 / 达到轮数上限
 ```
+
+## 本机 AI（Claude Code）例外
+
+协议选「本机 AI」时走 `local-cli-client.ts`，不产生 tool_calls，工具由 Claude Code 自己执行，权限请求转给确认弹窗（`ToolConfirmDialog`）；上面的工具循环不参与。详见 `bridge/README.md`。
 
 ## 扩展指南
 
-添加新工具需要：
-
-1. 在 `TOOLS` 数组中添加工具定义
-2. 在 `executeTool` 函数中添加对应的处理分支
+- 新增能力：优先在 MCP 服务器侧提供工具，插件会自动发现。
+- 要加插件内置工具：在 `TOOLS` 中加定义，并在 `getTools()` 返回、`executeTool` 增加分支；工具显示名与图标见 `src/utils/tool-display-config.ts`。
 
 ## 更新记录
 
 - 2025-12-21：从 `AiChatPanel.tsx` 提取为独立模块
-- 2026-01-23：补充标签搜索返回属性与 block-ref 展开说明
+- 内置笔记工具（搜索、读写块、日记等）及工具管理面板已移除，工具全部走 MCP

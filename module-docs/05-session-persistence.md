@@ -2,178 +2,81 @@
 
 ## 目标与范围
 
-实现 AI Chat 对话的持久化存储，让用户能够：
-
-- 手动保存当前对话
-- 查看和恢复历史会话
-- 创建新对话
-- 关闭面板时自动保存（可选）
+让对话在关闭面板、重启 Orca 后仍在，并支持：自动保存、历史对话切换、置顶 / 收藏 / 重命名 / 删除、笔记里的聊天块「继续对话」。**没有手动保存按钮，也没有自动保存开关**：只要有真实消息就自动保存（`shouldAutoSave()` 恒为 true）。
 
 ## 关联文件
 
-- `src/services/session-service.ts`：会话持久化核心服务
-- `src/store/session-store.ts`：会话状态共享 store
-- `src/views/ChatHistoryMenu.tsx`：历史会话下拉菜单组件
-- `src/views/AiChatPanel.tsx`：集成会话管理 UI
-- `src/ui/ai-chat-ui.ts`：关闭时自动保存逻辑
-- `src/settings/ai-chat-settings.ts`：新增设置项
+- `src/services/session-service.ts`：会话读写、索引、缓存（核心）
+- `src/utils/pending-save.ts`：防抖保存队列（`createPendingSave`）
+- `src/store/session-store.ts`：面板与 `ai-chat-ui` 共享的当前会话快照
+- `src/views/ChatHistoryMenu.tsx`：历史对话下拉菜单
+- `src/views/AiChatPanel.tsx`：会话管理（新建 / 切换 / 删除 / 自动保存）
+- `src/ui/ai-chat-ui.ts`：关闭面板前保存（`autoSaveOnClose`）
+- `src/store/ui-store.ts`：`pendingChatSession`（笔记聊天块「继续对话」传来的副本）
 
 ## 数据结构
 
-### SavedSession
+- `Message`：`id`、`role`（user / assistant / tool）、`content`、`createdAt`，另有 `localOnly`（不入存档的本地提示）、`files`、`reasoning`、`model`、`contextRefs`、`pinned`、`tool_calls` / `tool_call_id` / `name`、分支字段（`branches`、`branchId`、`parentMessageId`、`activeBranchId`）、本机 AI 的 `cc` 等。
+- `SessionFileData` / `SavedSession`：`id`、`title`、`model`、`workDir`（本机 AI 工作文件夹）、`ccHead`（本机 AI 续接点）、`messages`、`contexts`、`createdAt`、`updatedAt`、`pinned`、`favorited`、`scrollPosition`。
+- `SessionMeta`（索引项）：`id`、`title`、`model`、`createdAt`、`updatedAt`、`pinned`、`favorited`、`messageCount`。
+- `SessionIndex`：`{ version: 2, activeSessionId, sessions: SessionMeta[] }`，置顶的排前，其余按 `updatedAt` 倒序。
 
-```typescript
-type SavedSession = {
-  id: string;              // 会话唯一ID
-  title: string;           // 自动生成（用户第一条消息前20字）
-  messages: Message[];     // 消息数组（排除 localOnly）
-  contexts: ContextRef[];  // 关联的上下文
-  createdAt: number;       // 创建时间
-  updatedAt: number;       // 最后更新时间
-};
-```
+## 存储
 
-### ChatSessionsData（存储格式）
-
-```typescript
-type ChatSessionsData = {
-  version: 1;                      // 数据格式版本
-  activeSessionId: string | null;  // 当前活动会话
-  sessions: SavedSession[];        // 所有保存的会话
-};
-```
-
-### 存储位置
-
-- 存储 API：`orca.plugins.setData/getData`
-- 存储 key：`chat-sessions`
-- 数据格式：JSON 字符串
+- 存储 API：`orca.plugins.readFile / writeFile / removeFile / listFiles`（插件数据目录）
+- 索引：`Sessions/index.json`；每个会话一个文件 `Sessions/<id>.json`
+- 旧版（单个 `chat-sessions` 数据项，`orca.plugins.getData`）会在首次加载时迁移成上述文件格式
+- 加载索引时会扫描 `Sessions/` 目录：目录里有但索引里没有的会话文件会自动补进索引（也支持 `日期_标题.json` 这样的自定义文件名），索引里的消息数等元数据过期时会更新
+- 读取会话时会把旧消息里内嵌的 XML / DSML 工具调用标记规整成正式的 `tool_calls`（`normalizePersistedMessages`）
 
 ## 核心 API（session-service.ts）
 
 | 函数 | 说明 |
-|------|------|
-| `loadSessions()` | 加载所有保存的会话 |
-| `saveSession(session)` | 保存或更新会话 |
-| `deleteSession(sessionId)` | 删除指定会话 |
-| `clearAllSessions()` | 清空所有会话 |
-| `createNewSession()` | 创建新的空会话 |
-| `getSession(sessionId)` | 获取指定会话 |
-| `shouldAutoSave()` | 检查是否启用自动保存 |
-| `generateSessionTitle(messages)` | 自动生成会话标题 |
-| `formatSessionTime(timestamp)` | 格式化时间显示 |
+| --- | --- |
+| `loadSessions()` | 读索引，返回只含元数据的会话列表（消息按需再加载）和 `activeSessionId` |
+| `loadFullSession(id)` / `getSession(id)` | 读完整会话（含消息） |
+| `saveSession(session)` | 立即写入并更新索引；没有非 `localOnly` 消息则跳过（关闭面板时用） |
+| `autoCacheSession(session)` | 自动保存用：文件 2 秒防抖写入、索引立即更新；只有消息变多才更新 `updatedAt`；保留已有标题 / 置顶 / 收藏 |
+| `deleteSession(id)` | 删除会话文件并更新索引 |
+| `clearAllSessions()` | 删除所有**非收藏**的会话 |
+| `toggleSessionPinned(id)` / `toggleSessionFavorited(id)` | 置顶 / 收藏 |
+| `renameSession(id, title)` | 重命名；空标题则按首条消息重新生成 |
+| `setActiveSessionId(id)` | 记录活动会话 |
+| `createNewSession()` | 创建空会话（内存中，有消息才会存） |
+| `generateSessionTitle(messages)` | 标题 = 首条用户消息前 20 字（超出加 `...`），没有则用「会话 + 时间」 |
+| `formatSessionTime(ts)` | 今天 HH:mm / 昨天 / 周几 / M月D日 |
+| `clearSessionCache()` | 清缓存并立即写出待写入内容 |
 
-## UI 结构
+## UI
 
-### Header 按钮布局
+- 面板 Header：`[会话标题（可编辑）] [+ 新对话] [历史对话] [更多] [关闭]`，没有单独的保存按钮。
+- `ChatHistoryMenu`：按「置顶 / 收藏 / 今天 / 昨天 / 本周 / 更早」分组；每项显示标题和 `N 条`；可置顶、收藏、重命名、删除（删除先确认）；顶部「新建」，可切换「只看收藏」；底部「清空非收藏对话」（确认后执行，收藏的保留）。
 
-```
-[AI Chat] [Save💾] [History📚] [Settings⚙️] [Stop⏹] [Clear🗑] [Close✕]
-```
+## 保存与加载流程
 
-| 按钮 | 图标 | 行为 |
-|------|------|------|
-| Save | `ti-device-floppy` | 手动保存当前会话 |
-| History | `ti-history` | 打开历史会话下拉菜单 |
-
-### ChatHistoryMenu 组件
-
-下拉菜单结构：
+保存（面板内）：
 
 ```
-┌────────────────────────┐
-│ Chat History    [+New] │
-├────────────────────────┤
-│ • 今天讨论的任务查询   │ ← 当前会话高亮
-│   今天 12:30 · 8 msgs  │
-├────────────────────────┤
-│ • 代码优化建议      [×]│ ← 悬停显示删除
-│   昨天 · 15 msgs       │
-├────────────────────────┤
-│ [Clear All History]    │
-└────────────────────────┘
-```
-
-功能：
-- 点击会话：切换到该会话
-- New 按钮：创建新对话
-- × 按钮：删除单个会话
-- Clear All：清空所有历史
-
-## 设置项
-
-新增两个设置项（`ai-chat-settings.ts`）：
-
-| 设置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `autoSaveChat` | singleChoice | `manual` | 自动保存模式 |
-| `maxSavedSessions` | number | `10` | 最大保存会话数 |
-
-### autoSaveChat 选项
-
-- `on_close`：关闭面板时自动保存
-- `manual`：仅手动保存（默认）
-- `never`：从不保存
-
-## 数据流
-
-### 保存流程
-
-```
-用户点击 Save / 关闭面板(auto-save)
+消息 / 会话 / 上下文变化 → pendingSave.schedule(拍快照)（1 秒防抖）
     ↓
-过滤 localOnly 消息
+到点：autoCacheSession(快照)（串行执行，前一次写完才写下一次）
     ↓
-检查是否有真实消息（无则跳过）
-    ↓
-生成/更新会话标题（首条用户消息前20字）
-    ↓
-调用 orca.plugins.setData() 存储
-    ↓
-检查会话数量，超出 maxSavedSessions 则删除最旧的
+刷新历史列表
 ```
 
-### 加载流程
-
-```
-面板打开
-    ↓
-调用 loadSessions() 读取数据
-    ↓
-如果有 activeSessionId，恢复该会话
-    ↓
-恢复消息和上下文
-```
-
-### 状态同步（session-store.ts）
-
-用于在 `AiChatPanel` 和 `ai-chat-ui` 之间共享状态：
-
-```typescript
-sessionStore = {
-  currentSession,  // 当前会话
-  messages,        // 当前消息
-  contexts,        // 当前上下文
-  isDirty,         // 是否有未保存的更改
-}
-```
-
-- `AiChatPanel` 通过 `useEffect` 同步状态到 store
-- `ai-chat-ui` 在关闭面板时读取 store 执行自动保存
+- 新建 / 切换 / 删除对话前会 `pendingSave.flush()`：立刻拍下尚未执行的那次快照并排队写入，避免防抖把最后一条回复吞掉，也避免晚到的保存把刚删的对话写回来。保存失败只记日志，不打断后续操作。
+- 面板打开时：`loadSessions()` 后恢复 `activeSessionId` 对应的会话（消息、上下文、滚动位置）；若读取期间用户已新建 / 切换对话则不再恢复。
+- 关闭面板：`autoSaveOnClose`（`ai-chat-ui.ts`）读取 `sessionStore`，有未保存改动且有真实消息时调用 `saveSession`。
+- `sessionStore`（`currentSession`、`messages`、`contexts`、`isDirty`）由 `AiChatPanel` 在消息变化时同步，供 `ai-chat-ui` 关闭时读取。
+- 清空消息（Clear Chat）会把空状态同步进存档（已存过的对话才更新），避免关闭时把清空前的快照写回去。
 
 ## 已知限制
 
-- 会话数据存储在 Orca 插件存储中，不支持跨设备同步
-- 自动保存是异步执行的，极端情况下（如应用崩溃）可能丢失
-- 会话标题自动生成，暂不支持手动重命名
-
-## 下一步
-
-- （可选）会话重命名功能
-- （可选）导出对话为 Markdown
-- （可选）会话搜索功能
-- （可选）云同步
+- 会话存在插件数据目录，不跨设备同步。
+- 防抖期内（约 1–2 秒）发生崩溃可能丢最后一点内容。
+- 会话数量没有上限设置。
 
 ## 更新记录
 
-- 2025-12-20：完成会话持久化功能（保存/加载/删除/历史菜单/自动保存）
+- 2025-12-20：完成会话持久化功能
+- 后续：存储由单个数据项改为「索引 + 每会话一个文件」；增加置顶 / 收藏 / 重命名、始终自动保存、串行防抖保存（`pending-save.ts`）、保存工作文件夹与本机 AI 续接点

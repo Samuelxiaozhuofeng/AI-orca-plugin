@@ -16,6 +16,10 @@ src/utils/tokenizer/
 └── alignment.ts  # Token 对齐填充
 ```
 
+界面和业务代码一般不直接引用本模块，而是通过 `src/utils/token-utils.ts`（`estimateTokens`、`formatTokenCount`、`estimateCost`、`formatCost`、`formatTokenSpeed`，并转出 `estimateTokensDetailed`、`recordCalibrationSample`、`alignToTokenBoundary` 等）。
+
+估算方式：启发式规则（CJK 约 1.5 字符/token、英文约 4 字符/token、符号、数字分别计）或「简化 BPE 估算」，不引入真实 tokenizer 库；模型名未识别时回退启发式。默认配置：`modelName: "gpt-4o"`、开启校准、`safetyMargin: 0.05`（`setTokenizerConfig` 可改）。
+
 ## 核心功能
 
 ### Token 估算
@@ -86,6 +90,12 @@ const config = getModelAlignmentConfig("deepseek-chat");
 | Claude | claude | 禁用 |
 | Gemini | gemini | 禁用 |
 | DeepSeek | deepseek | 启用 64 |
+
+## 当前接入情况
+
+- 在用：`estimateTokens`（输入框预估、上下文标签 token 数、面板与聊天块里的 token 统计，均经 `token-utils.ts`）、`formatTokenSpeed`（消息上的 tok/s）。
+- 注意 `services/ai/context-manager.ts`（历史压缩）自带一个独立的估算函数，不走本模块。
+- 已实现但目前没有被发送流程调用：`recordCalibrationSample`（没有任何地方传入 API 返回的真实 token 数）、`alignToTokenBoundary`（请求构造里没有做对齐填充）。
 
 ## 设计原则
 

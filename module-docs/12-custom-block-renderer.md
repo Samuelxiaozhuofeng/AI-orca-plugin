@@ -8,8 +8,9 @@
 
 ## 核心文件
 
-- `src/ui/ai-chat-renderer.ts` - 块渲染器注册
-- `src/components/AiChatBlockRenderer.tsx` - 块渲染组件
+- `src/ui/ai-chat-renderer.ts` - 块渲染器与转换器注册（块类型 `aichat.conversation`，`main.ts` 的 `load()` 里注册、`unload()` 里注销）
+- `src/components/AiChatBlockRenderer.tsx` - 块渲染组件：复用 `MessageList` 显示消息，工具栏有「继续对话」（把副本交给面板载入，见 `uiStore.pendingChatSession`）、复制全部、搜索、导出 MD / JSON
+- `src/services/export-service.ts` - 「保存到日记」时用 `core.editor.insertBlock` 在日记下插入这种块（repr 含 `title`、`messages`、`model`、`createdAt`）
 
 ## 注册块渲染器
 
@@ -39,8 +40,8 @@ orca.renderers.registerBlock(
   "aichat.conversation",
   true,  // 可编辑，允许缩进
   AiChatBlockRenderer,
-  []     // 无资源字段
-  // 不需要 useChildren，自定义块不支持子块
+  [],    // 无资源字段
+  true   // useChildren：代码里传了 true；该参数的效果见下文「常见问题」
 );
 ```
 
@@ -91,7 +92,7 @@ return createElement(BlockShell, {
 
 ## 注册转换器
 
-转换器用于复制、搜索等功能：
+转换器用于复制、搜索等功能（`registerAiChatRenderer` 里注册了 plain / html / markdown 三种，注销时一并注销）：
 
 ```typescript
 // 纯文本格式（用于搜索）
@@ -106,7 +107,7 @@ orca.converters.registerBlock("markdown", "aichat.conversation", converter);
 
 ## 样式注入
 
-块渲染器需要独立管理样式，避免依赖其他组件：
+块渲染器需要独立管理样式，避免依赖其他组件（实际代码注入的是 `src/styles/chat-animations.ts` 的 `chatAnimations`，style id 为 `ai-chat-block-styles`，注销渲染器时不移除，保证已有对话块仍能正常显示）：
 
 ```typescript
 function injectBlockStyles(): void {
