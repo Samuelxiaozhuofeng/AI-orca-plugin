@@ -82,7 +82,8 @@ function lastUserIndex(list: Array<{ role: string }>): number {
 }
 
 /** 回复正文开头的模式行（单独成段）；压缩历史时按 BANNER_RE 剥掉 */
-const BANNER_RE = /^本机 AI · 模型 [^\n]* · (安全模式|⚠ 完全放开模式)\n+/;
+// 不依赖换行：面板累加时会 trim，模式行后面的换行可能被吃掉
+const BANNER_RE = /^本机 AI · 模型 [^\n]*? · (?:安全模式|⚠ 完全放开模式)\s*/;
 
 /** session 事件 → 回复正文开头一行模式说明；老 bridge 不带 mode 时不显示 */
 export function sessionBanner(ev: any): string | null {
@@ -205,6 +206,7 @@ export async function* streamLocalCli(
   // 权限请求串行排队，一次只显示一个弹窗
   let permissionQueue: Promise<void> = Promise.resolve();
   let bannerShown = false;
+  let textAfterBanner = false;
   let content = "";
   let reasoning = "";
 
@@ -261,9 +263,14 @@ export async function* streamLocalCli(
       } else if (ev.type === "done") {
         done = true;
       }
-      const chunk = mapBridgeEvent(ev);
+      let chunk = mapBridgeEvent(ev);
       if (!chunk) continue;
-      if (chunk.type === "content") content += chunk.content;
+      if (chunk.type === "content") {
+        content += chunk.content;
+        // 面板对累加内容 trim，模式行后单独发的 "\n\n" 会被吃掉：流式时给第一段正文补上分段（最终 content 不重复）
+        if (bannerShown && !textAfterBanner) chunk = { ...chunk, content: `\n\n${chunk.content}` };
+        textAfterBanner = true;
+      }
       if (chunk.type === "reasoning") reasoning += chunk.reasoning;
       yield chunk;
     }

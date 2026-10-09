@@ -2758,13 +2758,16 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       }
 
       // 本机 AI 中止：在原消息末尾注明已执行的操作不会撤销（setMessages 已校验仍属当前对话）
-      const localCliAbort = isAbort && getModelApiConfig(settings, model).protocol === "local-cli";
+      const isLocalCli = getModelApiConfig(settings, model).protocol === "local-cli";
+      const localCliAbort = isAbort && isLocalCli;
       setMessages((prev) => {
         const lastIdx = prev.findIndex((m, i) => m.role === "assistant" && i === prev.length - 1);
         if (lastIdx >= 0) {
           return prev.map((m, i) => {
             if (i !== lastIdx) return m;
             if (localCliAbort) return { ...m, content: m.content ? `${m.content}\n\n${LOCAL_CLI_ABORT_NOTE}` : LOCAL_CLI_ABORT_NOTE };
+            // 本机 AI 出错：正文开头已有模式行，错误要追加而不是被 || 吞掉
+            if (!isAbort && isLocalCli && m.content) return { ...m, content: `${m.content}\n\n(error) ${msg}` };
             return { ...m, content: m.content || (isAbort ? "(stopped)" : `(error) ${msg}`) };
           });
         }

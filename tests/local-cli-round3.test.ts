@@ -109,3 +109,23 @@ test("H3 压缩历史剥掉完全放开模式行，只剥开头那一行", () =>
   ] as any[]);
   assert(prompt.includes("助手：答") && !prompt.includes("完全放开"), prompt);
 });
+
+test("R4 面板逐块 trim 累加时模式行仍单独成段，中止残留也能被剥掉", async () => {
+  const m = mockBridge([[{ type: "session", id: "s", mode: "full", model: "sonnet" }, { type: "text", delta: "好的" }, { type: "done" }]]);
+  const n = stubOrca();
+  try {
+    const out = await collect(streamLocalCli({ ...base, localCli: ctx("r4") }, [{ role: "user", content: "问" }] as any[]));
+    let shown = "";
+    for (const c of out) if (c.type === "content") shown = (shown + c.content).trim();
+    assert(/完全放开模式\n\n好的$/.test(shown), JSON.stringify(shown));
+    const prompt = buildLocalCliPrompt([
+      { role: "user", content: "问" },
+      { role: "assistant", content: "本机 AI · 模型 sonnet · ⚠ 完全放开模式好的" },
+      { role: "user", content: "再问" },
+    ] as any[]);
+    assert(!prompt.includes("本机 AI · 模型") && prompt.includes("助手：好的"), prompt);
+  } finally {
+    m.restore();
+    n.restore();
+  }
+});
