@@ -58,8 +58,9 @@ async function collect(gen: AsyncGenerator<any>) {
 test("mapBridgeEvent：text/thinking/tool/tool_result 映射", () => {
   assertDeepEqual(mapBridgeEvent({ type: "text", delta: "hi" }), { type: "content", content: "hi" });
   assertDeepEqual(mapBridgeEvent({ type: "thinking", delta: "嗯" }), { type: "reasoning", reasoning: "嗯" });
-  assertDeepEqual(mapBridgeEvent({ type: "tool", name: "Bash", input: { command: "ls" } }), { type: "reasoning", reasoning: "\n调用 Bash\n" });
+  assertDeepEqual(mapBridgeEvent({ type: "tool", name: "Bash", input: { command: "ls" } }), { type: "reasoning", reasoning: "\n运行 `ls`\n" });
   assertDeepEqual(mapBridgeEvent({ type: "tool_result", name: "Bash", ok: false }), { type: "reasoning", reasoning: "Bash 失败\n" });
+  assertEqual(mapBridgeEvent({ type: "tool_result", name: "Bash", ok: true }), null);
   assertEqual(mapBridgeEvent({ type: "permission" }), null);
   assertEqual(mapBridgeEvent({ type: "done" }), null);
 });

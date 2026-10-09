@@ -140,6 +140,23 @@ const mcpDirs = new Set(); // 所有临时 MCP 配置目录（内含令牌，结
 const MCP_DIR_PREFIX = `orca-bridge-${process.pid}-`;
 const LEGACY_STALE_MS = 10 * 60 * 1000;
 
+/** 工具失败结果 → 单行、≤300 字（content 可能是字符串或 [{type:"text",text}]） */
+function toolErrorText(content) {
+  const text = typeof content === "string" ? content : Array.isArray(content) ? content.filter((c) => c?.type === "text").map((c) => c.text).join(" ") : "";
+  const line = String(text).replace(/\s+/g, " ").trim();
+  return line.length > 300 ? line.slice(0, 299) + "…" : line;
+}
+
+/** result 消息 → { usage: { input, output, costUsd? } }；input 在这里算一次（含缓存读写），插件不再加；拿不到数字就不带 */
+function usageOf(m) {
+  const u = m.usage;
+  const n = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  if (!u || typeof u.input_tokens !== "number" || typeof u.output_tokens !== "number") return {};
+  const usage = { input: n(u.input_tokens) + n(u.cache_creation_input_tokens) + n(u.cache_read_input_tokens), output: n(u.output_tokens) };
+  if (typeof m.total_cost_usd === "number" && Number.isFinite(m.total_cost_usd)) usage.costUsd = m.total_cost_usd;
+  return { usage };
+}
+
 function removeMcpDir(dir) {
   if (!dir || !mcpDirs.has(dir)) return;
   mcpDirs.delete(dir);
@@ -390,20 +407,23 @@ async function handleChat(req, res, body) {
       const delta = m.event?.type === "content_block_delta" ? m.event.delta : null;
       if (delta?.type === "text_delta") { produced = true; send({ type: "text", delta: delta.text }); }
       else if (delta?.type === "thinking_delta") { produced = true; send({ type: "thinking", delta: delta.thinking }); }
-    } else if (m.type === "assistant" && !m.parent_tool_use_id) {
+    } else if (m.type === "assistant") {
+      // 子代理（带 parent_tool_use_id）只转发工具调用，正文 / 思考 / uuid 不转
+      const sub = Boolean(m.parent_tool_use_id);
       for (const block of m.message?.content || []) {
         if (block.type !== "tool_use") continue;
         produced = true;
         toolNames.set(block.id, block.name);
-        send({ type: "tool", name: block.name, input: block.input });
+        send({ type: "tool", name: block.name, input: block.input, ...(sub ? { sub: true } : {}) });
       }
       // 完整 assistant 消息的 uuid：插件记最后一个，日后续接 / 回退用
-      if (typeof m.uuid === "string" && m.uuid) send({ type: "assistant_uuid", uuid: m.uuid });
-    } else if (m.type === "user" && !m.parent_tool_use_id && Array.isArray(m.message?.content)) {
+      if (!sub && typeof m.uuid === "string" && m.uuid) send({ type: "assistant_uuid", uuid: m.uuid });
+    } else if (m.type === "user" && Array.isArray(m.message?.content)) {
+      const sub = Boolean(m.parent_tool_use_id);
       for (const block of m.message.content) {
-        if (block.type !== "tool_result") continue;
+        if (block.type !== "tool_result" || (sub && !block.is_error)) continue;
         produced = true;
-        send({ type: "tool_result", name: toolNames.get(block.tool_use_id) || "工具", ok: !block.is_error });
+        send({ type: "tool_result", name: toolNames.get(block.tool_use_id) || "工具", ok: !block.is_error, ...(block.is_error ? { error: toolErrorText(block.content) } : {}), ...(sub ? { sub: true } : {}) });
       }
     } else if (m.type === "control_request") {
       const r = m.request || {};
@@ -425,7 +445,7 @@ async function handleChat(req, res, body) {
         const message = m.result || (m.errors || []).join("; ") || "claude 运行出错";
         finish({ type: "error", ...(resume && !produced ? { code: "resume_failed" } : {}), message: String(message) });
       } else {
-        finish({ type: "done" });
+        finish({ type: "done", ...usageOf(m) });
       }
       child.stdin.end();
       // 正常应自己退出；宽限期后还在（如有后台任务）就杀掉，exit/close 照常走 cleanup 删临时目录

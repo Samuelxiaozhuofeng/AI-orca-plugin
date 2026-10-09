@@ -1687,6 +1687,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       const ccMsgId = ccAssistantId;
       // 出错（非停止）或本轮进行中删过消息：不记续接点，下次整段新开
       const ccHeadOk = !ccErrored && ccHistoryGenRef.current === ccHistoryGenAtSend;
+      if (ccRun.usage && ccMsgId) updateMessage(ccMsgId, { usage: ccRun.usage });
       if (ccSid && ccMsgId) {
         updateMessage(ccMsgId, { cc: { sid: ccSid, ...(ccRun.uuid ? { uuid: ccRun.uuid } : {}), ...(ccPartial ? { partial: true as const } : {}) } });
         setCurrentSessionGuarded((prev) => ({ ...prev, ccHead: ccHeadOk ? { sid: ccSid, msgId: ccMsgId } : undefined }));

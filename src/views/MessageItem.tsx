@@ -26,7 +26,7 @@ import {
 } from "../styles/ai-chat-styles";
 import type { Message } from "../services/session-service";
 import type { ToolCallInfo } from "../services/ai/chat-stream-handler";
-import { formatTokenSpeed } from "../utils/token-utils";
+import { formatTokenSpeed, formatUsage } from "../utils/token-utils";
 import { BANNER_RE } from "../services/ai/local-cli-client";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
 import {
@@ -812,6 +812,8 @@ export default function MessageItem({
   const isTool = message.role === "tool";
   const isAssistant = message.role === "assistant";
   const tokenSpeed = isAssistant ? formatTokenSpeed((message.content || "").replace(BANNER_RE, ""), message.reasoning, message.durationMs) : null;
+  const usageText = isAssistant ? formatUsage(message.usage) : null;
+  const speedLine = [tokenSpeed, usageText].filter(Boolean).join(" · ") || null;
   const isPinned = (message as any).pinned === true;
   // Display settings from store
   const displaySettings = useSnapshot(displaySettingsStore);
@@ -1227,7 +1229,7 @@ export default function MessageItem({
         ),
 
       // Message Time and Speed
-      ((showTimestamp && message.createdAt) || tokenSpeed) &&
+      ((showTimestamp && message.createdAt) || speedLine) &&
         createElement(
           "div",
           { 
@@ -1242,8 +1244,8 @@ export default function MessageItem({
           // 时间 (controlled by showTimestamps setting)
           showTimestamp && message.createdAt && formatMessageTime(message.createdAt),
           // 输出速度
-          tokenSpeed && withTooltip(
-            tooltipText("输出速度（估算）"),
+          speedLine && withTooltip(
+            tooltipText(usageText ? "输出速度（估算）· 本轮输入 / 输出 token 与费用" : "输出速度（估算）"),
             createElement(
               "span",
               {
@@ -1259,7 +1261,7 @@ export default function MessageItem({
                 },
               },
               createElement("i", { className: "ti ti-bolt", style: { fontSize: "10px" } }),
-              tokenSpeed
+              speedLine
             )
           )
         ),

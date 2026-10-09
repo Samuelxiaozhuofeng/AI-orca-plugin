@@ -36,6 +36,13 @@ export function formatTokenSpeed(content: string, reasoning: string | undefined,
   return `${Math.round(tokens / (durationMs / 1000))} tok/s`;
 }
 
+/** 本机 AI 用量，如 "入 12.8k · 出 820 · ≈$0.12"；没有用量返回 null */
+export function formatUsage(usage: { input: number; output: number; costUsd?: number } | undefined): string | null {
+  if (!usage || typeof usage.input !== "number" || typeof usage.output !== "number") return null;
+  const cost = typeof usage.costUsd === "number" ? ` · ${usage.costUsd < 0.01 ? "<$0.01" : `≈$${usage.costUsd.toFixed(2)}`}` : "";
+  return `入 ${formatTokenCount(usage.input)} · 出 ${formatTokenCount(usage.output)}${cost}`;
+}
+
 /**
  * 格式化 Token 数量显示
  */
