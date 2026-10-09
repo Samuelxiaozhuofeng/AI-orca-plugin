@@ -4,7 +4,6 @@
  */
 
 import { modelButtonStyle, modelLabelStyle, menuContainerStyle, measureMenu } from "./chat-input-styles";
-import { withTooltip } from "../../utils/orca-tooltip";
 
 const React = window.React as unknown as {
   createElement: typeof window.React.createElement;
@@ -70,6 +69,13 @@ type MenuProps = {
   width: number;
 };
 
+// 按下就生效：Orca 弹层在按下后不再接收指针，松开落到页面上，click 不会触发（实测 mouseup 目标是 HTML）
+const pick = (fn: () => void) => (e: any) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  fn();
+};
+
 function WorkDirMenu({ workDir, onChange, close, width }: MenuProps) {
   const [draft, setDraft] = useState(workDir ?? "");
   const [recent] = useState(loadRecent);
@@ -102,7 +108,7 @@ function WorkDirMenu({ workDir, onChange, close, width }: MenuProps) {
         },
         style: { ...inputStyle, flex: 1, minWidth: 0 },
       }),
-      createElement(Button, { variant: "solid", onClick: () => choose(draft) }, "确定"),
+      createElement(Button, { variant: "solid", onMouseDown: pick(() => choose(draft)) }, "确定"),
     ),
     recent.length > 0 && createElement("div", { style: sectionTitleStyle }, "最近用过"),
     ...recent.map((dir) =>
@@ -112,7 +118,7 @@ function WorkDirMenu({ workDir, onChange, close, width }: MenuProps) {
           key: dir,
           title: dir,
           style: { ...itemStyle, background: dir === workDir ? "var(--orca-color-bg-3)" : undefined },
-          onClick: () => choose(dir),
+          onMouseDown: pick(() => choose(dir)),
         },
         dir,
       ),
@@ -121,7 +127,7 @@ function WorkDirMenu({ workDir, onChange, close, width }: MenuProps) {
       "div",
       {
         style: { ...itemStyle, marginTop: 8, borderTop: "1px solid var(--orca-color-border)", borderRadius: 0, paddingTop: 8 },
-        onClick: () => choose(""),
+        onMouseDown: pick(() => choose("")),
       },
       createElement("i", { className: "ti ti-arrow-back-up", style: { marginRight: 6 } }),
       "用默认文件夹",
@@ -149,22 +155,21 @@ export default function WorkDirButton({ workDir, onChange }: Props) {
       menu: (close: () => void) =>
         createElement(WorkDirMenu, { workDir: dir, onChange, close, width: menuLayout.width }),
     },
+    // 用原生 title，不用 withTooltip：浮层提示会盖在菜单底部「用默认文件夹」上，点不到
     (openMenu: (e: any) => void) =>
-      withTooltip(
-        dir ? `本机 AI 工作文件夹：${dir}` : "本机 AI 工作文件夹：中转配置里的默认文件夹",
-        createElement(
-          Button,
-          {
-            variant: "plain",
-            onClick: (e: any) => {
-              setMenuLayout(measureMenu(e.currentTarget, "left", 220, 360));
-              openMenu(e);
-            },
-            style: modelButtonStyle,
+      createElement(
+        Button,
+        {
+          variant: "plain",
+          title: dir ? `本机 AI 工作文件夹：${dir}` : "本机 AI 工作文件夹：中转配置里的默认文件夹",
+          onClick: (e: any) => {
+            setMenuLayout(measureMenu(e.currentTarget, "left", 220, 360));
+            openMenu(e);
           },
-          createElement("i", { className: "ti ti-folder" }),
-          createElement("span", { style: { ...modelLabelStyle, maxWidth: 120 } }, dir ? folderName(dir) : "默认文件夹"),
-        ),
+          style: modelButtonStyle,
+        },
+        createElement("i", { className: "ti ti-folder" }),
+        createElement("span", { style: { ...modelLabelStyle, maxWidth: 120 } }, dir ? folderName(dir) : "默认文件夹"),
       ),
   );
 }
