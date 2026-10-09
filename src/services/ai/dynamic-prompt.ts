@@ -128,7 +128,12 @@ function buildSkillsSection(skills: SkillPromptInfo[]): string {
 可用技能列表：
 
 `;
-  const parts = [header];
+  return [header, ...skillListItems(skills)].join("\n");
+}
+
+/** 每个技能一行：名称、描述、指令前 5 行要点 */
+function skillListItems(skills: SkillPromptInfo[]): string[] {
+  const parts: string[] = [];
 
   for (const skill of skills) {
     // 只取指令的前 5 行核心要点，避免 token 浪费
@@ -145,7 +150,34 @@ function buildSkillsSection(skills: SkillPromptInfo[]): string {
   核心要求：${keyPoints.join("；")}`);
   }
 
-  return parts.join("\n");
+  return parts;
+}
+
+/**
+ * 本机 AI（Claude Code）用的个人设定：自动激活技能 + 已启用技能 + 本条格式要求 + 用户信息。
+ * 不含插件工具调用说明（Claude Code 用自己的工具）；技能和用户信息的写法与直连 API 的系统提示词一致。
+ */
+export function buildLocalCliInstructions(options: {
+  skills?: SkillPromptInfo[];
+  autoActivatedSkill?: AutoActivatedSkill;
+  formatSuffix?: string;
+  memoryText?: string;
+}): string {
+  const sections: string[] = [];
+  if (options.autoActivatedSkill) {
+    sections.push(buildAutoActivatedSkillSection(options.autoActivatedSkill));
+  }
+  if (options.skills && options.skills.length > 0) {
+    sections.push(`## 可用技能 (Skills)
+以下是已启用的专业技能。当用户请求与某个技能描述高度匹配时，按该技能的要求完成任务。
+
+可用技能列表：
+
+${skillListItems(options.skills).join("\n")}`);
+  }
+  if (options.formatSuffix?.trim()) sections.push(options.formatSuffix.trim());
+  if (options.memoryText?.trim()) sections.push(`用户信息:\n${options.memoryText.trim()}`);
+  return sections.join("\n\n");
 }
 
 function buildTechnicalNotes(repoId: string): string {

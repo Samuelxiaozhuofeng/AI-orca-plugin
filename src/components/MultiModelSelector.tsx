@@ -5,7 +5,7 @@
  */
 
 import type { AiChatSettings, AiProvider, ProviderModel, ModelCapability, MODEL_CAPABILITY_LABELS } from "../settings/ai-chat-settings";
-import { getAiChatSettings } from "../settings/ai-chat-settings";
+import { getAiChatSettings, normalizeApiProtocol } from "../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
 import { multiModelStore, toggleModelSelection, clearModelSelection, toggleMultiModelMode, getModelKey } from "../store/multi-model-store";
 import { withTooltip } from "../utils/orca-tooltip";
@@ -150,7 +150,9 @@ export default function MultiModelSelector({ settings, onClose }: MultiModelSele
   }, [settings]);
 
   // 规范化 provider/models，兼容旧数据里 models 为 string 的情况
-  const rawProviders = Array.isArray(resolvedSettings.providers) ? resolvedSettings.providers : [];
+  // 本机 AI 不能参与多模型对比，不列出
+  const rawProviders = (Array.isArray(resolvedSettings.providers) ? resolvedSettings.providers : [])
+    .filter((provider) => normalizeApiProtocol(provider.protocol) !== "local-cli");
   const normalizedProviders = rawProviders.map((provider) => {
     const rawModels: any = (provider as any).models;
     const models = Array.isArray(rawModels)

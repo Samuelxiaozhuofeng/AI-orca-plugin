@@ -8,6 +8,7 @@
 import { openAIChatCompletionsStream, type OpenAIChatMessage } from "./openai-client";
 import { getAiChatSettings, getModelApiConfig, resolveAiModel } from "../../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../../ui/ai-chat-ui";
+import { withDirectApiFallback, needDirectApiMessage } from "./api-helpers";
 
 /**
  * Generate suggested replies using AI based on current AI message content
@@ -18,10 +19,12 @@ import { getAiChatPluginName } from "../../ui/ai-chat-ui";
 export async function generateSuggestedReplies(aiMessageContent: string): Promise<string[]> {
   const pluginName = getAiChatPluginName();
   const settings = getAiChatSettings(pluginName);
-  const model = resolveAiModel(settings);
+  const selectedModel = resolveAiModel(settings);
   
-  // 获取当前模型的 API 配置
-  const apiConfig = getModelApiConfig(settings, model);
+  // 获取当前模型的 API 配置（本机 AI 换成直连 API 模型）
+  const apiConfig = withDirectApiFallback(settings, { ...getModelApiConfig(settings, selectedModel), model: selectedModel });
+  if (!apiConfig) throw new Error(needDirectApiMessage("生成追问建议"));
+  const model = apiConfig.model;
 
   // 验证设置
   if (!apiConfig.apiUrl || !apiConfig.apiKey) {

@@ -10,6 +10,7 @@ export function buildLocalCliContext(
   conversationId: string,
   opts: {
     contextText?: string;
+    instructions?: string;
     /** 请求是否仍属当前对话；不是就不弹窗，按拒绝处理 */
     isCurrent: () => boolean;
   },
@@ -19,6 +20,7 @@ export function buildLocalCliContext(
   return {
     conversationId,
     contextText: opts.contextText,
+    instructions: opts.instructions,
     orcaMcp: orcaNote?.url ? { url: orcaNote.url, token: auth.replace(/^Bearer\s+/i, "") } : undefined,
     confirm: (tool, input, { signal }) =>
       opts.isCurrent() ? createToolConfirmPromise(tool, input, { full: true, signal }) : Promise.resolve(false),

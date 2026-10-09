@@ -71,6 +71,10 @@ export async function* streamMultiModelChat(
       };
       continue;
     }
+    if (apiConfig.protocol === "local-cli") {
+      yield { modelKey, type: "error", error: "本机 AI 不参与多模型对比" };
+      continue;
+    }
     
     const iterator = streamChatWithRetry(
       {

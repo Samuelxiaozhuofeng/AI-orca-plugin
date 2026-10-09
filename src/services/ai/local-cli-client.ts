@@ -28,6 +28,8 @@ export interface LocalCliContext {
   conversationId: string;
   /** 用户拖入的笔记/页面等上下文；每轮都拼进 prompt */
   contextText?: string;
+  /** 用户的记忆、技能、本条消息的格式要求；放在 prompt 最前面 */
+  instructions?: string;
   orcaMcp?: { url: string; token: string };
   confirm: LocalCliConfirm;
 }
@@ -92,8 +94,13 @@ export function sessionBanner(ev: any): string | null {
   return `本机 AI · 模型 ${model} · ${ev.mode === "full" ? "⚠ 完全放开模式" : "安全模式"}\n\n`;
 }
 
-/** 可见历史（调用方已排除 localOnly）压成文字 + 用户上下文 + 最新一条用户消息；助手回复开头的模式行剥掉 */
-export function buildLocalCliPrompt(messages: OpenAIChatMessage[], contextText?: string): string {
+/** 个人设定 + 可见历史（调用方已排除 localOnly）压成文字 + 用户上下文 + 最新一条用户消息；助手回复开头的模式行剥掉 */
+export function buildLocalCliPrompt(messages: OpenAIChatMessage[], contextText?: string, instructions?: string): string {
+  const head = instructions?.trim() ? `以下是用户的个人设定与要求，请遵守：\n\n${instructions.trim()}\n\n---\n` : "";
+  return head + buildConversationPrompt(messages, contextText);
+}
+
+function buildConversationPrompt(messages: OpenAIChatMessage[], contextText?: string): string {
   const convo = messages.filter((m) => m.role === "user" || m.role === "assistant");
   const lastUser = lastUserIndex(convo);
   const current = lastUser >= 0 ? messageText(convo[lastUser]) : "";
@@ -243,7 +250,7 @@ export async function* streamLocalCli(
 
   try {
     let done = false;
-    const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText), model: options.model, orcaMcp: ctx.orcaMcp };
+    const body = { prompt: buildLocalCliPrompt(messages, ctx.contextText, ctx.instructions), model: options.model, orcaMcp: ctx.orcaMcp };
     for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
       if (ev.type === "session") {
         const banner = bannerShown ? null : sessionBanner(ev);

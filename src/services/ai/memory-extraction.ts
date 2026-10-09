@@ -15,7 +15,7 @@ import {
   validateCurrentConfig,
   type ApiProtocol,
 } from "../../settings/ai-chat-settings";
-import { buildChatUrlCandidates, readErrorMessage, extractJsonFromResponse } from "./api-helpers";
+import { buildChatUrlCandidates, readErrorMessage, extractJsonFromResponse, withDirectApiFallback, needDirectApiMessage } from "./api-helpers";
 
 // ============================================================================
 // Types
@@ -130,7 +130,7 @@ export async function extractMemories(conversationContext: string, customPrompt?
   const pluginName = getAiChatPluginName();
   const settings = getAiChatSettings(pluginName);
   
-  const apiConfig = getCurrentApiConfig(settings);
+  const apiConfig = withDirectApiFallback(settings, getCurrentApiConfig(settings));
 
   // Validate settings
   const validationError = validateCurrentConfig(settings);
@@ -140,6 +140,9 @@ export async function extractMemories(conversationContext: string, customPrompt?
       success: false,
       error: validationError,
     };
+  }
+  if (!apiConfig) {
+    return { memories: [], success: false, error: needDirectApiMessage("提取记忆") };
   }
 
   const model = apiConfig.model || resolveAiModel(settings);

@@ -17,7 +17,7 @@ import {
 } from "../settings/ai-chat-settings";
 import type { MemoryItem, PortraitTag, PortraitCategory } from "../store/memory-store";
 import { generateId, parseContentToItems } from "../store/memory-store";
-import { buildChatUrlCandidates, readErrorMessage, extractJsonFromResponse } from "./ai/api-helpers";
+import { buildChatUrlCandidates, readErrorMessage, extractJsonFromResponse, withDirectApiFallback, needDirectApiMessage } from "./ai/api-helpers";
 
 // ============================================================================
 // Types
@@ -128,7 +128,7 @@ export async function generatePortrait(memories: MemoryItem[], signal?: AbortSig
   const pluginName = getAiChatPluginName();
   const settings = getAiChatSettings(pluginName);
   
-  const apiConfig = getCurrentApiConfig(settings);
+  const apiConfig = withDirectApiFallback(settings, getCurrentApiConfig(settings));
 
   // Validate settings
   const validationError = validateCurrentConfig(settings);
@@ -140,6 +140,9 @@ export async function generatePortrait(memories: MemoryItem[], signal?: AbortSig
     };
   }
 
+  if (!apiConfig) {
+    return { portrait: null, success: false, error: needDirectApiMessage("生成印象") };
+  }
   const model = apiConfig.model || resolveAiModel(settings);
   if (!model) {
     return {
@@ -520,7 +523,10 @@ export async function refreshPortraitFromCategories(
     };
   }
 
-  const apiConfig = getCurrentApiConfig(settings);
+  const apiConfig = withDirectApiFallback(settings, getCurrentApiConfig(settings));
+  if (!apiConfig) {
+    return { portrait: null, success: false, error: needDirectApiMessage("生成印象") };
+  }
   const model = apiConfig.model || resolveAiModel(settings);
   if (!model) {
     return {

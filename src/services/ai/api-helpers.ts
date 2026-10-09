@@ -2,8 +2,42 @@
  * Shared API helpers — used by memory-extraction & portrait-generation.
  */
 
-import type { ApiProtocol } from "../../settings/ai-chat-settings";
+import type { AiChatSettings, ApiProtocol } from "../../settings/ai-chat-settings";
+import { normalizeApiProtocol } from "../../settings/ai-chat-settings";
 import { LOCAL_CLI_UNSUPPORTED } from "./local-cli-client";
+
+// ─── Model fallback ──────────────────────────────────────────────────────────
+
+export type HelperApiConfig = {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  protocol: ApiProtocol;
+  anthropicApiPath?: string;
+};
+
+/** 本机 AI 做不了一次性调用：current 是本机 AI 时换成第一个配好地址和密钥的直连 API 模型；没有则 null */
+export function withDirectApiFallback(settings: AiChatSettings, current: HelperApiConfig): HelperApiConfig | null {
+  if (current.protocol !== "local-cli") return current;
+  for (const p of settings.providers) {
+    const protocol = normalizeApiProtocol(p.protocol);
+    if (protocol === "local-cli" || p.enabled === false || !p.apiUrl?.trim() || !p.apiKey?.trim()) continue;
+    const model = Array.isArray(p.models) ? p.models.find((m) => m?.id) : undefined;
+    if (!model) continue;
+    return {
+      apiUrl: p.apiUrl,
+      apiKey: p.apiKey,
+      model: model.id,
+      protocol,
+      anthropicApiPath: typeof p.anthropicApiPath === "string" ? p.anthropicApiPath : undefined,
+    };
+  }
+  return null;
+}
+
+export function needDirectApiMessage(feature: string): string {
+  return `${feature}需要一个直连 API 模型，请先在模型设置里添加`;
+}
 
 // ─── URL builders ────────────────────────────────────────────────────────────
 

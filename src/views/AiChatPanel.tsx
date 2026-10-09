@@ -41,7 +41,7 @@ import {
   getModelRuntimeConfig,
   type AiChatSettings,
 } from "../settings/ai-chat-settings";
-import { buildDynamicSystemPrompt, getCurrentRepoId } from "../services/ai/dynamic-prompt";
+import { buildDynamicSystemPrompt, buildLocalCliInstructions, getCurrentRepoId } from "../services/ai/dynamic-prompt";
 import { getDiscoveredTools } from "../store/mcp-store";
 import {
   loadSessions,
@@ -1063,6 +1063,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      }
 	    }
 	    
+	    // 格式/风格要求单独收集：直连 API 拼进系统提示词，本机 AI 放进个人设定
+	    let formatSuffix = "";
+
 	    // /timeline - 时间线格式
 	    const wantsTimelineFormat = /\/timeline|用\s*timeline\s*格式展示|timeline\s*格式|时间线格式/.test(content);
 	    if (wantsTimelineFormat) {
@@ -1079,7 +1082,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	          ? `请把下面这段内容重新整理为 timeline 格式，不要重新问候，不要询问我要展示什么。\n\n${sanitizeContent(priorAssistantMessage.content)}`
 	          : "请用 timeline 格式展示最近一次可用的对话内容；如果没有可用内容，简短询问需要展示的日期或主题。";
 	      }
-	      systemPrompt += `\n\n【格式要求 - 时间线】用户要求使用时间线格式展示结果。
+	      formatSuffix += `\n\n【格式要求 - 时间线】用户要求使用时间线格式展示结果。
 格式：
 \`\`\`timeline
 日期时间 | [标题](orca-block:id) | 详细描述 | 类型
@@ -1101,7 +1104,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /brief - 简洁回答
 	    if (content.includes("/brief")) {
 	      processedContent = processedContent.replace(/\/brief/g, "").trim();
-	      systemPrompt += `\n\n【回答风格】用户要求简洁回答。请：
+	      formatSuffix += `\n\n【回答风格】用户要求简洁回答。请：
 1. 直接给出答案，不要铺垫
 2. 使用短句，避免长段落
 3. 要点用列表呈现
@@ -1111,7 +1114,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /detail - 详细回答
 	    if (content.includes("/detail")) {
 	      processedContent = processedContent.replace(/\/detail/g, "").trim();
-	      systemPrompt += `\n\n【回答风格】用户要求详细回答。请：
+	      formatSuffix += `\n\n【回答风格】用户要求详细回答。请：
 1. 充分展开说明，提供完整信息
 2. 包含背景、原因、细节
 3. 举例说明关键点
@@ -1121,7 +1124,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /table - 表格格式
 	    if (content.includes("/table")) {
 	      processedContent = processedContent.replace(/\/table/g, "").trim();
-	      systemPrompt += `\n\n【格式要求 - 表格】用户要求使用表格格式展示结果。请：
+	      formatSuffix += `\n\n【格式要求 - 表格】用户要求使用表格格式展示结果。请：
 1. 使用 Markdown 表格格式
 2. 第一行为表头，描述各列含义
 3. 合理设计列，让信息清晰对比
@@ -1131,7 +1134,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /summary - 总结模式
 	    if (content.includes("/summary")) {
 	      processedContent = processedContent.replace(/\/summary/g, "").trim();
-	      systemPrompt += `\n\n【回答风格 - 总结】用户要求总结模式。请：
+	      formatSuffix += `\n\n【回答风格 - 总结】用户要求总结模式。请：
 1. 提炼核心要点，去除冗余信息
 2. 使用结构化格式（标题+要点）
 3. 每个要点一句话概括
@@ -1141,7 +1144,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /compare - 对比模式
 	    if (content.includes("/compare")) {
 	      processedContent = processedContent.replace(/\/compare/g, "").trim();
-	      systemPrompt += `\n\n【格式要求 - 对比】用户要求对比展示。请使用以下格式：
+	      formatSuffix += `\n\n【格式要求 - 对比】用户要求对比展示。请使用以下格式：
 \`\`\`compare
 左侧标题 | 右侧标题
 ---
@@ -1159,7 +1162,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /list - 列表格式
 	    if (content.includes("/list")) {
 	      processedContent = processedContent.replace(/\/list/g, "").trim();
-	      systemPrompt += `\n\n【格式要求 - 列表】用户要求使用列表格式展示结果。请：
+	      formatSuffix += `\n\n【格式要求 - 列表】用户要求使用列表格式展示结果。请：
 1. 使用有序或无序列表呈现信息
 2. 每个列表项简洁明了
 3. 相关项目可以使用嵌套列表
@@ -1169,7 +1172,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /steps - 步骤格式
 	    if (content.includes("/steps")) {
 	      processedContent = processedContent.replace(/\/steps/g, "").trim();
-	      systemPrompt += `\n\n【格式要求 - 步骤】用户要求分步骤展示操作流程。请：
+	      formatSuffix += `\n\n【格式要求 - 步骤】用户要求分步骤展示操作流程。请：
 1. 使用有序列表，每步一个编号
 2. 每步标题简洁，后面可以补充说明
 3. 步骤之间有清晰的逻辑顺序
@@ -1179,7 +1182,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /eli5 - 简单易懂解释
 	    if (content.includes("/eli5")) {
 	      processedContent = processedContent.replace(/\/eli5/g, "").trim();
-	      systemPrompt += `\n\n【回答风格 - 简单易懂】用户要求用简单易懂的方式解释。请：
+	      formatSuffix += `\n\n【回答风格 - 简单易懂】用户要求用简单易懂的方式解释。请：
 1. 避免专业术语，用日常用语
 2. 多用比喻和类比帮助理解
 3. 从基础概念讲起，循序渐进
@@ -1189,7 +1192,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /formal - 正式专业语气
 	    if (content.includes("/formal")) {
 	      processedContent = processedContent.replace(/\/formal/g, "").trim();
-	      systemPrompt += `\n\n【回答风格 - 正式专业】用户要求使用正式专业的语气回答。请：
+	      formatSuffix += `\n\n【回答风格 - 正式专业】用户要求使用正式专业的语气回答。请：
 1. 使用规范的书面语言
 2. 结构清晰，逻辑严谨
 3. 适当使用专业术语
@@ -1199,7 +1202,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // /diagram - 流程图/示意图
 	    if (content.includes("/diagram")) {
 	      processedContent = processedContent.replace(/\/diagram/g, "").trim();
-	      systemPrompt += `\n\n【格式要求 - 流程图】用户要求生成流程图或示意图。请使用 Mermaid 语法：
+	      formatSuffix += `\n\n【格式要求 - 流程图】用户要求生成流程图或示意图。请使用 Mermaid 语法：
 \`\`\`mermaid
 graph TD
     A[开始] --> B{判断条件}
@@ -1214,6 +1217,8 @@ graph TD
 3. 节点文字简洁明了
 4. 连线标注清晰`;
 	    }
+
+	    systemPrompt += formatSuffix;
 
 	    // Get current chat mode for tool handling
 	    const currentChatMode = getMode();
@@ -1695,7 +1700,11 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           timeoutMs: settings.streamTimeout,
           maxContextTokens: modelContextLength,
           localCli: apiConfig.protocol === "local-cli"
-            ? buildLocalCliContext(currentSession.id, { contextText, isCurrent: req.isCurrent })
+            ? buildLocalCliContext(currentSession.id, {
+                contextText,
+                instructions: buildLocalCliInstructions({ skills: enabledSkills, autoActivatedSkill, formatSuffix, memoryText }),
+                isCurrent: req.isCurrent,
+              })
             : undefined,
         },
         apiMessages,

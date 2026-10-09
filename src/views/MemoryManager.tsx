@@ -387,6 +387,10 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         
         // Mark the memory as extracted
         memoryStore.markMemoryAsExtracted(memoryId);
+      } else if (result.error) {
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("error", result.error);
+        }
       }
     } catch (error: any) {
       if (error?.name === 'AbortError') {
@@ -447,6 +451,9 @@ export default function MemoryManager({ onBack }: MemoryManagerProps) {
         });
       } else if (result.error) {
         console.warn("[MemoryManager] Portrait generation failed:", result.error);
+        if (typeof orca !== "undefined" && orca.notify) {
+          orca.notify("error", result.error);
+        }
       }
     } catch (error: any) {
       if (error?.name === 'AbortError') {
