@@ -97,3 +97,11 @@ test("disabled selected provider is treated as not configured", () => {
   assertEqual(getCurrentApiConfig(settings).apiUrl, "https://on.example.com/v1");
   assertEqual(validateCurrentConfig(settings), null);
 });
+
+test("model only on a disabled provider is not rerouted to the selected provider", () => {
+  const settings = withProviders();
+  settings.providers[1].models = [{ id: "other-model" }];
+  settings.selectedProviderId = "on";
+  assertEqual(getModelApiConfig(settings, "shared-model").apiUrl, "");
+  assertEqual(getModelApiConfig(settings, "unknown-model").apiUrl, "https://on.example.com/v1");
+});

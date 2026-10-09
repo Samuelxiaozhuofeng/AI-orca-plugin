@@ -776,6 +776,8 @@ export function getModelApiConfig(
       anthropicApiPath: typeof best.anthropicApiPath === "string" ? best.anthropicApiPath : undefined,
     };
   }
+  // 模型只在停用平台里有 → 当作未配置，不转给别的平台
+  if (settings.providers.some((p) => p.models.some((m) => m.id === modelName))) return empty;
   // 回退到当前选中的平台
   const current = getCurrentApiConfig(settings);
   return { apiUrl: current.apiUrl, apiKey: current.apiKey, protocol: current.protocol, anthropicApiPath: current.anthropicApiPath };
