@@ -9,7 +9,7 @@ import path from "node:path";
 
 const HOST = "127.0.0.1";
 const BRIDGE_HOME = process.env.ORCA_BRIDGE_HOME || path.join(os.homedir(), ".orca-agent-bridge");
-// 启动时锁定 claude 的绝对路径：对话可指定任意工作目录，PATH 里若有相对项（如 "."）会按 cwd 找到所选文件夹里的同名程序
+// 每次请求按绝对 PATH 项现查 claude（中转开着时才装 / 换位置也能找到）：对话可指定任意工作目录，PATH 里若有相对项（如 "."）会按 cwd 找到所选文件夹里的同名程序
 function resolveClaudeBin(bin) {
   if (bin.includes("/")) return path.resolve(bin);
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
@@ -20,7 +20,6 @@ function resolveClaudeBin(bin) {
   return null;
 }
 const CLAUDE_NAME = process.env.ORCA_BRIDGE_CLAUDE || "claude";
-const CLAUDE_BIN = resolveClaudeBin(CLAUDE_NAME);
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
 const EXIT_GRACE_MS = 3000;
@@ -233,7 +232,8 @@ function handleChat(req, res, body) {
   if (typeof model !== "string" || !MODEL_RE.test(model)) return sendJson(res, 400, { error: "model 不合法" });
   const workDir = resolveWorkDir(body.workDir);
   if (workDir === null) return sendJson(res, 400, { error: `文件夹 ${String(body.workDir)} 不存在或不是文件夹` });
-  if (!CLAUDE_BIN) return sendJson(res, 500, { error: `找不到 claude 命令（${CLAUDE_NAME}），请先安装 Claude Code` });
+  const claudeBin = resolveClaudeBin(CLAUDE_NAME);
+  if (!claudeBin) return sendJson(res, 500, { error: `找不到 claude 命令（${CLAUDE_NAME}），请先安装 Claude Code` });
 
   const args = [...BASE_ARGS, ...addDirArgs];
   let mcpDir = null;
@@ -261,7 +261,7 @@ function handleChat(req, res, body) {
     res.end();
   };
 
-  const child = spawn(CLAUDE_BIN, args, { cwd: workDir, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(claudeBin, args, { cwd: workDir, stdio: ["pipe", "pipe", "pipe"] });
   children.add(child);
   // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
   child.stdout.setEncoding("utf8");
@@ -279,7 +279,7 @@ function handleChat(req, res, body) {
   };
   child.on("error", (err) => {
     cleanup();
-    finish({ type: "error", message: err.code === "ENOENT" ? `找不到 claude 命令（${CLAUDE_BIN}），请先安装 Claude Code` : `启动 claude 失败：${err.message}` });
+    finish({ type: "error", message: err.code === "ENOENT" ? `找不到 claude 命令（${claudeBin}），请先安装 Claude Code` : `启动 claude 失败：${err.message}` });
   });
   // exit 时 stdout 可能还没读完；等 close（stdio 全部读完）再判断结束
   let exitStatus = null;
