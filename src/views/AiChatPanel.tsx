@@ -2345,7 +2345,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       onWorkDirChange: handleWorkDirChange,
       // 中转是全局一个模式：先看本次运行中转报告的，没有再看本对话最近一条模式行
       localCliFullAccess: (getLastLocalCliMode() ?? ([...messages].reverse().map((m) => m.role === "assistant" ? bannerOf(m.content) : null).find(Boolean)?.includes("完全放开") ? "full" : null)) === "full",
-      currency: settingsForUi.currency,
     }),
     // MCP Server Settings Modal
     toBody(createElement(McpServerSettingsModal, {

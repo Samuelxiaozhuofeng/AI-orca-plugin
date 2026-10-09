@@ -97,7 +97,6 @@ function ModelItem({
   onDelete?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const hasPrice = model.inputPrice !== undefined || model.outputPrice !== undefined;
   const hasCapabilities = model.capabilities && model.capabilities.length > 0;
   
   return createElement(
@@ -160,12 +159,6 @@ function ModelItem({
             createElement(CapabilityBadge, { key: cap, capability: cap })
           )
         )
-      ),
-      // 价格
-      hasPrice && createElement(
-        "div",
-        { style: { fontSize: "10px", color: "var(--orca-color-text-3)", marginTop: "2px" } },
-        `$${model.inputPrice ?? 0}/${model.outputPrice ?? 0} /M`
       )
     ),
     // 右侧操作区
@@ -333,8 +326,6 @@ function ModelEditPanel({
   onClose: () => void;
 }) {
   const [label, setLabel] = useState(model.label || model.id);
-  const [inputPrice, setInputPrice] = useState(String(model.inputPrice ?? ""));
-  const [outputPrice, setOutputPrice] = useState(String(model.outputPrice ?? ""));
   const [temperature, setTemperature] = useState(String(model.temperature ?? ""));
   const [maxTokens, setMaxTokens] = useState(String(model.maxTokens ?? ""));
   const [maxToolRounds, setMaxToolRounds] = useState(String(model.maxToolRounds ?? ""));
@@ -360,7 +351,7 @@ function ModelEditPanel({
     display: "block",
   };
 
-  const allCapabilities: ModelCapability[] = ["vision", "web", "reasoning", "tools", "rerank", "embedding"];
+  const allCapabilities: ModelCapability[] = ["vision", "reasoning", "tools"];
 
   const toggleCapability = (cap: ModelCapability) => {
     if (capabilities.includes(cap)) {
@@ -385,8 +376,6 @@ function ModelEditPanel({
     onUpdate({
       ...model,
       label: label.trim() || model.id,
-      inputPrice: parseOptionalFloat(inputPrice),
-      outputPrice: parseOptionalFloat(outputPrice),
       temperature: parseOptionalFloat(temperature),
       maxTokens: parseOptionalInt(maxTokens),
       maxToolRounds: overrideToolRounds ? normalizeToolRoundLimit(maxToolRounds) : undefined,
@@ -411,18 +400,6 @@ function ModelEditPanel({
     createElement("div", { style: { marginBottom: "12px" } },
       createElement("label", { style: labelStyle }, "显示名称"),
       createElement("input", { type: "text", value: label, onChange: (e: any) => setLabel(e.target.value), style: inputStyle })
-    ),
-
-    // 价格（两列）
-    createElement("div", { style: { display: "flex", gap: "8px", marginBottom: "12px" } },
-      createElement("div", { style: { flex: 1, minWidth: 0 } },
-        createElement("label", { style: labelStyle }, "输入价格 ($/M)"),
-        createElement("input", { type: "number", step: "0.01", value: inputPrice, onChange: (e: any) => setInputPrice(e.target.value), placeholder: "0", style: inputStyle })
-      ),
-      createElement("div", { style: { flex: 1, minWidth: 0 } },
-        createElement("label", { style: labelStyle }, "输出价格 ($/M)"),
-        createElement("input", { type: "number", step: "0.01", value: outputPrice, onChange: (e: any) => setOutputPrice(e.target.value), placeholder: "0", style: inputStyle })
-      )
     ),
 
     // 模型参数（三列）
@@ -748,10 +725,7 @@ function ProviderConfigPanel({
                   onMouseLeave: (e: any) => { e.currentTarget.style.borderColor = "transparent"; },
                 },
                 createElement("div", { style: { flex: 1, minWidth: 0 } },
-                  createElement("div", { style: { fontSize: "12px", fontWeight: 500 } }, model.label || model.id),
-                  createElement("div", { style: { fontSize: "10px", color: "var(--orca-color-text-3)", marginTop: "2px" } },
-                    model.inputPrice !== undefined ? `${model.inputPrice}/${model.outputPrice ?? 0} $/M` : "未设置价格"
-                  )
+                  createElement("div", { style: { fontSize: "12px", fontWeight: 500 } }, model.label || model.id)
                 ),
                 createElement("div", { style: { display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
                   model.capabilities && model.capabilities.map(cap =>

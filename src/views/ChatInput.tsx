@@ -4,12 +4,12 @@
  */
 
 import type { DbId } from "../orca.d.ts";
-import type { AiChatSettings, CurrencyType } from "../settings/ai-chat-settings";
+import type { AiChatSettings } from "../settings/ai-chat-settings";
 import { getModelApiConfig } from "../settings/ai-chat-settings";
 import type { FileRef, VideoProcessMode } from "../services/session-service";
 import { buildContextForSend } from "../services/notes/context-builder";
 import { contextStore, contextKey, addBlockById, clearHighPriorityContexts } from "../store/context-store";
-import { estimateTokens, formatTokenCount, estimateCost } from "../utils/token-utils";
+import { estimateTokens, formatTokenCount } from "../utils/token-utils";
 import { tooltipText, withTooltip } from "../utils/orca-tooltip";
 import {
   uploadFile,
@@ -85,8 +85,6 @@ type Props = {
   onModelSelect: (providerId: string, modelId: string) => void;
   /** 更新设置回调（用于平台配置修改） */
   onUpdateSettings: (settings: AiChatSettings) => void;
-  /** 币种设置 */
-  currency?: CurrencyType;
   /** 当前对话选的本机 AI 工作文件夹（空 = 默认文件夹） */
   workDir?: string;
   onWorkDirChange: (workDir: string | undefined) => void;
@@ -167,7 +165,6 @@ export default function ChatInput({
   selectedModel,
   onModelSelect,
   onUpdateSettings,
-  currency = "USD",
   workDir,
   onWorkDirChange,
   localCliFullAccess,
@@ -237,30 +234,12 @@ export default function ChatInput({
     adjustTextareaHeight();
   }, [text, adjustTextareaHeight]);
 
-  // 获取当前选中模型的价格信息
-  const selectedModelInfo = useMemo(() => {
-    // 从 settings.providers 中查找当前选中的模型
-    for (const provider of settings.providers) {
-      const model = provider.models.find(m => m.id === selectedModel);
-      if (model) {
-        return {
-          inputPrice: model.inputPrice,
-          outputPrice: model.outputPrice,
-        };
-      }
-    }
-    return { inputPrice: 0, outputPrice: 0 };
-  }, [settings.providers, selectedModel]);
-
   // 计算 Token 预估
   const tokenEstimate = useMemo(() => {
     const inputTokens = estimateTokens(text);
     const outputTokens = Math.ceil(inputTokens * 1.5); // 预估输出为输入的 1.5 倍
-    const inputPrice = selectedModelInfo?.inputPrice ?? 0;
-    const outputPrice = selectedModelInfo?.outputPrice ?? 0;
-    const cost = estimateCost(inputTokens, outputTokens, inputPrice, outputPrice);
-    return { inputTokens, outputTokens, cost };
-  }, [text, selectedModelInfo]);
+    return { inputTokens, outputTokens };
+  }, [text]);
 
   const isLocalCli = useMemo(() => getModelApiConfig(settings, selectedModel).protocol === "local-cli", [settings, selectedModel]);
 
