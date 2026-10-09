@@ -13,7 +13,7 @@ const React = window.React as unknown as {
   useCallback: <T extends (...args: any[]) => any>(fn: T, deps: any[]) => T;
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useEffect, useCallback, Fragment } = React;
+const { createElement, useState, useEffect, useCallback } = React;
 
 export default function GlobalImagePreview() {
   const [selectedImage, setSelectedImage] = useState<ImagePreviewItem | null>(null);

@@ -20,13 +20,8 @@ import {
   generateResultSummary,
 } from "../utils/tool-display-config";
 import {
-  toolStatusPillStyle,
-  toolStatusIconStyle,
-  toolStatusTextStyle,
-  toolStatusExpandButtonStyle,
   toolStatusDetailsStyle,
   toolStatusErrorStyle,
-  toolStatusRetryButtonStyle,
 } from "../styles/ai-chat-styles";
 import { withTooltip } from "../utils/orca-tooltip";
 import MarkdownMessage from "./MarkdownMessage";

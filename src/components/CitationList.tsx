@@ -12,7 +12,7 @@ const React = window.React as unknown as {
   useMemo: <T>(factory: () => T, deps: any[]) => T;
   Fragment: typeof window.React.Fragment;
 };
-const { createElement, useState, useCallback, useMemo, Fragment } = React;
+const { createElement, useState, useCallback } = React;
 
 export interface Citation {
   id: string;
