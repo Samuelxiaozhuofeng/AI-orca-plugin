@@ -1,13 +1,11 @@
 /**
  * EnhancedMarkdownMessage Component
  * 增强版Markdown消息组件，支持：
- * - 自动解析和显示图片
  * - 引用来源显示（底部折叠列表）
  * - 智能内容增强
  */
 
 import MarkdownMessage from "./MarkdownMessage";
-import ImageGallery, { type ImageItem } from "./ImageGallery";
 import CitationList, { type Citation } from "./CitationList";
 import type { SourceGroup, WebSearchSource } from "../utils/source-attribution";
 import { sanitizeContent } from "../services/ai/openai-client";
@@ -25,8 +23,7 @@ const { createElement, useMemo, useCallback, Fragment } = React;
 interface EnhancedMarkdownMessageProps {
   content: string;
   role: "user" | "assistant" | "tool";
-  // 可选的图片和引用数据
-  images?: ImageItem[];
+  // 可选的引用数据
   citations?: Citation[];
   sourceGroups?: SourceGroup[];
   sourceResults?: WebSearchSource[];
@@ -36,32 +33,6 @@ interface EnhancedMarkdownMessageProps {
   onLeaveSourceGroup?: () => void;
   // 是否自动解析内容中的图片和引用
   autoParseEnhancements?: boolean;
-}
-
-/**
- * 从Markdown内容中解析图片
- */
-function parseImagesFromMarkdown(content: string): { images: ImageItem[], hasMarkdownImages: boolean } {
-  const images: ImageItem[] = [];
-  
-  // 匹配Markdown图片语法: ![alt](url "title")
-  const imageRegex = /!\[([^\]]*)\]\(([^)]+)(?:\s+"([^"]*)")?\)/g;
-  let match;
-  
-  while ((match = imageRegex.exec(content)) !== null) {
-    const [, alt, url, title] = match;
-    
-    // 只处理HTTP/HTTPS图片URL
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      images.push({
-        url: url.trim(),
-        title: title || alt || '图片',
-        sourceUrl: url.trim(),
-      });
-    }
-  }
-  
-  return { images, hasMarkdownImages: images.length > 0 };
 }
 
 /**
@@ -141,7 +112,6 @@ function extractDomain(url: string): string {
 export default function EnhancedMarkdownMessage({
   content,
   role,
-  images: providedImages,
   citations: providedCitations,
   sourceGroups,
   sourceResults,
@@ -161,25 +131,16 @@ export default function EnhancedMarkdownMessage({
       .trim();
   }, []);
   
-  // 解析内容中的图片和引用 - 智能显示模式切换
-  const { parsedCitations, cleanedContent, hasMarkdownImages } = useMemo(() => {
+  // 解析内容中的引用
+  const { parsedCitations, cleanedContent } = useMemo(() => {
     const contentToUse = cleanContent(content);
     
     if (!autoParseEnhancements) {
       return {
         parsedCitations: [],
         cleanedContent: contentToUse,
-        hasMarkdownImages: false,
       };
     }
-    
-    // 检测是否有Markdown图片
-    const hasMarkdownImgs = contentToUse.includes('![') && contentToUse.includes('](');
-    
-    // 解析Markdown中的图片（仅用于检测）
-    const { hasMarkdownImages: hasImgs } = hasMarkdownImgs
-      ? parseImagesFromMarkdown(contentToUse)
-      : { hasMarkdownImages: false };
     
     // 只有当内容包含引用格式时才解析引用，避免不必要的正则操作
     const citations = (contentToUse.includes('[') && contentToUse.includes('](') && contentToUse.includes('http'))
@@ -194,32 +155,8 @@ export default function EnhancedMarkdownMessage({
     return {
       parsedCitations: citations,
       cleanedContent: cleaned.replace(/\n{3,}/g, '\n\n').trim(),
-      hasMarkdownImages: hasImgs,
     };
   }, [content, autoParseEnhancements, cleanContent]);
-  
-  // 智能图片显示策略：
-  // - 如果有Markdown图片：不显示ImageGallery，让Markdown自己处理
-  // - 如果只有AI工具图片：用ImageGallery显示
-  const finalImages = useMemo(() => {
-    // 如果内容中有Markdown图片，就不使用ImageGallery模式
-    if (hasMarkdownImages) {
-      return [];
-    }
-    
-    // 只有AI工具调用的图片时，才使用ImageGallery
-    if (!providedImages || providedImages.length === 0) {
-      return [];
-    }
-    
-    // 去重 - 使用更高效的去重算法
-    const seen = new Set<string>();
-    return providedImages.filter(img => {
-      if (seen.has(img.url)) return false;
-      seen.add(img.url);
-      return true;
-    });
-  }, [providedImages, hasMarkdownImages]);
   
   // 合并引用 - 优化依赖项
   const finalCitations = useMemo(() => {
@@ -244,15 +181,6 @@ export default function EnhancedMarkdownMessage({
   return createElement(
     Fragment,
     null,
-    // 智能图片显示策略：
-    // - 有Markdown图片时：不显示ImageGallery，让Markdown自己处理图片
-    // - 只有AI工具图片时：用ImageGallery统一显示
-    finalImages.length > 0 && createElement(ImageGallery, {
-      images: finalImages,
-      maxDisplay: 6,
-      // 智能布局选择：1-2张用行布局，3张以上用网格布局
-      layout: finalImages.length <= 2 ? "row" : "grid",
-    }),
     // Markdown内容
     createElement(MarkdownMessage, {
       content: cleanedContent,

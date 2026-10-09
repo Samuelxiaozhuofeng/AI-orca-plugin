@@ -12,7 +12,7 @@
 - **多文件支持** - 图片、视频、音频、PDF、Word、Excel、代码、数据文件
 - **斜杠命令** - 输入 `/` 选用 `Commands/` 目录里的提示词模板
 - **流式输出** - SSE 实时流式响应
-- **Markdown 增强** - 代码块、表格、图片画廊等
+- **Markdown 增强** - 代码块、表格等
 
 ---
 
@@ -46,7 +46,7 @@ AI-orca-plugin/
 │   │   ├── DisplaySettingsPanel.tsx # 字号 / 紧凑模式 / 时间戳
 │   │   ├── McpServerSettingsModal.tsx # MCP 服务器设置
 │   │   └── EmptyState.tsx         # 欢迎页
-│   ├── components/                # 消息列表、Markdown 渲染、工具确认弹窗、引用、图片画廊等
+│   ├── components/                # 消息列表、Markdown 渲染、工具确认弹窗、引用等
 │   ├── services/
 │   │   ├── ai/                    # 见「服务层」
 │   │   ├── external/              # MCP 客户端 / 服务器管理、图片、动图、视频

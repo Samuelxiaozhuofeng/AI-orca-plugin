@@ -197,7 +197,7 @@ type Props = {
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
   onClearAll: () => void;
-  onNewSession: () => void;
+  onNewSession?: () => void; // 已不使用，AiChatPanel 仍在传
   onTogglePin?: (sessionId: string) => void;
   onToggleFavorite?: (sessionId: string) => void;
   onRename?: (sessionId: string, newTitle: string) => void;
@@ -213,7 +213,6 @@ export default function ChatHistoryMenu({
   onSelectSession,
   onDeleteSession,
   onClearAll,
-  onNewSession,
   onTogglePin,
   onToggleFavorite,
   onRename,
@@ -337,11 +336,6 @@ export default function ChatHistoryMenu({
     onClearAll();
     setIsOpen(false);
   }, [sessions.length, pendingDelete, onClearAll]);
-
-  const handleNewSession = useCallback(() => {
-    onNewSession();
-    setIsOpen(false);
-  }, [onNewSession]);
 
   // 分组逻辑：
   // - 置顶始终在最前
@@ -614,20 +608,6 @@ export default function ChatHistoryMenu({
                   className: showFavoritesOnly ? "ti ti-star-filled" : "ti ti-star", 
                   style: { fontSize: 12 } 
                 })
-              )
-            ),
-            withTooltip(
-              "新建对话",
-              createElement(
-                "button",
-                {
-                  onClick: handleNewSession,
-                  style: newButtonStyle,
-                  onMouseOver: (e: any) => (e.currentTarget.style.opacity = "0.85"),
-                  onMouseOut: (e: any) => (e.currentTarget.style.opacity = "1"),
-                },
-                createElement("i", { className: "ti ti-plus", style: { fontSize: 12 } }),
-                "新建"
               )
             )
           )

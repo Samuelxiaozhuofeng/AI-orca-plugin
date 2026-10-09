@@ -15,8 +15,6 @@ export type TokenizerType =
 export type TokenizerConfig = {
   /** 默认模型名称 */
   modelName: string;
-  /** 是否启用运行时校准 */
-  enableCalibration: boolean;
   /** 安全余量（0.05 = 5%） */
   safetyMargin: number;
 };
@@ -27,31 +25,10 @@ export type TokenEstimateResult = {
   tokens: number;
   /** 原始估算值 */
   rawTokens: number;
-  /** 校准后的值 */
-  calibratedTokens: number;
   /** 使用的 tokenizer 类型 */
   tokenizerType: TokenizerType;
   /** 模型家族 */
   modelFamily: "gpt" | "claude" | "gemini" | "deepseek" | "other";
   /** 估算置信度 (0-1) */
   confidence: number;
-};
-
-/** 填充策略类型 */
-export type PaddingStrategy = 
-  | "comment"     // HTML 注释填充
-  | "whitespace"  // 空白字符填充
-  | "marker"      // 特殊标记填充
-  | "none";       // 不填充
-
-/** Token 对齐配置 */
-export type TokenAlignmentConfig = {
-  /** 是否启用对齐 */
-  enabled: boolean;
-  /** 对齐单位（token 数） */
-  alignUnit: number;
-  /** 填充策略 */
-  paddingStrategy: PaddingStrategy;
-  /** 填充标记（用于 marker 策略） */
-  paddingMarker?: string;
 };

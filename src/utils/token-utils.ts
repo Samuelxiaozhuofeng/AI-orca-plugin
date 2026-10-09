@@ -2,7 +2,7 @@
  * Token estimation utilities
  * Token 估算工具，用于预估消息的 Token 数量和费用
  * 
- * v2: 使用新的 tokenizer 模块，支持多模型校准
+ * v2: 使用新的 tokenizer 模块
  */
 
 import type { CurrencyType } from "../settings/ai-chat-settings";
@@ -12,24 +12,15 @@ import { estimateTokens as tokenizerEstimate } from "./tokenizer";
 // 重新导出 tokenizer 功能
 export { 
   estimateTokensDetailed,
-  recordCalibrationSample,
   setTokenizerConfig,
   getTokenizerConfig,
 } from "./tokenizer";
-
-export { 
-  alignToTokenBoundary,
-  getModelAlignmentConfig,
-  isAligned,
-  removePadding,
-} from "./tokenizer/alignment";
 
 /**
  * 估算文本的 Token 数量
  * 
  * 使用新的 tokenizer 模块，支持：
  * - 多模型特定估算
- * - 运行时偏差校准
  * - 安全余量
  * 
  * @param text 要估算的文本

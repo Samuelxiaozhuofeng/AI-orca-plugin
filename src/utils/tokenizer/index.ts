@@ -4,12 +4,10 @@
  * 支持：
  * - 真实 tokenizer（tiktoken for GPT, 自定义 BPE for 其他模型）
  * - 回退到启发式估算
- * - 跨模型一致性校准
  * 
  * 设计原则：
  * - 宁可高估也不低估（避免上下文截断）
  * - 缓存 tokenizer 实例，避免重复初始化
- * - 支持运行时偏差校准
  */
 
 import type { TokenizerType, TokenizerConfig, TokenEstimateResult } from "./types";
@@ -160,68 +158,12 @@ function getModelFamily(modelName: string): "gpt" | "claude" | "gemini" | "deeps
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 偏差校准
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** 校准数据 */
-type CalibrationData = {
-  samples: Array<{ estimated: number; actual: number }>;
-  biasFactor: number;
-  lastUpdated: number;
-};
-
-const calibrationStore = new Map<string, CalibrationData>();
-
-/** 记录校准样本 */
-export function recordCalibrationSample(
-  modelName: string,
-  estimatedTokens: number,
-  actualTokens: number,
-): void {
-  const key = getModelFamily(modelName);
-  let data = calibrationStore.get(key);
-  
-  if (!data) {
-    data = { samples: [], biasFactor: 1.0, lastUpdated: Date.now() };
-    calibrationStore.set(key, data);
-  }
-  
-  // 保留最近 20 个样本
-  data.samples.push({ estimated: estimatedTokens, actual: actualTokens });
-  if (data.samples.length > 20) {
-    data.samples.shift();
-  }
-  
-  // 重新计算偏差因子
-  if (data.samples.length >= 3) {
-    const totalEstimated = data.samples.reduce((sum, s) => sum + s.estimated, 0);
-    const totalActual = data.samples.reduce((sum, s) => sum + s.actual, 0);
-    
-    if (totalEstimated > 0) {
-      const rawFactor = totalActual / totalEstimated;
-      // 限制在合理范围内
-      data.biasFactor = Math.max(0.85, Math.min(1.20, rawFactor));
-    }
-  }
-  
-  data.lastUpdated = Date.now();
-}
-
-/** 获取校准后的偏差因子 */
-function getCalibrationFactor(modelName: string): number {
-  const key = getModelFamily(modelName);
-  const data = calibrationStore.get(key);
-  return data?.biasFactor ?? 1.0;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // 主要导出
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 默认配置 */
 const DEFAULT_CONFIG: TokenizerConfig = {
   modelName: "gpt-4o",
-  enableCalibration: true,
   safetyMargin: 0.05, // 5% 安全余量
 };
 
@@ -269,51 +211,17 @@ export function estimateTokensDetailed(text: string, modelName?: string): TokenE
     rawTokens = simpleBpeEstimate(text, modelFamily);
   }
   
-  // 应用校准因子
-  let calibratedTokens = rawTokens;
-  if (currentConfig.enableCalibration) {
-    const factor = getCalibrationFactor(model);
-    calibratedTokens = Math.ceil(rawTokens * factor);
-  }
-  
   // 应用安全余量
   const safetyMargin = currentConfig.safetyMargin || 0.05;
-  const finalTokens = Math.ceil(calibratedTokens * (1 + safetyMargin));
+  const finalTokens = Math.ceil(rawTokens * (1 + safetyMargin));
   
   return {
     tokens: finalTokens,
     rawTokens,
-    calibratedTokens,
     tokenizerType,
     modelFamily,
     confidence: tokenizerType === "heuristic" ? 0.7 : 0.85,
   };
-}
-
-/**
- * 获取校准统计
- */
-export function getCalibrationStats(): Record<string, {
-  samples: number;
-  biasFactor: number;
-  lastUpdated: number;
-}> {
-  const stats: Record<string, any> = {};
-  
-  for (const [key, data] of calibrationStore) {
-    stats[key] = {
-      samples: data.samples.length,
-      biasFactor: data.biasFactor,
-      lastUpdated: data.lastUpdated,
-    };
-  }
-  
-  return stats;
-}
-
-/** 清除校准数据 */
-export function clearCalibrationData(): void {
-  calibrationStore.clear();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -322,9 +230,6 @@ export function clearCalibrationData(): void {
 
 export const tokenizerDebug = {
   estimateTokensDetailed,
-  getCalibrationStats,
-  recordCalibrationSample,
-  clearCalibrationData,
   getTokenizerType,
   getModelFamily,
   setTokenizerConfig,
