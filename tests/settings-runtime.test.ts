@@ -1,5 +1,5 @@
 import { test, assertEqual } from "./test-harness";
-import { getModelRuntimeConfig, type AiChatSettings } from "../src/settings/ai-chat-settings";
+import { getModelRuntimeConfig, getModelApiConfig, getCurrentApiConfig, validateCurrentConfig, type AiChatSettings } from "../src/settings/ai-chat-settings";
 
 function makeSettings(model: AiChatSettings["providers"][number]["models"][number]): AiChatSettings {
   return {
@@ -63,4 +63,37 @@ test("getModelRuntimeConfig respects explicit model tool round override", () => 
   const runtime = getModelRuntimeConfig(settings, "model-b");
 
   assertEqual(runtime.maxToolRounds, 0);
+});
+
+function withProviders(): AiChatSettings {
+  const base = makeSettings({ id: "shared-model" });
+  const p = (id: string, enabled: boolean) => ({
+    id, name: id, apiUrl: `https://${id}.example.com/v1`, apiKey: `sk-${id}`,
+    protocol: "openai" as const, enabled, models: [{ id: "shared-model" }],
+  });
+  return { ...base, providers: [p("off", false), p("on", true)], selectedProviderId: "off", selectedModelId: "shared-model" };
+}
+
+test("getModelApiConfig never resolves to a disabled provider", () => {
+  const settings = withProviders();
+  assertEqual(getModelApiConfig(settings, "shared-model").apiUrl, "https://on.example.com/v1");
+  assertEqual(getModelApiConfig(settings, "shared-model", "off").apiUrl, "");
+  assertEqual(getModelApiConfig(settings, "shared-model", "on").apiUrl, "https://on.example.com/v1");
+});
+
+test("getModelApiConfig returns empty config when the only match is disabled", () => {
+  const settings = withProviders();
+  settings.providers = settings.providers.filter((p) => p.id === "off");
+  const cfg = getModelApiConfig(settings, "shared-model");
+  assertEqual(cfg.apiUrl, "");
+  assertEqual(cfg.apiKey, "");
+});
+
+test("disabled selected provider is treated as not configured", () => {
+  const settings = withProviders();
+  assertEqual(getCurrentApiConfig(settings).apiUrl, "");
+  assertEqual(validateCurrentConfig(settings), "off 已停用，请换一个平台");
+  settings.selectedProviderId = "on";
+  assertEqual(getCurrentApiConfig(settings).apiUrl, "https://on.example.com/v1");
+  assertEqual(validateCurrentConfig(settings), null);
 });

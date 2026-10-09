@@ -657,7 +657,8 @@ export function getCurrentApiConfig(settings: AiChatSettings): {
   protocol: ApiProtocol;
   anthropicApiPath?: string;
 } {
-  const provider = getSelectedProvider(settings);
+  const selected = getSelectedProvider(settings);
+  const provider = selected?.enabled === false ? undefined : selected; // 停用的平台不发任何请求
   return {
     apiUrl: provider?.apiUrl || "",
     apiKey: provider?.apiKey || "",
@@ -671,6 +672,7 @@ export function getCurrentApiConfig(settings: AiChatSettings): {
 export function validateCurrentConfig(settings: AiChatSettings): string | null {
   const provider = getSelectedProvider(settings);
   if (!provider) return "请选择一个平台";
+  if (provider.enabled === false) return `${provider.name} 已停用，请换一个平台`;
   if (!provider.apiUrl.trim()) return `请设置 ${provider.name} 的 API 地址`;
   if (!provider.apiKey.trim()) return `请设置 ${provider.name} 的 API 密钥`;
   if (!settings.selectedModelId.trim()) return "请选择一个模型";
@@ -728,9 +730,14 @@ export function getModelApiConfig(
   modelName: string,
   providerId?: string,
 ): { apiUrl: string; apiKey: string; protocol: ApiProtocol; anthropicApiPath?: string } {
-  // 如果指定了 providerId，直接查找该 provider
+  // 停用的平台一律不选，避免把内容发给用户关掉的服务
+  const enabledProviders = settings.providers.filter(p => p.enabled !== false);
+  const empty = { apiUrl: "", apiKey: "", protocol: normalizeApiProtocol(undefined) };
+
+  // 如果指定了 providerId，直接查找该 provider；指定的平台已停用则当作未配置
   if (providerId) {
     const provider = settings.providers.find(p => p.id === providerId);
+    if (provider?.enabled === false) return empty;
     if (provider && provider.apiUrl?.trim() && provider.apiKey?.trim()) {
       return {
         apiUrl: provider.apiUrl,
@@ -742,7 +749,7 @@ export function getModelApiConfig(
   }
 
   // 优先选择已配置 API 的提供商，避免重名模型命中未配置的内置项
-  const matchedProviders = settings.providers.filter((provider) =>
+  const matchedProviders = enabledProviders.filter((provider) =>
     provider.models.some((m) => m.id === modelName)
   );
 
@@ -759,18 +766,9 @@ export function getModelApiConfig(
     };
   }
 
-  // 2) 其它 provider 按“配置完整+启用”优先级选择
-  const scored = matchedProviders
-    .map((p) => {
-      const hasApi = !!p.apiUrl?.trim() && !!p.apiKey?.trim();
-      const enabled = p.enabled !== false;
-      const score = (hasApi ? 2 : 0) + (enabled ? 1 : 0);
-      return { p, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  if (scored.length > 0 && scored[0].score > 0) {
-    const best = scored[0].p;
+  // 2) 其它已启用 provider，配置完整的优先
+  const best = matchedProviders.find((p) => !!p.apiUrl?.trim() && !!p.apiKey?.trim()) ?? matchedProviders[0];
+  if (best) {
     return {
       apiUrl: best.apiUrl,
       apiKey: best.apiKey,
