@@ -195,6 +195,10 @@ export const AiChatPluginAPI = {
 
     // 获取 API 配置
     const apiConfig = getModelApiConfig(settings, model);
+    if (!apiConfig.apiUrl.trim()) {
+      yield { type: "done", result: { success: false, content: "", error: `模型 ${model} 未配置 API（所在平台可能已停用）` } };
+      return;
+    }
 
     // 构建用户消息
     const userMsg: Message = {
