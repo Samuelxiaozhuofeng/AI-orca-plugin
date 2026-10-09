@@ -158,6 +158,7 @@ const TOOLBAR_HIDE_BREAKPOINTS = {
 const overflowMenuStyle: React.CSSProperties = {
   minWidth: 240,
   padding: "10px",
+  boxSizing: "border-box",
   background: "var(--orca-color-bg-1)",
   display: "flex",
   flexDirection: "column",
@@ -638,7 +639,7 @@ export default function ChatInput({
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        if (e.nativeEvent?.isComposing) return;
+        if (e.nativeEvent?.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         handleSend();
         return;

@@ -284,11 +284,13 @@ export default function ChatHistoryMenu({
 
   const handleTogglePin = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    setPendingDelete(null);
     onTogglePin?.(sessionId);
   }, [onTogglePin]);
 
   const handleToggleFavorite = useCallback((e: React.MouseEvent, sessionId: string) => {
     e.stopPropagation();
+    setPendingDelete(null);
     onToggleFavorite?.(sessionId);
   }, [onToggleFavorite]);
 
@@ -300,6 +302,7 @@ export default function ChatHistoryMenu({
 
   const handleStartRename = useCallback((e: React.MouseEvent, session: SavedSession) => {
     e.stopPropagation();
+    setPendingDelete(null);
     renameCancelledRef.current = false;
     setRenamingId(session.id);
     setRenameValue(getDisplayTitle(session));
@@ -591,7 +594,10 @@ export default function ChatHistoryMenu({
               createElement(
                 "button",
                 {
-                  onClick: () => setShowFavoritesOnly(!showFavoritesOnly),
+                  onClick: () => {
+                    setPendingDelete(null);
+                    setShowFavoritesOnly(!showFavoritesOnly);
+                  },
                   style: {
                     ...newButtonStyle,
                     background: showFavoritesOnly ? "var(--orca-color-warning)" : "var(--orca-color-bg-3)",
@@ -693,7 +699,7 @@ export default function ChatHistoryMenu({
                 ),
               )
         ),
-        nonFavoritedSessions.length > 0 &&
+        !showFavoritesOnly && nonFavoritedSessions.length > 0 &&
           createElement(
             "div",
             { style: footerStyle },

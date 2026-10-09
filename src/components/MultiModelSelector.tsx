@@ -220,6 +220,7 @@ export default function MultiModelSelector({ settings, onClose, width = 320 }: M
     {
       style: {
         width,
+        boxSizing: "border-box",
         maxHeight: "400px",
         background: "var(--orca-color-bg-1)",
         borderRadius: "8px",

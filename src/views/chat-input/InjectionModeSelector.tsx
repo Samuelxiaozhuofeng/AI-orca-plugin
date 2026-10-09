@@ -47,6 +47,7 @@ const menuContainerStyle: React.CSSProperties = {
   width: 280,
   maxHeight: 360,
   padding: 10,
+  boxSizing: "border-box",
   background: "var(--orca-color-bg-1)",
   display: "flex",
   flexDirection: "column",
