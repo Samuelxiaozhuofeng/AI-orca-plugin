@@ -11,6 +11,7 @@ interface SavedMessage {
   role: "user" | "assistant";
   content: string;
   createdAt?: number;
+  durationMs?: number; // 输出耗时，用于显示 tok/s
   // 文件/图片
   files?: Array<{
     path: string;
@@ -136,6 +137,7 @@ function convertMessages(messages: Message[]): SavedMessage[] {
         role: m.role as "user" | "assistant",
         content: m.content,
         createdAt: m.createdAt,
+        durationMs: m.durationMs,
       };
       // 文件/图片
       if (m.files && m.files.length > 0) {

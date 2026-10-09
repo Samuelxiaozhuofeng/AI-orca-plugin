@@ -1139,14 +1139,16 @@ graph TD
     let ccPartial = false;
     let ccErrored = false;
     // 本次流里创建的助手消息（思考 / 正文各一条时各记一条），流结束时写 durationMs
-    const streamedMsgs: Array<{ id: string; createdAt: number }> = [];
+    // start = 模型第一个字到达的时刻；本机 AI 的模式横幅不算输出，横幅之后才开始计时
+    const streamedMsgs: Array<{ id: string; start?: number }> = [];
+    const isBannerOnly = (text: string) => text.replace(BANNER_RE, "") === "";
     const stampDurations = () => {
-      const pending = streamedMsgs.splice(0);
+      const pending = streamedMsgs.splice(0).filter((p) => p.start !== undefined);
       if (pending.length === 0) return;
       const now = Date.now();
       setMessages((prev) => prev.map((m) => {
         const hit = pending.find((p) => p.id === m.id);
-        return hit ? { ...m, durationMs: now - hit.createdAt } : m;
+        return hit ? { ...m, durationMs: now - hit.start! } : m;
       }));
     };
 
@@ -1352,12 +1354,16 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         apiMessages,
         apiMessagesFallback,
       )) {
+        if (chunk.type === "reasoning" || (chunk.type === "content" && !isBannerOnly(chunk.content))) {
+          const t = Date.now();
+          for (const p of streamedMsgs) p.start ??= t;
+        }
         if (chunk.type === "reasoning") {
           // 第一次收到 reasoning 时，创建独立的 reasoning 消息
           if (!reasoningMessageId) {
             reasoningMessageId = nowId();
             reasoningCreatedAt = Date.now();
-            streamedMsgs.push({ id: reasoningMessageId, createdAt: reasoningCreatedAt });
+            streamedMsgs.push({ id: reasoningMessageId, start: reasoningCreatedAt });
             setStreamingMessageId(reasoningMessageId);
             currentReasoning = chunk.reasoning;
             setMessages((prev) => [...prev, { 
@@ -1379,7 +1385,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             // 没有 reasoning，直接创建 assistant 消息
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
-            streamedMsgs.push({ id: assistantId, createdAt: assistantCreatedAt });
+            streamedMsgs.push({ id: assistantId, start: isBannerOnly(chunk.content) ? undefined : assistantCreatedAt });
             setStreamingMessageId(assistantId);
             setMessages((prev) => [...prev, {
               id: assistantId,
@@ -1397,7 +1403,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             stampDurations(); // 思考消息到此结束
             const assistantId = nowId();
             const assistantCreatedAt = Date.now();
-            streamedMsgs.push({ id: assistantId, createdAt: assistantCreatedAt });
+            streamedMsgs.push({ id: assistantId, start: assistantCreatedAt });
             setStreamingMessageId(assistantId);
             setMessages((prev) => [...prev, {
               id: assistantId,
@@ -1752,7 +1758,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               if (!nextReasoningMessageId) {
                 nextReasoningMessageId = nowId();
                 nextReasoningCreatedAt = Date.now();
-                streamedMsgs.push({ id: nextReasoningMessageId, createdAt: nextReasoningCreatedAt });
+                streamedMsgs.push({ id: nextReasoningMessageId, start: nextReasoningCreatedAt });
                 setStreamingMessageId(nextReasoningMessageId);
                 nextReasoning = chunk.reasoning;
                 setMessages((prev) => [...prev, { 
@@ -1774,7 +1780,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 // 没有 reasoning，直接创建 assistant 消息
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
-                streamedMsgs.push({ id: nextAssistantId, createdAt: nextAssistantCreatedAt });
+                streamedMsgs.push({ id: nextAssistantId, start: nextAssistantCreatedAt });
                 setStreamingMessageId(nextAssistantId);
                 setMessages((prev) => [...prev, {
                   id: nextAssistantId,
@@ -1792,7 +1798,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                 stampDurations(); // 思考消息到此结束
                 const nextAssistantId = nowId();
                 const nextAssistantCreatedAt = Date.now();
-                streamedMsgs.push({ id: nextAssistantId, createdAt: nextAssistantCreatedAt });
+                streamedMsgs.push({ id: nextAssistantId, start: nextAssistantCreatedAt });
                 setStreamingMessageId(nextAssistantId);
                 setMessages((prev) => [...prev, {
                   id: nextAssistantId,
