@@ -2497,7 +2497,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             orca.notify("warn", "没有可导出的消息");
             return;
           }
-          exportSessionAsFile(currentSession);
+          exportSessionAsFile({ ...currentSession, messages });
           orca.notify("success", "已导出 Markdown 文件");
         },
         onSaveToJournal: async () => {
@@ -2505,7 +2505,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
             orca.notify("warn", "没有可保存的消息");
             return;
           }
-          const result = await saveSessionToJournal(currentSession);
+          const result = await saveSessionToJournal({ ...currentSession, messages });
           if (result.success) {
             orca.notify("success", result.message);
           } else {
