@@ -39,10 +39,16 @@ const COMMON_ARGS = [
   "--verbose",
   "--include-partial-messages",
 ];
+// 两种模式共用的工具清单，必须显式列：--restricted 下 "default" 会剥掉 Bash/WebFetch，"default" 与具名混写时只取具名。
+// 故意不给：后台/定时类（ScheduleWakeup、CronCreate/Delete/List、Monitor、RemoteTrigger，会在本轮结束后让进程无人值守地继续跑）、
+// 跨会话类（SendMessage、ListAgents，不经确认就能碰到用户其他 Claude 会话）、PushNotification、
+// Artifact*/DesignSync/ReportFindings（对外发布或用不上）、AskUserQuestion/EnterPlanMode/ExitPlanMode（要交互回答，bridge 接不住）
+const CLI_TOOLS = "Task,Bash,Edit,EnterWorktree,ExitWorktree,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Workflow,Write";
 const SAFE_ARGS = [
   ...COMMON_ARGS,
   "--restricted",
-  "--tools", "Bash,Read,Edit,Write,Glob,Grep,WebFetch,WebSearch",
+  "--tools", CLI_TOOLS,
+  "--chrome",
   "--strict-mcp-config",
   "--permission-mode", "manual",
   "--permission-prompts", "host",
@@ -50,7 +56,7 @@ const SAFE_ARGS = [
 ];
 // 完全放开：只由启动参数 --full-access 或 config.json 决定，请求体改不了（实测 init 报 permissionMode=bypassPermissions）
 // --setting-sources user：不加载所选文件夹里的项目级 Claude 设置（含 hooks），免得换个文件夹就不经确认跑别人的钩子
-const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", "default", "--strict-mcp-config", "--setting-sources", "user"];
+const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", CLI_TOOLS, "--chrome", "--strict-mcp-config", "--setting-sources", "user"];
 
 const expandHome = (p) => path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
 
@@ -353,6 +359,8 @@ function handleChat(req, res, body) {
         finish({ type: "done" });
       }
       child.stdin.end();
+      // 正常应自己退出；宽限期后还在（如有后台任务）就杀掉，exit/close 照常走 cleanup 删临时目录
+      setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM"); }, EXIT_GRACE_MS);
     }
   });
 }

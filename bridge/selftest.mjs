@@ -70,6 +70,7 @@ function start(p) {
     log("linger.log", String(g.pid));
     return process.exit(3);
   }
+  if (p.includes("afterresult")) { finishOk(); return setInterval(() => {}, 1000); } // 给完 result 不退出
   if (p.includes("hang")) return setInterval(() => {}, 1000);
   if (p.includes("crash")) { process.stderr.write("boom"); process.exit(2); }
   if (p.includes("perm")) return out({ type: "control_request", request_id: "r1", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "touch x" }, permission_suggestions: [{ type: "addRules" }] } });
@@ -130,6 +131,12 @@ async function chat(body, onText, at = base) {
 const lastArgs = () => JSON.parse(readLog("args.log").trim().split("\n").pop());
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const others = [];
+const checkTools = (args) => {
+  const tools = args[args.indexOf("--tools") + 1].split(",");
+  assert.ok(tools.includes("Bash") && tools.includes("Task") && tools.includes("WebFetch"), "缺常用工具");
+  for (const t of ["SendMessage", "ListAgents", "CronCreate", "ScheduleWakeup"]) assert.ok(!tools.includes(t), t);
+  assert.ok(args.includes("--chrome"), "--chrome");
+};
 const results = [];
 async function check(name, fn) {
   try { await fn(); results.push(`PASS ${name}`); }
@@ -152,6 +159,7 @@ try {
     for (const flag of ["--restricted", "--strict-mcp-config", "--permission-prompt-tool"]) assert.ok(args.includes(flag), flag);
     assert.equal(args[args.indexOf("--permission-mode") + 1], "manual");
     assert.ok(!args.some((a) => /bypass|dangerously/i.test(a)));
+    checkTools(args);
   });
 
   await check("权限：permission 事件 → 允许 → done，回包不带 updatedPermissions", async () => {
@@ -338,6 +346,22 @@ try {
     }
   });
 
+  await check("G5 给完 result 后子进程不自己退出 → 宽限期后被杀", async () => {
+    fs.rmSync(path.join(tmp, "pid.log"), { force: true });
+    const r = await chat({ prompt: "afterresult", orcaMcp: { url: "http://127.0.0.1:9/mcp", token: "t" } });
+    assert.equal(r.events.at(-1).type, "done");
+    const pid = Number(readLog("pid.log").trim());
+    const dir = path.dirname(JSON.parse(readLog("mcp.log").trim().split("\n").pop()).file);
+    try {
+      assert.ok(alive(pid), "result 后应先留宽限期");
+      await sleep(3600);
+      assert.ok(!alive(pid), "宽限期后子进程未被杀");
+      assert.ok(!fs.existsSync(dir), "临时目录未删");
+    } finally {
+      try { process.kill(pid, "SIGKILL"); } catch {}
+    }
+  });
+
   await check("G6 安全模式遇受管 allow 规则 → 拒绝启动并列出规则；完全放开不受影响", async () => {
     const managed = path.join(tmp, "managed.json");
     fs.writeFileSync(managed, JSON.stringify({ permissions: { allow: ["Write", "mcp__orca-note__*"] } }));
@@ -366,7 +390,7 @@ try {
     assert.equal(r.events[0].mode, "full");
     const args = lastArgs();
     assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
-    assert.equal(args[args.indexOf("--tools") + 1], "default");
+    checkTools(args);
     assert.ok(args.includes("--strict-mcp-config"));
     for (const f of ["--restricted", "--permission-prompts", "--permission-prompt-tool"]) assert.ok(!args.includes(f), f);
     const bad = await chat({ prompt: "safemode" }, undefined, b.base);
