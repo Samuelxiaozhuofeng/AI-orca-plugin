@@ -161,6 +161,6 @@ export function measureMenuWidth(
     }
   }
   const available = align === "left" ? clipRight - rect.left - 8 : rect.right - clipLeft - 8;
-  // 可用宽度是硬上限，min 只在空间够时生效；极窄时至少 160 以免内容不可用
-  return Math.min(max, Math.max(available, Math.min(min, 160)));
+  // 可用宽度是硬上限（空间不足 min 时宁可窄也不越界）
+  return Math.max(0, Math.min(max, available));
 }

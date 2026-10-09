@@ -364,6 +364,10 @@ export default function ChatHistoryMenu({
     ? sessions.filter((s) => s.favorited && !s.pinned)
     : sessions.filter((s) => !s.pinned && !s.favorited);
 
+  // 「清空」实际删除的是全部未收藏对话（含置顶），数量按这个算
+  const clearableSessions = sessions.filter((s) => !s.favorited);
+  const clearablePinnedCount = clearableSessions.filter((s) => s.pinned).length;
+
   const groupByTime = (list: SavedSession[]) => {
     const today: SavedSession[] = [];
     const yesterday: SavedSession[] = [];
@@ -699,7 +703,7 @@ export default function ChatHistoryMenu({
                 ),
               )
         ),
-        !showFavoritesOnly && nonFavoritedSessions.length > 0 &&
+        !showFavoritesOnly && clearableSessions.length > 0 &&
           createElement(
             "div",
             { style: footerStyle },
@@ -728,8 +732,8 @@ export default function ChatHistoryMenu({
                 },
               },
               pendingDelete === CLEAR_ALL
-                ? `确认清空 ${nonFavoritedSessions.length} 条对话？`
-                : `清空非收藏对话 (${nonFavoritedSessions.length})`
+                ? `确认清空 ${clearableSessions.length} 条对话${clearablePinnedCount ? `（含 ${clearablePinnedCount} 条置顶）` : ""}？`
+                : `清空非收藏对话 (${clearableSessions.length})`
             )
           )
       )
