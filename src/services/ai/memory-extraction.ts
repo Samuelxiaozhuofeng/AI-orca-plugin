@@ -133,7 +133,7 @@ export async function extractMemories(conversationContext: string, customPrompt?
   const apiConfig = withDirectApiFallback(settings, getCurrentApiConfig(settings));
 
   // Validate settings
-  const validationError = validateCurrentConfig(settings);
+  const validationError = getCurrentApiConfig(settings).protocol === "local-cli" ? null : validateCurrentConfig(settings); // 本机 AI 走直连回退，不校验本机平台
   if (validationError) {
     return {
       memories: [],

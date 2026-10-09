@@ -1584,6 +1584,9 @@ export default function MarkdownMessage({
   // 预处理：清理 AI 输出中多余的标注符号
   const cleanedContent = useMemo(() => {
     let text = content;
+
+    // 旧存档里已废弃的关系图标记
+    text = text.replace(/\[GRAPH_REQUEST:\d+\]/g, '');
     
     // 清理中文方括号引用标注：【引用】
     text = text.replace(/【([^】]+)】/g, '$1');
