@@ -1,4 +1,5 @@
 import { test, assertEqual } from "./test-harness";
+import { openAIChatCompletionsStream } from "../src/services/ai/openai-client";
 import { getModelRuntimeConfig, getModelApiConfig, getCurrentApiConfig, validateCurrentConfig, type AiChatSettings } from "../src/settings/ai-chat-settings";
 
 function makeSettings(model: AiChatSettings["providers"][number]["models"][number]): AiChatSettings {
@@ -104,4 +105,20 @@ test("model only on a disabled provider is not rerouted to the selected provider
   settings.selectedProviderId = "on";
   assertEqual(getModelApiConfig(settings, "shared-model").apiUrl, "");
   assertEqual(getModelApiConfig(settings, "unknown-model").apiUrl, "https://on.example.com/v1");
+});
+
+test("chat stream refuses to send when resolved config has no url or key", async () => {
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async () => { fetched++; throw new Error("should not fetch"); }) as typeof fetch;
+  try {
+    let error = "";
+    try {
+      for await (const _ of openAIChatCompletionsStream({ apiUrl: "https://api.openai.com/v1", apiKey: "", model: "gpt-4o", messages: [{ role: "user", content: "hi" }] } as any)) { /* drain */ }
+    } catch (e) { error = String(e); }
+    assertEqual(fetched, 0);
+    assertEqual(error.includes("未配置 API"), true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
