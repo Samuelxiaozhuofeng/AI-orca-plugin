@@ -649,11 +649,14 @@ try {
     assert.ok(lastArgs().includes("--settings"), "安全模式也要排除全局 CLAUDE.md");
   });
   await check("W2b 所选文件夹有 CLAUDE.md → 正文交给 AI；没有就不带", async () => {
-    // 默认工作目录（tmp 在 macOS 是 /var → /private/var 的链接路径）不传 workDir 也要读到
-    assert.notEqual(fs.realpathSync(tmp), tmp, "此项需要 tmp 是符号链接路径");
-    fs.writeFileSync(path.join(tmp, "work", "CLAUDE.md"), "默认目录规则");
-    await chat({ prompt: "hi" });
-    fs.rmSync(path.join(tmp, "work", "CLAUDE.md"));
+    // 默认工作目录是符号链接路径（如 /tmp → /private/tmp）时，不传 workDir 也要读到
+    const realDef = path.join(tmp, "real-w2b");
+    fs.mkdirSync(realDef);
+    fs.writeFileSync(path.join(realDef, "CLAUDE.md"), "默认目录规则");
+    fs.symlinkSync(realDef, path.join(tmp, "link-w2b"));
+    const bd = await startBridge("w2b", ["--dir", path.join(tmp, "link-w2b")], {}, false);
+    others.push(bd.proc);
+    await chat({ prompt: "hi" }, undefined, bd.base);
     assert.ok((lastArgs()[lastArgs().indexOf("--append-system-prompt") + 1] || "").includes("默认目录规则"));
     const d = fs.mkdtempSync(path.join(tmp, "rules-"));
     await chat({ prompt: "hi", workDir: d });
