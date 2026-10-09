@@ -2,11 +2,11 @@
 
 ## 目标与范围
 
-决定 AI 能调用哪些工具、如何执行。插件自身只内置一个元工具 `tool_instructions`；操作笔记库等能力全部来自外部 MCP 服务器（默认连 Orca Note MCP）发现的工具。
+决定 AI 能调用哪些工具、如何执行。提供给模型的工具全部来自外部 MCP 服务器（默认连 Orca Note MCP）发现的工具。
 
 ## 关联文件
 
-- `src/services/ai/ai-tools.ts`：`TOOLS`（仅 `tool_instructions`）、`getTools()`、`executeTool()`
+- `src/services/ai/ai-tools.ts`：`getTools()`、`executeTool()`
 - `src/services/ai/tool-call-router.ts`：把模型给的工具名对到可用工具名（容错）、重复调用签名
 - `src/services/ai/tool-call-protocol.ts`：从正文里解析 / 剔除 XML、DSML 形式的工具调用
 - `src/services/ai/tool-round-limit.ts`：工具轮数上限
@@ -19,17 +19,15 @@
 
 | 工具名称 | 功能 | 参数 |
 | --- | --- | --- |
-| `tool_instructions` | 返回指定工具的说明（描述 + 参数表） | `toolName`（必填） |
 | `mcp__<服务器>__<工具名>_<哈希>` | 外部 MCP 工具，由已连接服务器动态发现；名称由 `buildMcpOpenAIName` 生成，总长不超过 64 字符 | 由各 MCP 工具自己的 schema 决定 |
 
-`getTools()` 与 `getToolsForDraggedContext()` 目前都只返回已发现且未被禁用的 MCP 工具（`getAllDiscoveredTools()`），拖入块不会改变工具列表。`TOOLS`（含 `tool_instructions`）没有并入这个列表，所以请求里不会带上 `tool_instructions`，模型实际调不到它；`executeTool` 里的 `tool_instructions` 分支只是保留的实现（且只能查 MCP 工具）。
+`getTools()` 与 `getToolsForDraggedContext()` 目前都只返回已发现且未被禁用的 MCP 工具（`getAllDiscoveredTools()`），拖入块不会改变工具列表。`executeTool` 另外认得名字 `tool_instructions`（返回某个 MCP 工具的说明），但它不在提供给模型的工具列表里。
 
 默认 MCP 服务器：`orca-note`，`http://localhost:18672/mcp`（`mcp-store.ts` 的 `DEFAULT_MCP_SERVER`）。在头部「更多」菜单的「MCP 服务器」里可增删服务器、单独禁用某个工具。
 
 ## 核心 API
 
 ```typescript
-export const TOOLS: OpenAITool[];                       // 仅 tool_instructions
 export function getTools(): OpenAITool[];               // 已启用的 MCP 工具
 export async function executeTool(toolName: string, args: any): Promise<string>;
 ```
@@ -59,7 +57,7 @@ executeTool（60 秒超时，并行执行）→ 工具结果截断到 maxToolRes
 ## 扩展指南
 
 - 新增能力：优先在 MCP 服务器侧提供工具，插件会自动发现。
-- 要加插件内置工具：在 `TOOLS` 中加定义，并在 `getTools()` 返回、`executeTool` 增加分支；工具显示名与图标见 `src/utils/tool-display-config.ts`。
+- 要加插件内置工具：在 `getTools()` 返回的列表里加定义、`executeTool` 增加分支；工具显示名与图标见 `src/utils/tool-display-config.ts`。
 
 ## 更新记录
 

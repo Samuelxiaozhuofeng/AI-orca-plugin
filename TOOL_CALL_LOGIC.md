@@ -16,9 +16,8 @@
 
 ## 1. 工具定义层（`src/services/ai/ai-tools.ts`）
 
-- `TOOLS`：只有元工具 `tool_instructions`（参数 `toolName`，返回某个工具的说明）。它没有并入 `getTools()`，请求里不会带它。
 - `getTools()` / `getToolsForDraggedContext()`：都返回 `getAllDiscoveredTools()`，即已连接 MCP 服务器发现的、且没被用户禁用的工具。拖入块不会改变工具列表。
-- `executeTool(toolName, args)`：`mcp__` 开头 → `callRemoteTool`；`tool_instructions` → 返回说明；其他 → `Unknown tool: ...`；异常 → `Error executing ...`。
+- `executeTool(toolName, args)`：`mcp__` 开头 → `callRemoteTool`；`tool_instructions` → 返回该工具的说明（这个名字不在提供给模型的列表里）；其他 → `Unknown tool: ...`；异常 → `Error executing ...`。
 
 MCP 工具名格式 `mcp__<服务器>__<原名>_<哈希>`（`mcp-tool-names.ts`，总长不超过 64 字符），调用时再映射回服务器与原名。
 
