@@ -195,14 +195,6 @@ export function isSupportedFile(file: File): boolean {
 }
 
 /**
- * 检查文件是否为图片
- */
-export function isImageFile(file: File): boolean {
-  const config = getFileTypeConfig(file.name, file.type);
-  return config?.category === "image";
-}
-
-/**
  * 获取文件图标
  */
 export function getFileIcon(filename: string, mimeType?: string): string {
@@ -227,18 +219,6 @@ export function getSupportedExtensions(): string {
     extensions.push(...config.extensions.map(ext => `.${ext}`));
   }
   return extensions.join(",");
-}
-
-/**
- * 读取文本文件内容
- */
-export async function readTextFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
 }
 
 /**
@@ -401,23 +381,6 @@ export async function uploadFile(file: File): Promise<FileRef | null> {
 }
 
 /**
- * 批量上传文件
- */
-export async function uploadFiles(files: FileList | File[]): Promise<FileRef[]> {
-  const results: FileRef[] = [];
-  const fileArray = Array.from(files);
-
-  for (const file of fileArray) {
-    const ref = await uploadFile(file);
-    if (ref) {
-      results.push(ref);
-    }
-  }
-
-  return results;
-}
-
-/**
  * 获取文件显示 URL（用于图片预览）
  */
 export function getFileDisplayUrl(fileRef: FileRef): string {
@@ -440,46 +403,6 @@ export function getFileFullPath(fileRef: FileRef): string {
   }
 
   return fullPath;
-}
-
-/**
- * 图片转 base64（用于发送 API）
- */
-export async function imageToBase64(fileRef: FileRef): Promise<string | null> {
-  const config = getFileTypeConfig(fileRef.name, fileRef.mimeType);
-  if (config?.category !== "image") {
-    return null;
-  }
-
-  try {
-    let fullPath = fileRef.path;
-    if (fileRef.path.startsWith("./") || fileRef.path.startsWith("../")) {
-      const repoDir = orca.state.repoDir;
-      if (repoDir) {
-        const relativePath = fileRef.path.replace(/^\.\//, "");
-        fullPath = `${repoDir}/assets/${relativePath}`;
-      }
-    }
-
-    const response = await fetch(`file:///${fullPath.replace(/\\/g, "/")}`);
-    if (!response.ok) return null;
-
-    const blob = await response.blob();
-    
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        const base64 = result.split(",")[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch (error) {
-    console.error("[file-service] Failed to convert image to base64:", error);
-    return null;
-  }
 }
 
 /**

@@ -310,32 +310,6 @@ export function renameBranch(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 获取所有分支点
- */
-export function getBranchPoints(messages: Message[]): BranchPoint[] {
-  const branchPoints: BranchPoint[] = [];
-
-  messages.forEach((message, index) => {
-    if (message.branches && message.branches.length > 0) {
-      branchPoints.push({
-        messageId: message.id,
-        messageIndex: index,
-        branches: message.branches.map(branch => ({
-          id: branch.id,
-          name: branch.name || generateBranchName(message.branches!.indexOf(branch)),
-          createdAt: branch.createdAt,
-          messageCount: branch.messages.length,
-          isActive: false, // 需要外部设置
-          parentMessageId: message.id,
-        })),
-      });
-    }
-  });
-
-  return branchPoints;
-}
-
-/**
  * 获取当前活跃的分支 ID
  */
 export function getActiveBranchId(messages: Message[]): string | null {
@@ -346,36 +320,4 @@ export function getActiveBranchId(messages: Message[]): string | null {
     }
   }
   return null;
-}
-
-/**
- * 检查消息是否是分支点
- */
-export function isBranchPoint(message: Message): boolean {
-  return Boolean(message.branches && message.branches.length > 0);
-}
-
-/**
- * 获取分支统计信息
- */
-export function getBranchStats(messages: Message[]): {
-  totalBranches: number;
-  branchPoints: number;
-  currentBranch: string | null;
-} {
-  let totalBranches = 0;
-  let branchPoints = 0;
-
-  messages.forEach(message => {
-    if (message.branches && message.branches.length > 0) {
-      branchPoints++;
-      totalBranches += message.branches.length;
-    }
-  });
-
-  return {
-    totalBranches,
-    branchPoints,
-    currentBranch: getActiveBranchId(messages),
-  };
 }

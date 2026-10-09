@@ -1,5 +1,4 @@
 import { getAiChatPluginName } from "../ui/ai-chat-ui";
-import { getAiChatSettings } from "../settings/ai-chat-settings";
 import type { ContextRef } from "../store/context-store";
 import type { WebSearchSource } from "../utils/source-attribution";
 import { extractToolProtocol } from "./ai/tool-call-protocol";
@@ -202,7 +201,6 @@ export type ChatSessionsData = {
 const SESSIONS_DIR = "Sessions";
 const INDEX_FILE = `${SESSIONS_DIR}/index.json`;
 const OLD_STORAGE_KEY = "chat-sessions"; // 旧版存储 key，用于迁移
-const DATA_VERSION = 2;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // File Operations
@@ -298,17 +296,6 @@ const pendingWrites = new Map<string, { data: SessionFileData; timer: ReturnType
 const WRITE_DEBOUNCE_MS = 2000; // 2秒防抖
 
 /** 清除缓存（用于测试或强制刷新） */
-export function clearSessionCache(): void {
-  indexCache = null;
-  sessionCache.clear();
-  // 立即执行所有待写入
-  for (const [sessionId, pending] of pendingWrites) {
-    clearTimeout(pending.timer);
-    flushSessionWrite(sessionId, pending.data);
-  }
-  pendingWrites.clear();
-}
-
 /** 立即写入单个会话 */
 async function flushSessionWrite(sessionId: string, data: SessionFileData): Promise<void> {
   try {
@@ -845,31 +832,8 @@ export async function clearAllSessions(): Promise<void> {
 }
 
 /**
- * Get a session by ID (full data)
- */
-export async function getSession(sessionId: string): Promise<SavedSession | null> {
-  return loadFullSession(sessionId);
-}
-
-/**
- * Set the active session ID
- */
-export async function setActiveSessionId(sessionId: string | null): Promise<void> {
-  const index = await loadIndex();
-  index.activeSessionId = sessionId;
-  await saveIndex();
-}
-
-/**
  * Check if auto-save is enabled based on settings
  */
-/**
- * Check if auto-save is enabled (always true now)
- */
-export function shouldAutoSave(): boolean {
-  return true;
-}
-
 /**
  * Format a timestamp for display
  */

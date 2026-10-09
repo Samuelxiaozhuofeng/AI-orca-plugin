@@ -34,59 +34,6 @@ import {
   unregisterMcpServerTools,
 } from "../../store/tool-store";
 
-// ─── 工具名命名空间 ──────────────────────────────────────────────────────────
-
-const MCP_TOOL_PREFIX = "mcp__";
-const MAX_OPENAI_TOOL_NAME_LENGTH = 64;
-
-function sanitizeMcpIdentifier(id: string): string {
-  const sanitized = id
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return sanitized || "tool";
-}
-
-function hashString(input: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-
-function buildMcpOpenAIName(serverId: string, originalName: string, usedNames: Set<string>): string {
-  const safeServerId = sanitizeMcpIdentifier(serverId);
-  const safeToolName = sanitizeMcpIdentifier(originalName);
-  const hash = hashString(`${serverId}:${originalName}`).slice(0, 8);
-  const prefix = `${MCP_TOOL_PREFIX}${safeServerId}__`;
-  const suffix = `_${hash}`;
-  const budget = Math.max(8, MAX_OPENAI_TOOL_NAME_LENGTH - prefix.length - suffix.length);
-  const baseToolName = safeToolName.length > budget ? safeToolName.slice(0, budget) : safeToolName;
-  let candidate = `${prefix}${baseToolName}${suffix}`;
-
-  let counter = 2;
-  while (usedNames.has(candidate)) {
-    const counterSuffix = `${suffix}_${counter}`;
-    const counterBudget = Math.max(8, MAX_OPENAI_TOOL_NAME_LENGTH - prefix.length - counterSuffix.length);
-    candidate = `${prefix}${safeToolName.slice(0, counterBudget)}${counterSuffix}`;
-    counter++;
-  }
-
-  usedNames.add(candidate);
-  return candidate;
-}
-
-function parseMcpOpenAIName(openaiName: string): { serverId: string; originalName: string } | null {
-  if (!openaiName.startsWith(MCP_TOOL_PREFIX)) return null;
-  const rest = openaiName.slice(MCP_TOOL_PREFIX.length);
-  const sepIndex = rest.indexOf("__");
-  if (sepIndex === -1) return null;
-  return { serverId: rest.slice(0, sepIndex), originalName: rest.slice(sepIndex + 2) };
-}
-
 // ─── 运行时状态（模块级，不持久化）──────────────────────────────────────────
 
 // openaiToolName → { serverId, originalName }
@@ -310,13 +257,6 @@ function startHealthCheck(): void {
       });
     }
   }, HEALTH_CHECK_MS);
-}
-
-function stopHealthCheck(): void {
-  if (healthCheckTimer) {
-    clearInterval(healthCheckTimer);
-    healthCheckTimer = null;
-  }
 }
 
 // ─── 初始化 ────────────────────────────────────────────────────────────────────
