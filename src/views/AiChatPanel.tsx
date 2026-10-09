@@ -709,11 +709,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   const handleSelectSession = useCallback(async (sessionId: string) => {
     const seq = ++switchSeqRef.current;
     // 切换对话：中止进行中的生成（旧请求的后续写入一律丢弃），并补存离开的对话
-    if (sessionId !== currentSession.id) {
-      abandonCurrentRequest();
-      // 快照已当场拍下；等写完再读目标对话，快速切回时才读得到刚补存的内容
-      await pendingSave.flush();
-    }
+    if (sessionId !== currentSession.id) abandonCurrentRequest();
+    // 快照已当场拍下；等写完再读目标对话，快速切回（含点回当前对话）时才读得到刚补存的内容
+    await pendingSave.flush();
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
