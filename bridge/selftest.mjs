@@ -656,6 +656,7 @@ try {
     await chat({ prompt: "hi", workDir: d });
     const a = lastArgs();
     assert.ok(a[a.indexOf("--append-system-prompt") + 1].includes("暗号 BANANA"));
+    assert.equal(a[a.indexOf("--system-prompt-snapshot") + 1], "off");
     // 链到文件夹外 → 不读；FIFO → 不卡住、照常启动不带参数
     const secret = path.join(tmp, "secret-w2b.txt");
     fs.writeFileSync(secret, "SECRET");

@@ -38,6 +38,8 @@ const USER_CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR ? path.resolve(process.env
 const COMMON_ARGS = [
   "-p",
   "--settings", JSON.stringify({ claudeMdExcludes: [path.join(USER_CLAUDE_DIR, "CLAUDE.md"), path.join(USER_CLAUDE_DIR, "rules", "**")] }),
+  // 续接默认沿用第一轮的系统提示：关掉，换文件夹 / 改了 CLAUDE.md 后下一轮就按新规则
+  "--system-prompt-snapshot", "off",
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
