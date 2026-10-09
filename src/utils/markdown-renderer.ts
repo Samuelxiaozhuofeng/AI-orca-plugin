@@ -48,7 +48,6 @@ export type MarkdownNode =
   | { type: "checklist"; items: CheckboxItem[] }
   | { type: "timeline"; items: TimelineItem[] }
   | { type: "compare"; leftTitle: MarkdownInlineNode[]; rightTitle: MarkdownInlineNode[]; items: CompareItem[] }
-  | { type: "localgraph"; blockId: number }
   | { type: "gallery"; images: GalleryImage[] }
   | { type: "quote"; children: MarkdownNode[] }
   | { type: "codeblock"; content: string; language?: string }
@@ -350,28 +349,6 @@ function mergeConsecutiveImages(nodes: MarkdownNode[]): MarkdownNode[] {
 export function parseMarkdown(text: string): MarkdownNode[] {
   if (!text) return [];
 
-  // Check for [GRAPH_REQUEST:blockId] marker and extract blockId
-  // This is a fallback when AI doesn't call the tool properly
-  const graphRequestMatch = text.match(/\[GRAPH_REQUEST:(\d+)\]/);
-  if (graphRequestMatch) {
-    const blockId = parseInt(graphRequestMatch[1], 10);
-    if (blockId > 0) {
-      // Remove the marker from text and add localgraph node
-      text = text.replace(/\[GRAPH_REQUEST:\d+\]/g, "").trim();
-      const nodes: MarkdownNode[] = [];
-      
-      // If there's remaining text, parse it first
-      if (text) {
-        const remainingNodes = parseMarkdownInternal(text);
-        nodes.push(...remainingNodes);
-      }
-      
-      // Always add the localgraph at the end
-      nodes.push({ type: "localgraph", blockId });
-      return nodes;
-    }
-  }
-
   return parseMarkdownInternal(text);
 }
 
@@ -471,58 +448,6 @@ function parseMarkdownInternal(text: string): MarkdownNode[] {
         codeBlockLines = [];
         return;
       }
-    }
-    
-    // Check if it's a localgraph code block
-    if (codeBlockLang.toLowerCase() === "localgraph") {
-      const blockIdStr = codeBlockLines.join("\n").trim();
-      const blockId = parseInt(blockIdStr, 10);
-      if (blockId > 0) {
-        nodes.push({
-          type: "localgraph",
-          blockId,
-        });
-        inCodeBlock = false;
-        codeBlockLang = "";
-        codeBlockLines = [];
-        return;
-      }
-    }
-    
-    // Intercept graph/mermaid/dot code blocks - AI sometimes returns these despite instructions
-    // Try to extract blockId from the content and convert to localgraph
-    const graphLangs = ["graph", "mermaid", "flowchart", "dot", "graphviz", "diagram"];
-    if (graphLangs.includes(codeBlockLang.toLowerCase())) {
-      const content = codeBlockLines.join("\n");
-      // Try to find block IDs in the content (e.g., "14772", "blockid:14772", "orca-block:14772", links like "14772[title]")
-      // Look for patterns like: blockId=14772, block_id: 14772, orca-block:14772, or standalone 4+ digit numbers
-      const blockIdPatterns = [
-        /blockId[=:]\s*(\d+)/i,
-        /block_id[=:]\s*(\d+)/i,
-        /orca-block:(\d+)/i,
-        /\b(\d{4,})\b/,  // 4+ digit numbers (likely block IDs)
-      ];
-      
-      let blockId = 0;
-      for (const pattern of blockIdPatterns) {
-        const match = content.match(pattern);
-        if (match) {
-          blockId = parseInt(match[1], 10);
-          if (blockId > 0) break;
-        }
-      }
-      
-      if (blockId > 0) {
-        nodes.push({
-          type: "localgraph",
-          blockId,
-        });
-        inCodeBlock = false;
-        codeBlockLang = "";
-        codeBlockLines = [];
-        return;
-      }
-      // If no valid blockId found, fall through to render as regular code block
     }
     
     nodes.push({

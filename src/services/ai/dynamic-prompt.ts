@@ -27,11 +27,6 @@ const TOOL_USE_SECTION = `## 工具使用
 
 const MCP_TOOLS_SECTION = `- 以 mcp__ 开头的是外部 MCP 工具，根据描述和场景按需调用`;
 
-const TODOIST_SECTION = `## Todoist 任务管理
-- 用户可通过 /todoist-ai 模式管理 Todoist 任务
-- 创建任务时，若用户未指定日期，默认设为今天
-- 完成任务前先确认任务 ID`;
-
 const CITATION_SECTION = `## 引用标注规范
 - 引用笔记块时，在句中使用双括号包裹块 ID，格式：((数字))
 - 多个块引用连续书写，示例：((5006))((1003))
@@ -64,7 +59,6 @@ export interface AutoActivatedSkill {
 
 export interface PromptOptions {
   hasMcpTools?: boolean;
-  hasTodoistTools?: boolean;
   hasWebSearch?: boolean;
   hasDraggedContext?: boolean;
   skills?: SkillPromptInfo[];
@@ -109,11 +103,6 @@ export function buildDynamicSystemPrompt(options: PromptOptions = {}): string {
   // 拖入上下文
   if (options.hasDraggedContext) {
     sections.push(DRAGGED_CONTEXT_SECTION);
-  }
-
-  // Todoist 模式
-  if (options.hasTodoistTools) {
-    sections.push(TODOIST_SECTION);
   }
 
   return sections.join("\n\n");

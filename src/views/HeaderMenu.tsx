@@ -17,7 +17,6 @@ interface HeaderMenuProps {
   onOpenStreamSettings?: () => void;
   onOpenWebSearchSettings?: () => void;
   onOpenVisionModelSettings?: () => void;
-  onOpenTodoistSettings?: () => void;
   onOpenMcpSettings?: () => void;
   onExportMarkdown?: () => void;
   onSaveToJournal?: () => void;
@@ -34,7 +33,6 @@ export default function HeaderMenu({
   onOpenStreamSettings,
   onOpenWebSearchSettings,
   onOpenVisionModelSettings,
-  onOpenTodoistSettings,
   onOpenMcpSettings,
   onExportMarkdown,
   onSaveToJournal,
@@ -201,17 +199,6 @@ export default function HeaderMenu({
           },
           createElement("i", { className: "ti ti-eye" }),
           "视觉模型"
-        ),
-        // Todoist Settings
-        onOpenTodoistSettings && createElement(
-          "div",
-          {
-            style: menuItemStyle,
-            onClick: () => handleItemClick(onOpenTodoistSettings),
-            className: "header-menu-item",
-          },
-          createElement("i", { className: "ti ti-checkbox" }),
-          "Todoist"
         ),
         // MCP Server Settings
         onOpenMcpSettings && createElement(

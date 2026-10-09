@@ -400,50 +400,6 @@ function generateSearchableText(title: string, messages: SavedMessage[]): string
 }
 
 /**
- * 保存会话到 Orca 笔记（使用自定义块渲染器）
- */
-export async function saveSessionToNote(session: SavedSession): Promise<{ success: boolean; blockId?: number; message: string }> {
-  try {
-    const title = session.title || "AI 对话";
-    const savedMessages = convertMessages(session.messages);
-    
-    if (savedMessages.length === 0) {
-      return { success: false, message: "没有可保存的消息" };
-    }
-    
-    // 创建新页面
-    const result = await orca.invokeBackend("create-page", title);
-    
-    if (!result || typeof result !== "number") {
-      return { success: false, message: "创建页面失败" };
-    }
-    
-    const pageId = result;
-    
-    // 使用自定义块类型创建对话块
-    const blockType = getAiChatBlockType();
-    const repr = {
-      type: blockType,
-      title,
-      messages: savedMessages,
-      model: session.model || "",
-      createdAt: session.createdAt,
-    };
-    
-    // 在页面下创建自定义块
-    await orca.invokeBackend("insert-blocks", pageId, "append", [{
-      text: "",
-      repr: repr, // 直接使用 repr 字段
-    }]);
-    
-    return { success: true, blockId: pageId, message: `已保存到笔记: ${title}` };
-  } catch (err: any) {
-    console.error("[export-service] Failed to save to note:", err);
-    return { success: false, message: err?.message || "保存失败" };
-  }
-}
-
-/**
  * 保存选中的消息到今日日记（使用自定义块渲染器）
  * @param messages 要保存的消息数组
  * @param title 可选标题

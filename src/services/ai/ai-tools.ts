@@ -22,11 +22,6 @@ import { searchWeb, searchWithFallback, formatSearchResults } from "../external/
 import { fetchWebContent } from "../external/web-fetcher";
 import { getAiChatSettings } from "../../settings/ai-chat-settings";
 import { getAiChatPluginName } from "../../ui/ai-chat-ui";
-import {
-  TODOIST_TOOLS,
-  executeTodoistTool,
-  isTodoistTool,
-} from "../external/todoist-tools";
 
 // 辅助函数：从URL提取域名
 function extractDomain(url: string): string {
@@ -415,7 +410,6 @@ export const WIKIPEDIA_TOOL: OpenAITool = {
  */
 export function getTools(
   webSearchEnabled?: boolean,
-  todoistEnabled?: boolean
 ): OpenAITool[] {
   const webSearchOn = webSearchEnabled ?? isWebSearchEnabled();
   const imageSearchOn = isImageSearchEnabled();
@@ -439,71 +433,8 @@ export function getTools(
     tools.push(WIKIPEDIA_TOOL);
   }
 
-  // Todoist AI 模式（/todoist-ai 命令启用）
-  if (todoistEnabled) {
-    tools.push(...TODOIST_TOOLS);
-  }
-
   return tools;
 }
-
-/**
- * 闪卡生成工具 - 仅供 /card 命令使用，不包含在普通对话工具列表中
- */
-export const FLASHCARD_TOOL: OpenAITool = {
-  type: "function",
-  function: {
-    name: "generateFlashcards",
-    description: `生成闪卡。根据对话内容或指定主题，生成 5-8 张闪卡用于记忆学习。必须调用此工具，不要用文本回复！`,
-    parameters: {
-      type: "object",
-      properties: {
-        cards: {
-          type: "array",
-          description: "闪卡列表，5-8 张",
-          items: {
-            type: "object",
-            properties: {
-              question: {
-                type: "string",
-                description: "问题（简洁明了）",
-              },
-              answer: {
-                type: "string",
-                description: "答案（简洁，≤20字为佳）。选择题不需要此字段",
-              },
-              type: {
-                type: "string",
-                enum: ["basic", "choice"],
-                description: "卡片类型：basic（问答）或 choice（选择题）",
-              },
-              options: {
-                type: "array",
-                description: "选择题选项（仅 type=choice 时需要）",
-                items: {
-                  type: "object",
-                  properties: {
-                    text: {
-                      type: "string",
-                      description: "选项文本",
-                    },
-                    isCorrect: {
-                      type: "boolean",
-                      description: "是否为正确答案",
-                    },
-                  },
-                  required: ["text", "isCorrect"],
-                },
-              },
-            },
-            required: ["question", "type"],
-          },
-        },
-      },
-      required: ["cards"],
-    },
-  },
-};
 
 /**
  * 搜索类工具名称列表 - 当用户拖入块时禁用这些工具
@@ -995,11 +926,6 @@ export async function executeTool(toolName: string, args: any): Promise<string> 
     // ─── 外部 MCP 服务器工具（标准 MCP 协议） ──────────────────────────
     if (isExternalMcpTool(toolName)) {
       return await callRemoteTool(toolName, args);
-    }
-
-    // ─── Todoist 工具 ─────────────────────────────────────────────────
-    if (isTodoistTool(toolName)) {
-      return await executeTodoistTool(toolName, args);
     }
 
     // ─── 联网类工具 ───────────────────────────────────────────────────

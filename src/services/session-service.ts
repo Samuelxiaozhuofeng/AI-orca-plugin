@@ -128,29 +128,6 @@ function normalizePersistedMessages(messages: Message[]): Message[] {
 }
 
 /**
- * Pending flashcard for session persistence
- */
-export type PendingFlashcard = {
-  id: string;
-  front: string;
-  back: string;
-  tags?: string[];
-  cardType?: "basic" | "choice";
-  options?: { text: string; isCorrect: boolean }[];
-  ordered?: boolean;
-};
-
-/**
- * Flashcard review state for session persistence
- */
-export type FlashcardState = {
-  cards: PendingFlashcard[];
-  currentIndex: number;
-  keptCount: number;
-  skippedCount: number;
-};
-
-/**
  * Session metadata (stored in index)
  */
 export type SessionMeta = {
@@ -178,7 +155,6 @@ export type SessionFileData = {
   pinned?: boolean;
   favorited?: boolean;
   scrollPosition?: number;
-  flashcardState?: FlashcardState;
 };
 
 /**
@@ -195,7 +171,6 @@ export type SavedSession = {
   pinned?: boolean;
   favorited?: boolean;
   scrollPosition?: number;
-  flashcardState?: FlashcardState;
   messageCount?: number; // 消息数量（用于列表显示）
 };
 
@@ -574,7 +549,6 @@ async function migrateFromOldFormat(): Promise<SessionIndex | null> {
         pinned: oldSession.pinned,
         favorited: oldSession.favorited,
         scrollPosition: oldSession.scrollPosition,
-        flashcardState: oldSession.flashcardState,
       };
 
       // 写入单独文件（使用标准命名）
@@ -754,7 +728,6 @@ export async function loadFullSession(sessionId: string): Promise<SavedSession |
     pinned: fileData.pinned,
     favorited: fileData.favorited,
     scrollPosition: fileData.scrollPosition,
-    flashcardState: fileData.flashcardState,
   };
 }
 
@@ -783,7 +756,6 @@ export async function saveSession(session: SavedSession): Promise<void> {
     pinned: session.pinned,
     favorited: session.favorited,
     scrollPosition: session.scrollPosition,
-    flashcardState: session.flashcardState,
   };
 
   // 保存文件（立即写入）
@@ -1037,7 +1009,6 @@ export async function autoCacheSession(session: SavedSession): Promise<void> {
     pinned: existingMeta?.pinned || session.pinned,
     favorited: existingMeta?.favorited || session.favorited,
     scrollPosition: session.scrollPosition,
-    flashcardState: session.flashcardState,
   };
 
   // 保存文件（防抖写入）

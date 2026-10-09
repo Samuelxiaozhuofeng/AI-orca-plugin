@@ -73,17 +73,9 @@ const SLASH_COMMANDS: SlashCommandDef[] = [
   { command: "/eli5", description: "用简单易懂的方式解释", icon: "ti ti-bulb", category: "style" },
   { command: "/formal", description: "正式专业的语气回答", icon: "ti ti-briefcase", category: "style" },
   // Visualization 可视化类
-  { command: "/card", description: "生成闪卡，交互式复习并保存", icon: "ti ti-cards", category: "visualization" },
-  { command: "/localgraph", description: "显示页面的链接关系图谱", icon: "ti ti-share", category: "visualization" },
   { command: "/diagram", description: "生成流程图或示意图", icon: "ti ti-chart-dots", category: "visualization" },
   // Skill 技能
   { command: "/skill", description: "让 AI 生成技能草稿（可附加需求）", icon: "ti ti-wand", category: "skill" },
-  // Todoist 任务管理类
-  { command: "/todoist", description: "查看今日 Todoist 任务", icon: "ti ti-checkbox", category: "todoist" },
-  { command: "/todoist-all", description: "查看全部未完成任务", icon: "ti ti-list-check", category: "todoist" },
-  { command: "/todoist-add", description: "添加新任务（支持自然语言日期）", icon: "ti ti-plus", category: "todoist" },
-  { command: "/todoist-done", description: "选择并标记任务完成", icon: "ti ti-circle-check", category: "todoist" },
-  { command: "/todoist-ai", description: "AI 模式管理任务（自然语言）", icon: "ti ti-robot", category: "todoist" },
 ];
 
 // 分类显示名称
@@ -91,7 +83,6 @@ const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
   format: "格式",
   style: "回答风格",
   visualization: "可视化",
-  todoist: "Todoist 任务",
   skill: "技能",
   command: "命令",
 };
@@ -422,7 +413,7 @@ export default function ChatInput({
     items.push(...recentCmds);
     
     const grouped = groupCommandsByCategory(filteredCommands as SlashCommandType[]);
-    const categories: SlashCommandCategory[] = ["format", "style", "visualization", "skill", "command", "todoist"];
+    const categories: SlashCommandCategory[] = ["format", "style", "visualization", "skill", "command"];
     for (const category of categories) {
       const cmds = grouped[category];
       for (const cmd of cmds) {
@@ -994,7 +985,7 @@ export default function ChatInput({
             
             // 按分类分组显示
             const grouped = groupCommandsByCategory(filteredCommands as SlashCommandType[]);
-            const categories: SlashCommandCategory[] = ["format", "style", "visualization", "skill", "command", "todoist"];
+            const categories: SlashCommandCategory[] = ["format", "style", "visualization", "skill", "command"];
             
             for (const category of categories) {
               const cmds = grouped[category];

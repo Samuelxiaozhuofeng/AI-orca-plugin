@@ -178,7 +178,7 @@ export function getProgressColor(percentage: number): string {
 /**
  * 斜杠命令分类
  */
-export type SlashCommandCategory = "format" | "style" | "visualization" | "todoist" | "skill" | "command";
+export type SlashCommandCategory = "format" | "style" | "visualization" | "skill" | "command";
 
 /**
  * 斜杠命令接口
@@ -197,7 +197,6 @@ export interface GroupedCommands {
   format: SlashCommand[];
   style: SlashCommand[];
   visualization: SlashCommand[];
-  todoist: SlashCommand[];
   skill: SlashCommand[];
   command: SlashCommand[];
 }
@@ -216,7 +215,6 @@ export function groupCommandsByCategory(commands: SlashCommand[]): GroupedComman
     format: [],
     style: [],
     visualization: [],
-    todoist: [],
     skill: [],
     command: [],
   };

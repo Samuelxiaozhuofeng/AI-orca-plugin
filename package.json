@@ -21,7 +21,6 @@
     "valtio": "^1.13.2"
   },
   "devDependencies": {
-    "@types/d3-force": "^3.0.10",
     "@types/node": "^25.1.0",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
@@ -32,7 +31,6 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
-    "d3-force": "^3.0.0",
     "mammoth": "^1.11.0",
     "unpdf": "^1.4.0",
     "xlsx": "^0.18.5"

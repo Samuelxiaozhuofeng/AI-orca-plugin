@@ -51,7 +51,6 @@
 
 | 库 | 用途 |
 |---|---|
-| `d3-force` | 力导向图可视化（知识图谱） |
 | `xlsx` | Excel 文件解析 |
 | `mammoth` | Word 文档解析 |
 | `unpdf` | PDF 文件解析 |
@@ -90,7 +89,6 @@ AI-orca-plugin/
 │   │
 │   ├── components/               # 可复用组件
 │   │   ├── MarkdownMessage.tsx   # Markdown 渲染
-│   │   ├── LocalGraph.tsx        # 知识图谱
 │   │   ├── MultiModelResponse.tsx # 多模型响应
 │   │   └── ...
 │   │
@@ -346,7 +344,6 @@ export async function buildContextForSend(
 
 **动态工具**：
 - **Skills** - 用户自定义技能工具
-- **Todoist** - 任务管理（6个工具）
 - **Code Interpreter** - 代码执行
 
 ### 7. 多模型支持
@@ -473,7 +470,6 @@ OpenAI API 客户端，支持：
 - **reranking-service.ts** - 搜索结果重排序
 - **web-search-service.ts** - 网页搜索
 - **utility-tools.ts** - Wikipedia、货币转换等
-- **todoist-service.ts** - Todoist 集成
 
 ---
 
@@ -566,14 +562,6 @@ OpenAI API 客户端，支持：
 - 时间线
 - 对比视图
 - 图片画廊
-- 知识图谱（`[GRAPH:blockId]`）
-
-#### LocalGraph.tsx
-知识图谱可视化：
-- 力导向布局（d3-force）
-- 节点拖拽
-- 缩放和平移
-- 链接关系展示
 
 #### MemoryManager.tsx
 记忆管理界面：

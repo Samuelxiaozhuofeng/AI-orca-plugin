@@ -26,13 +26,9 @@ import EmptyState from "./EmptyState";
 import TypingIndicator from "../components/TypingIndicator";
 import MemoryManager from "./MemoryManager";
 import ChatNavigation from "../components/ChatNavigation";
-import FlashcardReview, { type Flashcard } from "../components/FlashcardReview";
 import GlobalImagePreview from "../components/GlobalImagePreview";
-import TodoistModals from "./TodoistModals";
-import TodoistSettingsModal from "./TodoistSettingsModal";
 import SkillManagerModal from "./SkillManagerModal";
 import McpServerSettingsModal from "./McpServerSettingsModal";
-import { todoistModalStore } from "../store/todoist-store";
 import { injectChatStyles } from "../styles/chat-animations";
 import {
   getAiChatSettings,
@@ -64,7 +60,7 @@ import {
 } from "../services/session-service";
 import { exportSessionAsFile, saveSessionToJournal, saveMessagesToJournal } from "../services/export-service";
 import { sessionStore, updateSessionStore, clearSessionStore } from "../store/session-store";
-import { FLASHCARD_TOOL, executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
+import { executeTool, getToolsForDraggedContext, getTools, extractSearchResultsFromToolResults, getSkillToolsAsync, getSkillInstructionsAsync, getSkillToolName, resolveSkillIdFromToolName, getSkillToolMode } from "../services/ai/ai-tools";
 import { getToolStatus, isToolDisabled, shouldAskForTool, isAgenticRAGEnabled, getAgenticRAGConfig, isWebSearchEnabled } from "../store/tool-store";
 import { listSkills, getSkill } from "../services/ai/skills-manager";
 import type { Skill, SkillRef } from "../types/skills";
@@ -74,7 +70,7 @@ import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
 import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
-import { createChatRequestOwner, settlePendingConfirms, shouldReportFailure } from "../utils/chat-request-owner";
+import { createChatRequestOwner, settlePendingConfirms } from "../utils/chat-request-owner";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -378,13 +374,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   type ViewMode = 'chat' | 'memory-manager';
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
 
-  // Flashcard review state
-  const [flashcardMode, setFlashcardMode] = useState(false);
-  const [pendingFlashcards, setPendingFlashcards] = useState<Flashcard[]>([]);
-  const [flashcardIndex, setFlashcardIndex] = useState(0);
-  const [flashcardKeptCount, setFlashcardKeptCount] = useState(0);
-  const [flashcardSkippedCount, setFlashcardSkippedCount] = useState(0);
-
   // Multi-model parallel response state
   const [multiModelResponses, setMultiModelResponses] = useState<ModelResponse[]>([]);
   const [isMultiModelMode, setIsMultiModelMode] = useState(false);
@@ -400,9 +389,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   // Skill manager modal state
   const [showSkillManager, setShowSkillManager] = useState(false);
-
-  // Todoist settings modal state
-  const [showTodoistSettings, setShowTodoistSettings] = useState(false);
 
   // MCP server settings modal state
   const [showMcpSettings, setShowMcpSettings] = useState(false);
@@ -610,7 +596,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
         // 加载完整会话数据（包含消息）
         const active = await loadFullSession(data.activeSessionId);
         if (active) {
-          // 恢复会话（即使没有消息，也可能有闪卡状态）
+          // 恢复会话
           setCurrentSession({
             ...active,
             model: (active.model || "").trim() || defaultModel,
@@ -620,18 +606,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
           }
           if (active.contexts && active.contexts.length > 0) {
             contextStore.selected = active.contexts;
-          }
-          // 恢复闪卡状态
-          if (active.flashcardState && active.flashcardState.cards.length > 0) {
-            const state = active.flashcardState;
-            // 只有还有未完成的卡片才恢复
-            if (state.currentIndex < state.cards.length) {
-              setPendingFlashcards(state.cards as Flashcard[]);
-              setFlashcardIndex(state.currentIndex);
-              setFlashcardKeptCount(state.keptCount);
-              setFlashcardSkippedCount(state.skippedCount);
-              setFlashcardMode(true);
-            }
           }
           // 恢复滚动位置
           // 使用 setTimeout 确保 DOM 渲染完成后再滚动
@@ -689,12 +663,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     clearSessionStore();
     // 清除错误状态
     setLastError(null);
-    // 重置闪卡状态
-    setFlashcardMode(false);
-    setPendingFlashcards([]);
-    setFlashcardIndex(0);
-    setFlashcardKeptCount(0);
-    setFlashcardSkippedCount(0);
   }, [currentSession.id]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
@@ -722,32 +690,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     });
     setMessages(session.messages.length > 0 ? session.messages : []);
     contextStore.selected = session.contexts || [];
-
-    // 恢复闪卡状态
-    if (session.flashcardState && session.flashcardState.cards.length > 0) {
-      const state = session.flashcardState;
-      if (state.currentIndex < state.cards.length) {
-        setPendingFlashcards(state.cards as Flashcard[]);
-        setFlashcardIndex(state.currentIndex);
-        setFlashcardKeptCount(state.keptCount);
-        setFlashcardSkippedCount(state.skippedCount);
-        setFlashcardMode(true);
-      } else {
-        // 闪卡已完成，重置状态
-        setFlashcardMode(false);
-        setPendingFlashcards([]);
-        setFlashcardIndex(0);
-        setFlashcardKeptCount(0);
-        setFlashcardSkippedCount(0);
-      }
-    } else {
-      // 没有闪卡状态，重置
-      setFlashcardMode(false);
-      setPendingFlashcards([]);
-      setFlashcardIndex(0);
-      setFlashcardKeptCount(0);
-      setFlashcardSkippedCount(0);
-    }
 
     // 恢复目标会话的滚动位置
     // 使用 setTimeout 确保 DOM 渲染完成后再滚动
@@ -812,45 +754,34 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     }
   }, [currentSession.id]);
 
-  // Auto-cache session when messages or flashcard state change (debounced)
+  // Auto-cache session when messages change (debounced)
   const autoCacheTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const hasRealMessages = messages.some((m) => !m.localOnly);
-    const hasFlashcards = flashcardMode && pendingFlashcards.length > 0;
-    
-    // 需要有真实消息或闪卡状态才保存
-    if ((!hasRealMessages && !hasFlashcards) || !sessionsLoaded) return;
+    if (!hasRealMessages || !sessionsLoaded) return;
 
     // Debounce auto-cache to avoid too frequent saves
     if (autoCacheTimeoutRef.current) {
       clearTimeout(autoCacheTimeoutRef.current);
     }
     autoCacheTimeoutRef.current = setTimeout(async () => {
-      const flashcardState = hasFlashcards ? {
-        cards: pendingFlashcards,
-        currentIndex: flashcardIndex,
-        keptCount: flashcardKeptCount,
-        skippedCount: flashcardSkippedCount,
-      } : undefined;
-      
       const sessionToCache: SavedSession = {
         ...currentSession,
         messages,
         contexts: [...contextSnap.selected],
         scrollPosition: listRef.current?.scrollTop ?? currentSession.scrollPosition,
-        flashcardState,
       };
       await autoCacheSession(sessionToCache);
       const data = await loadSessions();
       setSessions(data.sessions);
-    }, 1000); // 1 second debounce for faster flashcard state saving
+    }, 1000); // 1 second debounce
 
     return () => {
       if (autoCacheTimeoutRef.current) {
         clearTimeout(autoCacheTimeoutRef.current);
       }
     };
-  }, [messages, currentSession, sessionsLoaded, flashcardMode, pendingFlashcards, flashcardIndex, flashcardKeptCount, flashcardSkippedCount, contextSnap.selected]);
+  }, [messages, currentSession, sessionsLoaded, contextSnap.selected]);
 
   // Sync state to session store for auto-save on close
   useEffect(() => {
@@ -978,46 +909,9 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
     if (!content && (!files || files.length === 0)) return;
     
-    // ─────────────────────────────────────────────────────────────────────
-    // Todoist 命令拦截（不发送给 AI，直接执行）
-    // ─────────────────────────────────────────────────────────────────────
     const trimmedContent = content.trim();
 
-    // /todoist - 查看今日任务
-    if (trimmedContent === "/todoist" || trimmedContent.startsWith("/todoist ")) {
-      todoistModalStore.viewMode = "today";
-      todoistModalStore.showTaskList = true;
-      return;
-    }
-    
-    // /todoist-add - 添加任务
-    if (trimmedContent === "/todoist-add" || trimmedContent.startsWith("/todoist-add ")) {
-      const taskContent = trimmedContent.replace(/^\/todoist-add\s*/, "").trim();
-      todoistModalStore.addTaskContent = taskContent;
-      todoistModalStore.showAddTask = true;
-      return;
-    }
-    
-    // /todoist-done - 标记完成
-    if (trimmedContent === "/todoist-done" || trimmedContent.startsWith("/todoist-done ")) {
-      todoistModalStore.showTaskList = true;
-      return;
-    }
-    
-    // /todoist-all - 查看全部任务
-    if (trimmedContent === "/todoist-all" || trimmedContent.startsWith("/todoist-all ")) {
-      todoistModalStore.viewMode = "all";
-      todoistModalStore.showTaskList = true;
-      return;
-    }
-    
-    // /todoist-ai - 启用 Todoist AI 工具模式（不拦截，继续发送给 AI）
-    let enableTodoistTools = false;
-    if (trimmedContent.startsWith("/todoist-ai")) {
-      enableTodoistTools = true;
-    }
-    
-    // 归属登记（Todoist 命令不算发送）：作废并中止上一请求；被接替或换对话后，本次请求的界面写入一律丢弃，
+    // 归属登记：作废并中止上一请求；被接替或换对话后，本次请求的界面写入一律丢弃，
     // 中止器生来即中止、不登记进 abortRef
     const req = chatOwnerRef.current.begin();
     const setMessages = req.guard(setMessagesUnguarded);
@@ -1097,7 +991,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    // 系统提示词
 	    let systemPrompt = buildDynamicSystemPrompt({
       hasMcpTools: getDiscoveredTools().length > 0,
-      hasTodoistTools: enableTodoistTools,
       hasWebSearch: isWebSearchEnabled(),
       hasDraggedContext: contextStore.selected.length > 0,
       skills: enabledSkills,
@@ -1151,11 +1044,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	      const commandName = spaceIndex > 0 ? content.slice(1, spaceIndex) : content.slice(1);
 	      const restText = spaceIndex > 0 ? content.slice(spaceIndex + 1).trim() : "";
 	      
-	      // 检查是否是内置 UI 命令（如 /table, /brief, /localgraph 等）
+	      // 检查是否是内置 UI 命令（如 /table, /brief 等）
 	      const builtinCommands = [
 	        "table", "timeline", "compare", "list", "steps", "brief", "detail", "summary", "eli5", "formal", "diagram",
-	        "localgraph", "card", "skill",
-	        "todoist", "todoist-all", "todoist-add", "todoist-done", "todoist-ai"
+	        "skill",
 	      ];
 	      const isBuiltinCommand = builtinCommands.includes(commandName);
 	      
@@ -1321,282 +1213,6 @@ graph TD
 2. 根据内容选择合适的图表类型（flowchart、sequence 等）
 3. 节点文字简洁明了
 4. 连线标注清晰`;
-	    }
-
-	    // /todoist-ai - Todoist AI 模式
-	    if (content.includes("/todoist-ai")) {
-	      processedContent = processedContent.replace(/\/todoist-ai/g, "").trim();
-	      systemPrompt += `\n\n【Todoist 任务管理模式】
-你现在可以使用 Todoist 工具来帮助用户管理任务：
-- todoist_get_tasks: 获取任务列表（today=今日，all=全部）
-- todoist_create_task: 创建新任务（支持自然语言日期如"明天下午3点"）
-- todoist_complete_task: 标记任务完成
-
-使用指南：
-1. 用户问任务相关问题时，先调用 todoist_get_tasks 获取任务列表
-2. 创建任务时，从用户的话中提取任务内容和截止日期
-3. 完成任务时，需要先获取任务列表找到对应的 task_id
-4. 回复时用友好的语气，告诉用户操作结果`;
-	    }
-
-	    // /localgraph - 链接关系图谱（直接渲染图谱，不走 AI）
-	    if (content.includes("/localgraph")) {
-	      const graphQuery = processedContent.replace(/\/localgraph/g, "").trim();
-	      const cleanedQuery = graphQuery.replace(/^(显示|查看|分析|的)?\s*/g, "").replace(/\s*(的)?(链接)?(关系)?(图谱)?$/g, "").trim();
-	      
-	      // 添加用户消息
-	      const userMsg: Message = { 
-	        id: nowId(), 
-	        role: "user", 
-	        content, 
-	        createdAt: Date.now(),
-	      };
-	      setMessages((prev) => [...prev, userMsg]);
-	      
-	      // 直接获取 blockId 并渲染图谱
-	      (async () => {
-	        let blockId: number | null = null;
-	        let pageName: string | null = null;
-	        
-	        if (cleanedQuery) {
-	          // 检查是否是 blockId 格式：纯数字、blockid 123、blockid:123
-	          const blockIdMatch = cleanedQuery.match(/^(?:blockid[:\s]*)?(\d+)$/i);
-	          if (blockIdMatch) {
-	            blockId = parseInt(blockIdMatch[1], 10);
-	          } else {
-	            // 否则当作页面名称，需要查找对应的 blockId
-	            pageName = cleanedQuery;
-            try {
-              const block = await orca.invokeBackend("get-block-by-alias", cleanedQuery);
-              if (block && block.id) {
-                blockId = block.id;
-              }
-            } catch (err) {
-            }
-          }
-	        } else {
-	          // 使用当前打开的页面
-	          try {
-	            const activePanel = orca.state.activePanel;
-	            if (activePanel && activePanel !== uiStore.aiChatPanelId) {
-	              const vp = orca.nav.findViewPanel(activePanel, orca.state.panels);
-	              if (vp?.view === "block" && vp.viewArgs?.blockId) {
-	                blockId = vp.viewArgs.blockId;
-	              }
-	            }
-	          } catch {}
-	        }
-	        
-	        if (!blockId) {
-	          const errorMsg = pageName 
-	            ? `找不到页面「${pageName}」，请检查名称是否正确`
-	            : "请先选择一个页面，或指定页面名称，例如：/localgraph 阿拉丁";
-	          const assistantMsg: Message = {
-	            id: nowId(),
-	            role: "assistant",
-	            content: errorMsg,
-	            createdAt: Date.now(),
-	          };
-	          setMessages((prev) => [...prev, assistantMsg]);
-	          return;
-	        }
-	        
-	        // 直接输出 localgraph 代码块格式，让 MarkdownMessage 渲染图谱
-	        const graphContent = "```localgraph\n" + blockId + "\n```";
-	        const assistantMsg: Message = {
-	          id: nowId(),
-	          role: "assistant",
-	          content: graphContent,
-	          createdAt: Date.now(),
-	        };
-	        setMessages((prev) => [...prev, assistantMsg]);
-	        queueMicrotask(scrollToBottom);
-	      })();
-	      
-	      return; // 直接返回，不走 AI
-	    }
-
-	    // /card - 闪卡生成模式（使用工具调用强制格式）
-	    const isFlashcardMode = content.includes("/card") || content.includes("帮我构建闪卡") || content.includes("生成闪卡");
-	    if (isFlashcardMode) {
-	      // 提取用户指定的主题（如果有）
-	      let cardTopic = processedContent
-	        .replace(/\/card/g, "")
-	        .replace(/帮我构建闪卡/g, "")
-	        .replace(/生成闪卡/g, "")
-	        .trim();
-	      
-	      // 闪卡界面状态也只在仍是当前请求时写入
-	      const setPendingFlashcardsGuarded = req.guard(setPendingFlashcards);
-	      const setFlashcardModeGuarded = req.guard(setFlashcardMode);
-
-	      // 添加用户消息
-	      const userMsg: Message = { 
-	        id: nowId(), 
-	        role: "user", 
-	        content, 
-	        createdAt: Date.now(),
-	      };
-	      setMessages((prev) => [...prev, userMsg]);
-	      
-	      // 设置发送状态，显示加载中
-	      setSending(true);
-	      
-	      // 构建闪卡生成的系统提示词
-	      const flashcardSystemPrompt = `你是一个闪卡生成助手。当用户要求生成闪卡时，你必须调用 generateFlashcards 工具。
-
-闪卡生成原则：
-- 简洁：答案≤20字为佳
-- 5-8 张卡片
-- 答案是结论，不是解释
-- 选择题需要 2-4 个选项，标记正确答案
-
-⚠️ 重要：必须调用 generateFlashcards 工具，不要用文本回复！`;
-	      
-	      // 用户请求消息
-	      let flashcardPrompt = cardTopic 
-	        ? `请根据我们之前的对话，生成关于「${cardTopic}」的闪卡。调用 generateFlashcards 工具生成。`
-	        : "请根据我们的对话内容生成闪卡。调用 generateFlashcards 工具生成。";
-	      
-	      // 构建对话历史
-	      const historyMessages = messages.filter((m) => !m.localOnly);
-	      const flashcardRequestMsg: Message = { 
-	        id: nowId(), 
-	        role: "user", 
-	        content: flashcardPrompt, 
-	        createdAt: Date.now() 
-	      };
-	      const conversationForFlashcard: Message[] = [...historyMessages, flashcardRequestMsg];
-	      
-	      const model = (currentSession.model || "").trim() || settings.selectedModelId;
-	      const memoryText = memoryStore.getFullMemoryText();
-	      
-	      // 构建上下文
-	      let contextText = "";
-	      try {
-	        const contexts = contextStore.selected;
-	        if (contexts.length) {
-	          const result = await buildContextForSend(contexts, { maxChars: settings.maxContextChars });
-	          contextText = result.text;
-	        }
-	      } catch {}
-	      
-	      // 使用专用的闪卡工具（不在普通 TOOLS 列表中）
-      const { standard: apiMessages, fallback: apiMessagesFallback } = await buildConversationMessages({
-	        messages: conversationForFlashcard,
-	        systemPrompt: flashcardSystemPrompt,
-	        contextText,
-	        customMemory: memoryText,
-	        chatMode: "agent", // 使用工具模式
-	        modelId: model,
-	      });
-	      if (!req.isCurrent()) return;
-	      
-	      // 获取模型特定的 API 配置
-	      const apiConfig = getModelApiConfig(settings, model);
-	      
-	      const aborter = req.newAborter(abortRef);
-	      
-	      try {
-	        let toolCallResult: any = null;
-	        let textContent = "";
-	        let mergedToolCalls: ToolCallInfo[] = [];
-	        
-	        // Stream tool calls and content, then process the final tool args.
-          for await (const chunk of streamChatWithRetry(
-            {
-              apiUrl: apiConfig.apiUrl,
-              apiKey: apiConfig.apiKey,
-              model,
-              protocol: apiConfig.protocol,
-              anthropicApiPath: apiConfig.anthropicApiPath,
-              temperature: runtimeConfig.temperature,
-              maxTokens: runtimeConfig.maxTokens,
-              signal: aborter.signal,
-              tools: [FLASHCARD_TOOL],
-            },
-	          apiMessages,
-	          apiMessagesFallback || apiMessages,
-	        )) {
-	          if (chunk.type === "content") {
-	            textContent += chunk.content;
-	          } else if (chunk.type === "tool_calls" && chunk.toolCalls) {
-	            mergedToolCalls = chunk.toolCalls;
-	          } else if (chunk.type === "done") {
-	            if (!textContent && chunk.result.content) {
-	              textContent = chunk.result.content;
-	            }
-	            if (chunk.result.toolCalls?.length) {
-	              mergedToolCalls = chunk.result.toolCalls;
-	            }
-	          }
-	        }
-	        
-	        if (!toolCallResult && mergedToolCalls.length > 0) {
-	          for (const tc of mergedToolCalls) {
-	            if (tc.function.name === "generateFlashcards") {
-	              try {
-	                const args = typeof tc.function.arguments === "string"
-	                  ? JSON.parse(tc.function.arguments)
-	                  : tc.function.arguments;
-	                const resultStr = await executeTool("generateFlashcards", args);
-	                toolCallResult = JSON.parse(resultStr);
-	              } catch (e) {
-	              }
-	            }
-	          }
-	        }
-	        
-	        // 检查工具调用结果
-	        if (toolCallResult && toolCallResult.success && toolCallResult.cards) {
-	          // 工具调用成功，进入闪卡界面
-	          setPendingFlashcardsGuarded(toolCallResult.cards);
-	          setFlashcardModeGuarded(true);
-	        } else if (textContent) {
-	          // 没有工具调用，尝试从文本解析（兼容不支持工具的模型）
-	          const { parseFlashcards } = await import("../services/flashcard-service");
-	          const cards = parseFlashcards(textContent);
-	          if (cards.length > 0) {
-	            setPendingFlashcardsGuarded(cards);
-	            setFlashcardModeGuarded(true);
-	          } else {
-	            // 显示 AI 的文本回复
-	            const assistantMsg: Message = {
-	              id: nowId(),
-	              role: "assistant",
-	              content: textContent || "抱歉，无法生成闪卡。请提供更多上下文或指定主题。",
-	              createdAt: Date.now(),
-	            };
-	            setMessages((prev) => [...prev, assistantMsg]);
-	          }
-	        } else {
-	          // 既没有工具调用也没有文本
-	          const assistantMsg: Message = {
-	            id: nowId(),
-	            role: "assistant",
-	            content: "抱歉，无法生成闪卡。请提供更多上下文或指定主题。",
-	            createdAt: Date.now(),
-	          };
-	          setMessages((prev) => [...prev, assistantMsg]);
-	        }
-	      } catch (err: any) {
-	        // 中止或已被接替 / 换对话：不报错
-	        if (!shouldReportFailure(req.isCurrent, err)) return;
-	        const msg = String(err?.message ?? err ?? "生成闪卡失败");
-	        orca.notify("error", msg);
-	        const assistantMsg: Message = {
-	          id: nowId(),
-	          role: "assistant",
-	          content: `生成闪卡失败: ${msg}`,
-	          createdAt: Date.now(),
-	        };
-	        setMessages((prev) => [...prev, assistantMsg]);
-	      } finally {
-	        setSending(false);
-	        if (abortRef.current === aborter) abortRef.current = null;
-	      }
-	      
-	      return; // 直接返回，不走常规 AI 流程
 	    }
 
 	    // Get current chat mode for tool handling
@@ -1885,7 +1501,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
 
       let baseTools = hasHighPriorityContext
         ? getToolsForDraggedContext()
-        : getTools(false, enableTodoistTools);
+        : getTools(false);
 
       // 合并技能工具：将已启用的技能注册为 function calling 工具
       try {
@@ -3339,123 +2955,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       );
     }
 
-    // 如果在闪卡模式，在消息列表末尾添加闪卡组件
-    if (flashcardMode && pendingFlashcards.length > 0) {
-      messageElements.push(
-        createElement(
-          "div",
-          {
-            key: "flashcard-review",
-            style: {
-              margin: "12px 0",
-              background: "var(--orca-color-bg-2)",
-              borderRadius: "12px",
-              border: "1px solid var(--orca-color-border)",
-              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
-              overflow: "hidden",
-            },
-          },
-          // 闪卡标题栏
-          createElement(
-            "div",
-            {
-              style: {
-                padding: "10px 16px",
-                borderBottom: "1px solid var(--orca-color-border)",
-                background: "var(--orca-color-bg-1)",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              },
-            },
-            createElement("i", {
-              className: "ti ti-cards",
-              style: { fontSize: "16px", color: "var(--orca-color-primary)" },
-            }),
-            createElement(
-              "span",
-              {
-                style: {
-                  fontSize: "13px",
-                  fontWeight: 500,
-                  color: "var(--orca-color-text-1)",
-                },
-              },
-              "闪卡复习"
-            ),
-            createElement(
-              "span",
-              {
-                style: {
-                  fontSize: "12px",
-                  color: "var(--orca-color-text-3)",
-                  marginLeft: "auto",
-                },
-              },
-              `共 ${pendingFlashcards.length} 张`
-            )
-          ),
-          createElement(FlashcardReview, {
-            cards: pendingFlashcards,
-            initialIndex: flashcardIndex,
-            initialKeptCount: flashcardKeptCount,
-            initialSkippedCount: flashcardSkippedCount,
-            onStateChange: (index: number, kept: number, skipped: number) => {
-              setFlashcardIndex(index);
-              setFlashcardKeptCount(kept);
-              setFlashcardSkippedCount(skipped);
-            },
-            onKeepCard: async (card: Flashcard) => {
-              const { saveCardToJournal } = await import("../services/flashcard-service");
-              const result = await saveCardToJournal(card);
-              if (result.success) {
-                orca.notify("success", "已保存到今日日记");
-              } else {
-                orca.notify("error", result.message);
-              }
-            },
-            onComplete: (keptCards: Flashcard[]) => {
-              // 添加完成消息到聊天记录
-              const keptCount = keptCards.length;
-              const totalCount = pendingFlashcards.length;
-              const summaryMsg: Message = {
-                id: nowId(),
-                role: "assistant",
-                content: `✅ 闪卡复习完成！共 ${totalCount} 张卡片，已保存 ${keptCount} 张到今日日记。`,
-                createdAt: Date.now(),
-              };
-              setMessages((prev) => [...prev, summaryMsg]);
-              
-              // 完成后延迟关闭闪卡界面，并重置状态
-              setTimeout(() => {
-                setFlashcardMode(false);
-                setPendingFlashcards([]);
-                setFlashcardIndex(0);
-                setFlashcardKeptCount(0);
-                setFlashcardSkippedCount(0);
-              }, 500);
-            },
-            onCancel: () => {
-              // 添加取消消息
-              const cancelMsg: Message = {
-                id: nowId(),
-                role: "assistant",
-                content: "闪卡复习已取消。",
-                createdAt: Date.now(),
-              };
-              setMessages((prev) => [...prev, cancelMsg]);
-              setFlashcardMode(false);
-              setPendingFlashcards([]);
-              setFlashcardIndex(0);
-              setFlashcardKeptCount(0);
-              setFlashcardSkippedCount(0);
-            },
-          })
-        )
-      );
-      messageListContent = messageElements;
-    }
-
     // 如果在多模型模式，在消息列表末尾添加多模型响应组件
     if (isMultiModelMode && multiModelResponses.length > 0) {
       messageElements.push(
@@ -3588,21 +3087,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           createElement("i", { className: "ti ti-plus" })
         )
       ),
-      // Todoist Button
-      withTooltip(
-        "Todoist 今日任务",
-        createElement(
-          Button,
-          {
-            variant: "plain",
-            onClick: () => {
-              todoistModalStore.viewMode = "today";
-              todoistModalStore.showTaskList = true;
-            },
-          },
-          createElement("i", { className: "ti ti-checkbox" })
-        )
-      ),
       // Skill Manager Button
       withTooltip(
         "技能管理",
@@ -3639,7 +3123,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         onOpenStreamSettings: () => setShowStreamSettings(true),
         onOpenWebSearchSettings: () => setShowWebSearchSettings(true),
         onOpenVisionModelSettings: () => setShowVisionModelSettings(true),
-        onOpenTodoistSettings: () => setShowTodoistSettings(true),
         onOpenMcpSettings: () => setShowMcpSettings(true),
         onExportMarkdown: () => {
           if (messages.length === 0) {
@@ -3741,19 +3224,12 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
       isOpen: showVisionModelSettings,
       onClose: () => setShowVisionModelSettings(false),
     }),
-    // Todoist Settings Modal
-    createElement(TodoistSettingsModal, {
-      visible: showTodoistSettings,
-      onClose: () => setShowTodoistSettings(false),
-    }),
     // MCP Server Settings Modal
     createElement(McpServerSettingsModal, {
       isOpen: showMcpSettings,
       onClose: () => setShowMcpSettings(false),
     }),
     // Global Image Preview Modal
-    createElement(GlobalImagePreview),
-    // Todoist Modals
-    createElement(TodoistModals)
+    createElement(GlobalImagePreview)
   );
 }

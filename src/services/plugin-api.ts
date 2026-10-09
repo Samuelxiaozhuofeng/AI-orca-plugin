@@ -59,8 +59,6 @@ export interface PluginApiOptions {
   timeoutMs?: number;
   /** 最大工具调用轮数，0 表示不设置固定上限 */
   maxToolRounds?: number;
-  /** 启用 Todoist AI 工具模式 */
-  todoistEnabled?: boolean;
   /** AbortSignal 用于取消请求 */
   signal?: AbortSignal;
 }
@@ -184,7 +182,6 @@ export const AiChatPluginAPI = {
       history = [],
       contextText = "",
       timeoutMs = 60000,
-      todoistEnabled = false,
       signal,
     } = options;
     const runtimeConfig = getModelRuntimeConfig(settings, model);
@@ -193,7 +190,7 @@ export const AiChatPluginAPI = {
     const maxToolRounds = options.maxToolRounds ?? runtimeConfig.maxToolRounds;
 
     // 动态获取工具列表（包含外部 MCP 工具）
-    const tools = options.tools ?? getTools(false, todoistEnabled);
+    const tools = options.tools ?? getTools(false);
     const toolRoundLimit = createToolRoundLimit(maxToolRounds);
 
     // 获取 API 配置
