@@ -31,7 +31,7 @@ import {
   getModelRuntimeConfig,
   type AiChatSettings,
 } from "../settings/ai-chat-settings";
-import { buildDynamicSystemPrompt, buildLocalCliInstructions, getCurrentRepoId } from "../services/ai/dynamic-prompt";
+import { buildDynamicSystemPrompt, getCurrentRepoId } from "../services/ai/dynamic-prompt";
 import { getDiscoveredTools } from "../store/mcp-store";
 import {
   loadSessions,
@@ -844,195 +844,11 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	    const toolRoundController = createToolRoundLimit(toolRoundLimit);
 
 	    // 系统提示词
-	    let systemPrompt = buildDynamicSystemPrompt({
+	    const systemPrompt = buildDynamicSystemPrompt({
       hasMcpTools: getDiscoveredTools().length > 0,
       hasDraggedContext: contextStore.selected.length > 0,
       repoId: getCurrentRepoId(),
     });
-
-	    // 检测用户指令并追加格式要求
-	    let processedContent = content;
-	    
-	    // Commands 加载逻辑：如果用户输入 /commandname，尝试加载命令文件
-	    if (content.startsWith("/")) {
-	      const spaceIndex = content.indexOf(" ");
-	      const commandName = spaceIndex > 0 ? content.slice(1, spaceIndex) : content.slice(1);
-	      const restText = spaceIndex > 0 ? content.slice(spaceIndex + 1).trim() : "";
-	      
-	      // 检查是否是内置 UI 命令（如 /table, /brief 等）
-	      const builtinCommands = [
-	        "table", "timeline", "compare", "list", "steps", "brief", "detail", "summary", "eli5", "formal", "diagram",
-		      ];
-	      const isBuiltinCommand = builtinCommands.includes(commandName);
-	      
-	      if (!isBuiltinCommand) {
-	        // 尝试从 Commands 文件夹加载命令
-	        const { loadCommand } = await import("../services/commands-loader");
-	        const commandContent = await loadCommand(commandName);
-	        if (!req.isCurrent()) return;
-	        if (commandContent) {
-	          // 拼接命令内容和用户输入（发送给 AI）
-	          processedContent = restText ? `${commandContent}\n\n${restText}` : commandContent;
-	        }
-	      }
-	    }
-	    
-	    // 格式/风格要求单独收集：直连 API 拼进系统提示词，本机 AI 放进个人设定
-	    let formatSuffix = "";
-
-	    // /timeline - 时间线格式
-	    const wantsTimelineFormat = /\/timeline|用\s*timeline\s*格式展示|timeline\s*格式|时间线格式/.test(content);
-	    if (wantsTimelineFormat) {
-	      const timelineRequest = processedContent
-	        .replace(/\/timeline|用\s*timeline\s*格式展示|timeline\s*格式|时间线格式/g, "")
-	        .trim();
-	      if (timelineRequest) {
-	        processedContent = timelineRequest;
-	      } else {
-	        const priorAssistantMessage = [...(historyOverride || messages)]
-	          .reverse()
-	          .find((message) => message.role === "assistant" && !message.localOnly && message.content.trim());
-	        processedContent = priorAssistantMessage
-	          ? `请把下面这段内容重新整理为 timeline 格式，不要重新问候，不要询问我要展示什么。\n\n${sanitizeContent(priorAssistantMessage.content)}`
-	          : "请用 timeline 格式展示最近一次可用的对话内容；如果没有可用内容，简短询问需要展示的日期或主题。";
-	      }
-	      formatSuffix += `\n\n【格式要求 - 时间线】用户要求使用时间线格式展示结果。
-格式：
-\`\`\`timeline
-日期时间 | [标题](orca-block:id) | 详细描述 | 类型
-\`\`\`
-要求：
-1. 每行一个事件，用 | 分隔：日期时间 | 标题 | 描述 | 类型
-2. 日期时间格式：YYYY-MM-DD HH:mm（如 2024-01-15 14:30），如果没有具体时间可以只写日期
-3. 标题使用 [标题](orca-block:id) 格式，让用户可以点击跳转
-4. 描述要详细，包含关键内容摘要
-5. 类型用中文，可选值：工作、娱乐、学习、生活、健康、旅行、财务、社交
-6. 根据内容智能判断类型，如日记默认生活，任务默认工作
-7. 按时间顺序排列
-8. 最终回答必须包含一个 fenced code block，语言名必须是 timeline，不要用普通 Markdown 列表替代：
-\`\`\`timeline
-日期时间 | 标题 | 描述 | 类型
-\`\`\``;
-	    }
-	    
-	    // /brief - 简洁回答
-	    if (content.includes("/brief")) {
-	      processedContent = processedContent.replace(/\/brief/g, "").trim();
-	      formatSuffix += `\n\n【回答风格】用户要求简洁回答。请：
-1. 直接给出答案，不要铺垫
-2. 使用短句，避免长段落
-3. 要点用列表呈现
-4. 省略不必要的解释和背景`;
-	    }
-	    
-	    // /detail - 详细回答
-	    if (content.includes("/detail")) {
-	      processedContent = processedContent.replace(/\/detail/g, "").trim();
-	      formatSuffix += `\n\n【回答风格】用户要求详细回答。请：
-1. 充分展开说明，提供完整信息
-2. 包含背景、原因、细节
-3. 举例说明关键点
-4. 如有相关内容，主动补充`;
-	    }
-	    
-	    // /table - 表格格式
-	    if (content.includes("/table")) {
-	      processedContent = processedContent.replace(/\/table/g, "").trim();
-	      formatSuffix += `\n\n【格式要求 - 表格】用户要求使用表格格式展示结果。请：
-1. 使用 Markdown 表格格式
-2. 第一行为表头，描述各列含义
-3. 合理设计列，让信息清晰对比
-4. 如有链接，使用 [标题](orca-block:id) 格式`;
-	    }
-	    
-	    // /summary - 总结模式
-	    if (content.includes("/summary")) {
-	      processedContent = processedContent.replace(/\/summary/g, "").trim();
-	      formatSuffix += `\n\n【回答风格 - 总结】用户要求总结模式。请：
-1. 提炼核心要点，去除冗余信息
-2. 使用结构化格式（标题+要点）
-3. 每个要点一句话概括
-4. 最后给出一句话总结`;
-	    }
-	    
-	    // /compare - 对比模式
-	    if (content.includes("/compare")) {
-	      processedContent = processedContent.replace(/\/compare/g, "").trim();
-	      formatSuffix += `\n\n【格式要求 - 对比】用户要求对比展示。请使用以下格式：
-\`\`\`compare
-左侧标题 | 右侧标题
----
-左侧内容第1点 | 右侧内容第1点
-左侧内容第2点 | 右侧内容第2点
-左侧内容第3点 | 右侧内容第3点
-\`\`\`
-要求：
-1. 第一行是两边的标题，用 | 分隔
-2. 第二行是分隔符 ---
-3. 后续每行是对应的对比项，用 | 分隔
-4. 对比项要一一对应，便于比较`;
-	    }
-
-	    // /list - 列表格式
-	    if (content.includes("/list")) {
-	      processedContent = processedContent.replace(/\/list/g, "").trim();
-	      formatSuffix += `\n\n【格式要求 - 列表】用户要求使用列表格式展示结果。请：
-1. 使用有序或无序列表呈现信息
-2. 每个列表项简洁明了
-3. 相关项目可以使用嵌套列表
-4. 如有链接，使用 [标题](orca-block:id) 格式`;
-	    }
-
-	    // /steps - 步骤格式
-	    if (content.includes("/steps")) {
-	      processedContent = processedContent.replace(/\/steps/g, "").trim();
-	      formatSuffix += `\n\n【格式要求 - 步骤】用户要求分步骤展示操作流程。请：
-1. 使用有序列表，每步一个编号
-2. 每步标题简洁，后面可以补充说明
-3. 步骤之间有清晰的逻辑顺序
-4. 如有注意事项，在相关步骤后用缩进说明`;
-	    }
-
-	    // /eli5 - 简单易懂解释
-	    if (content.includes("/eli5")) {
-	      processedContent = processedContent.replace(/\/eli5/g, "").trim();
-	      formatSuffix += `\n\n【回答风格 - 简单易懂】用户要求用简单易懂的方式解释。请：
-1. 避免专业术语，用日常用语
-2. 多用比喻和类比帮助理解
-3. 从基础概念讲起，循序渐进
-4. 举生活中的例子说明`;
-	    }
-
-	    // /formal - 正式专业语气
-	    if (content.includes("/formal")) {
-	      processedContent = processedContent.replace(/\/formal/g, "").trim();
-	      formatSuffix += `\n\n【回答风格 - 正式专业】用户要求使用正式专业的语气回答。请：
-1. 使用规范的书面语言
-2. 结构清晰，逻辑严谨
-3. 适当使用专业术语
-4. 保持客观中立的语气`;
-	    }
-
-	    // /diagram - 流程图/示意图
-	    if (content.includes("/diagram")) {
-	      processedContent = processedContent.replace(/\/diagram/g, "").trim();
-	      formatSuffix += `\n\n【格式要求 - 流程图】用户要求生成流程图或示意图。请使用 Mermaid 语法：
-\`\`\`mermaid
-graph TD
-    A[开始] --> B{判断条件}
-    B -->|是| C[执行操作1]
-    B -->|否| D[执行操作2]
-    C --> E[结束]
-    D --> E
-\`\`\`
-要求：
-1. 使用 mermaid 代码块
-2. 根据内容选择合适的图表类型（flowchart、sequence 等）
-3. 节点文字简洁明了
-4. 连线标注清晰`;
-	    }
-
-	    systemPrompt += formatSuffix;
 
 	    const validationError = validateCurrentConfig(settings);
 	    if (validationError) {
@@ -1090,7 +906,7 @@ graph TD
     const userMsgForApi: Message = {
       id: userMsg.id, 
       role: "user", 
-      content: processedContent, 
+      content, 
       createdAt: userMsg.createdAt,
       files: userMsg.files,
     };
@@ -1307,7 +1123,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           localCli: apiConfig.protocol === "local-cli"
             ? buildLocalCliContext(currentSession.id, {
                 contextText,
-                instructions: buildLocalCliInstructions({ formatSuffix }),
                 workDir: currentSession.workDir,
                 resume: ccResume,
                 run: ccRun,
@@ -2517,6 +2332,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
     // Chat Input
     createElement(ChatInput, {
       onSend: (text: string, files?: FileRef[]) => handleSend(text, files),
+      onClearChat: clear,
       onStop: stop,
       disabled: sending, // 生成时显示停止按钮
       currentPageId: rootBlockId,

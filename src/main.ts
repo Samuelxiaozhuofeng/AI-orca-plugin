@@ -3,7 +3,6 @@ import { autostartLocalCli } from "./services/ai/local-cli-autostart";
 import { registerAiChatUI, unregisterAiChatUI, openAiChatPanel } from "./ui/ai-chat-ui";
 import { registerAiChatRenderer, unregisterAiChatRenderer } from "./ui/ai-chat-renderer";
 
-import { initCommands } from "./services/commands-loader";
 import { initMcpServers } from "./services/external/mcp-server-manager";
 import { loadMcpSettings, ensureDefaultMcpServer } from "./store/mcp-store";
 
@@ -133,9 +132,6 @@ export async function load(_name: string) {
       );
     }
   }
-
-  // 初始化 Commands 目录（确保默认命令模板存在）
-  await initCommands();
 
   // 初始化 MCP 服务器连接（非阻塞，允许失败）
   await loadMcpSettings();

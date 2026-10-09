@@ -1,6 +1,5 @@
 import { test, assert, assertEqual } from "./test-harness";
 import { buildLocalCliPrompt } from "../src/services/ai/local-cli-client";
-import { buildLocalCliInstructions } from "../src/services/ai/dynamic-prompt";
 
 // 技能、格式要求作为「个人设定」放在本机 AI prompt 最前面
 
@@ -25,15 +24,4 @@ test("buildLocalCliPrompt：没有或空白个人设定时与原来完全一样"
     assertEqual(buildLocalCliPrompt(m as any, c, ""), before);
     assertEqual(buildLocalCliPrompt(m as any, c, "  \n "), before);
   }
-});
-
-test("buildLocalCliInstructions：没有格式要求时为空；有则不含插件工具说明", () => {
-  assertEqual(buildLocalCliInstructions({}), "");
-  assertEqual(buildLocalCliInstructions({ formatSuffix: "" }), "");
-  const text = buildLocalCliInstructions({
-    formatSuffix: "\n\n【回答风格】用户要求简洁回答。",
-  });
-  assert(text.includes("【回答风格】用户要求简洁回答。") && text.endsWith("【回答风格】用户要求简洁回答。"), text);
-  assert(!text.includes("用户信息"), text);
-  assert(!text.includes("function call"), text);
 });

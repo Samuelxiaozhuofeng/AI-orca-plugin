@@ -70,13 +70,6 @@ export function buildDynamicSystemPrompt(options: PromptOptions = {}): string {
   return sections.join("\n\n");
 }
 
-/** 本机 AI（Claude Code）用的个人设定：只有本条格式要求；不含插件工具调用说明。 */
-export function buildLocalCliInstructions(options: {
-  formatSuffix?: string;
-}): string {
-  return options.formatSuffix?.trim() ?? "";
-}
-
 function buildTechnicalNotes(repoId: string): string {
   return `## Technical Notes
 - 调用需要 \`repoId\` 参数的工具时，使用 \`"${repoId}"\` 作为其值`;
