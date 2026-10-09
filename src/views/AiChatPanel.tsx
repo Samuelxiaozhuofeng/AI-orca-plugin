@@ -668,13 +668,14 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     setMultiModelResponses([]);
   };
 
-  const handleNewSession = useCallback(() => {
+  const handleNewSession = useCallback(async () => {
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
-    void pendingSave.flush();
     abandonCurrentRequest();
+    // 等离开的对话存完再建新的，免得晚到的旧保存把「上次打开的对话」改回旧的
+    await pendingSave.flush();
 
     // 创建全新的会话，确保 ID 是新的
     const newSession = { ...createNewSession(), model: defaultModel };
@@ -773,29 +774,36 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleDeleteSession = useCallback(async (sessionId: string) => {
-    await pendingSave.flush(); // 先存完再删，免得晚到的保存把刚删的对话写回来
+    const deletingCurrent = currentSession.id === sessionId;
+    // 删当前对话：先停掉生成，免得删的过程中又登记保存把它写回来
+    if (deletingCurrent) abandonCurrentRequest();
+    await pendingSave.flush();
     await deleteSession(sessionId);
     const data = await loadSessions();
     setSessions(data.sessions);
-    if (currentSession.id === sessionId) {
+    if (deletingCurrent) {
+      pendingSave.cancel();
       handleNewSession();
     }
   }, [currentSession.id, handleNewSession]);
 
   const handleClearAllSessions = useCallback(async () => {
-    await pendingSave.flush(); // 同上：收藏的当前对话不丢，被清的也不会被写回
+    // 当前对话会被清掉（没收藏）时同上先停生成；收藏的当前对话先存好不丢
+    if (!sessions.find(s => s.id === currentSession.id)?.favorited) abandonCurrentRequest();
+    await pendingSave.flush();
     await clearAllSessions();
     const data = await loadSessions();
     setSessions(data.sessions);
     // 如果当前会话被清理了，切换到剩余会话或创建新会话
     if (!data.sessions.find(s => s.id === currentSession.id)) {
+      pendingSave.cancel();
       if (data.activeSessionId) {
         handleSelectSession(data.activeSessionId);
       } else {
         handleNewSession();
       }
     }
-  }, [handleNewSession, currentSession.id, handleSelectSession]);
+  }, [handleNewSession, currentSession.id, handleSelectSession, sessions]);
 
   // Toggle session pinned status
   const handleTogglePin = useCallback(async (sessionId: string) => {

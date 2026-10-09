@@ -28,3 +28,14 @@ test("防抖照旧：连续变化只存最后一次，flush 没东西时不保�
   await pending.flush();
   assertEqual(saves.join(","), "2", "已经存过的又被 flush 存了一次");
 });
+
+test("flush 等正在写的那次保存写完；保存失败不让 flush 抛错", async () => {
+  const pending = createPendingSave(10);
+  let done = false;
+  pending.schedule(async () => { await wait(50); done = true; });
+  await wait(20); // 定时器已触发，保存正在写
+  await pending.flush();
+  assertEqual(done, true, "flush 没等正在写的保存");
+  pending.schedule(() => { throw new Error("disk full"); });
+  await pending.flush(); // 不应抛错
+});
