@@ -66,7 +66,7 @@ const { token, file: tokenFile, created } = loadToken();
 const expectedAuth = Buffer.from(`Bearer ${token}`);
 
 const running = new Map(); // claude sessionId -> child
-const pending = new Map(); // requestId -> { child, input }
+const pending = new Map(); // requestId -> { child, input }；child.orcaTerminated 后一律作废
 
 function authorized(req) {
   const got = Buffer.from(String(req.headers.authorization || ""));
@@ -109,6 +109,7 @@ function onLines(stream, fn) {
 }
 
 function writeControl(child, requestId, response) {
+  if (child.orcaTerminated) return;
   const msg = { type: "control_response", response: { subtype: "success", request_id: requestId, response } };
   if (child.stdin.writable) child.stdin.write(JSON.stringify(msg) + "\n");
 }
@@ -120,16 +121,14 @@ function handleChat(req, res, body) {
   if (resume && running.has(resume)) return sendJson(res, 409, { error: "该对话上一条还在进行" });
 
   const args = [...BASE_ARGS, ...addDirArgs];
-  const env = { ...process.env };
   let mcpDir = null;
   const mcp = body.orcaMcp;
   if (mcp && typeof mcp.url === "string" && mcp.url) {
+    // 令牌直接写进 0600 文件（目录 mkdtemp 为 0700，结束即删）；不放环境变量，claude 的 Bash 子进程读不到
     mcpDir = fs.mkdtempSync(path.join(os.tmpdir(), "orca-bridge-"));
     const mcpFile = path.join(mcpDir, "mcp.json");
-    // 令牌经环境变量展开，不落命令行
-    const config = { mcpServers: { "orca-note": { type: "http", url: mcp.url, headers: { Authorization: "Bearer ${ORCA_MCP_TOKEN}" } } } };
+    const config = { mcpServers: { "orca-note": { type: "http", url: mcp.url, headers: { Authorization: `Bearer ${String(mcp.token || "")}` } } } };
     fs.writeFileSync(mcpFile, JSON.stringify(config), { mode: 0o600 });
-    env.ORCA_MCP_TOKEN = String(mcp.token || "");
     args.push("--mcp-config", mcpFile);
   }
   if (resume) args.push("--resume", resume);
@@ -146,7 +145,10 @@ function handleChat(req, res, body) {
     res.end();
   };
 
-  const child = spawn(CLAUDE_BIN, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(CLAUDE_BIN, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  // 按 utf8 流式解码，跨块的多字节字符不会变成乱码
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
   const sessionIds = new Set();
   if (resume) { sessionIds.add(resume); running.set(resume, child); }
   const toolNames = new Map();
@@ -155,29 +157,38 @@ function handleChat(req, res, body) {
   child.stdin.on("error", () => {});
   child.stdin.write(JSON.stringify({ type: "user", message: { role: "user", content: prompt } }) + "\n");
   child.stderr.on("data", (d) => { stderrTail = (stderrTail + d).slice(-2000); });
+  const releaseSessions = () => {
+    for (const id of sessionIds) if (running.get(id) === child) running.delete(id);
+  };
   const cleanup = () => {
     for (const [id, p] of pending) if (p.child === child) pending.delete(id);
-    for (const id of sessionIds) if (running.get(id) === child) running.delete(id);
+    releaseSessions();
     if (mcpDir) fs.rmSync(mcpDir, { recursive: true, force: true });
   };
   child.on("error", (err) => {
     cleanup();
     finish({ type: "error", message: err.code === "ENOENT" ? `找不到 claude 命令（${CLAUDE_BIN}），请先安装 Claude Code` : `启动 claude 失败：${err.message}` });
   });
-  child.on("exit", (code, signal) => {
+  // exit 时 stdout 可能还没读完；等 close（stdio 全部读完）再判断结束
+  let exitStatus = null;
+  child.on("exit", (code, signal) => { exitStatus = code ?? signal; });
+  child.on("close", (code, signal) => {
     cleanup();
     const tail = stderrTail.trim().slice(-500);
-    finish({ type: "error", message: `claude 异常退出（${code ?? signal}）${tail ? "：" + tail : ""}` });
+    finish({ type: "error", message: `claude 异常退出（${exitStatus ?? code ?? signal}）${tail ? "：" + tail : ""}` });
   });
   res.on("close", () => {
     if (finished) return;
-    // 客户端断开：杀子进程，未决权限随之作废（等同拒绝）
+    // 客户端断开：先标记终止、释放会话、撤销未决权限（之后的 /permission 一律 410、不写 stdin），再杀子进程
     finished = true;
     clearInterval(heartbeat);
+    child.orcaTerminated = true;
+    releaseSessions();
     child.kill("SIGTERM");
   });
 
   onLines(child.stdout, (line) => {
+    if (child.orcaTerminated) return;
     let m;
     try { m = JSON.parse(line); } catch { return; }
     if (m.type === "system" && m.subtype === "init") {
@@ -233,6 +244,7 @@ function handlePermission(res, body) {
   const p = pending.get(body.requestId);
   if (!p) return sendJson(res, 404, { error: "没有这个待确认请求（可能已中止）" });
   pending.delete(body.requestId);
+  if (p.child.orcaTerminated) return sendJson(res, 410, { error: "该请求已中止" });
   // 不带 updatedPermissions：只放行这一次
   writeControl(p.child, body.requestId, body.allow === true
     ? { behavior: "allow", updatedInput: p.input }
@@ -243,10 +255,13 @@ function handlePermission(res, body) {
 const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
   if (!authorized(req)) return sendJson(res, 401, { error: "令牌不对" });
   try {
+    if (req.method === "GET" && (req.url === "/models" || req.url === "/v1/models")) {
+      return sendJson(res, 200, { object: "list", data: [{ id: "claude", object: "model" }] });
+    }
     if (req.method === "POST" && req.url === "/chat") return handleChat(req, res, await readJson(req));
     if (req.method === "POST" && req.url === "/permission") return handlePermission(res, await readJson(req));
     sendJson(res, 404, { error: "not found" });
@@ -263,6 +278,6 @@ server.on("error", (err) => {
 server.listen(port, HOST, () => {
   console.log(`Orca Agent Bridge 已启动：http://${HOST}:${server.address().port}`);
   console.log(`工作目录：${cwd}${dirs.length > 1 ? `（另可访问：${dirs.slice(1).join("，")}）` : ""}`);
-  if (created) console.log(`已生成新令牌，请填到插件「API 密钥」：${token}`);
-  console.log(`令牌文件：${tokenFile}`);
+  // 不打印令牌本身（它等于以你身份执行命令的凭证）
+  console.log(`${created ? "已生成新令牌" : "令牌"}保存在：${tokenFile}（复制：pbcopy < ${tokenFile}，填到插件「API 密钥」）`);
 });

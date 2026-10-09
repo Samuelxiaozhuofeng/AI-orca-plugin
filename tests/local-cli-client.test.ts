@@ -9,19 +9,22 @@ import { streamChatWithRetry } from "../src/services/ai/chat-stream-handler";
 
 type Call = { url: string; body: any };
 
-/** 模拟 bridge：/chat 依次返回给定 SSE 事件序列（每次请求取一组），/permission 记录请求体 */
-function mockBridge(rounds: Array<Array<any | (() => Promise<void>)>>) {
+/** 模拟 bridge：/chat 依次返回给定 SSE 事件序列（每次请求取一组），/permission 记录请求体；连接中止时流随之报错 */
+function mockBridge(rounds: Array<Array<any | (() => Promise<void>)>>, permissionStatus = 200) {
   const calls: Call[] = [];
   const original = globalThis.fetch;
   let round = 0;
   globalThis.fetch = (async (url: any, init?: any) => {
     const body = init?.body ? JSON.parse(init.body) : null;
     calls.push({ url: String(url), body });
-    if (String(url).endsWith("/permission")) return new Response("{}", { status: 200 });
+    if (String(url).endsWith("/permission")) return new Response("{}", { status: permissionStatus });
     const events = rounds[round++] ?? [];
     const enc = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        init?.signal?.addEventListener("abort", () => {
+          try { controller.error(new DOMException("Aborted", "AbortError")); } catch {}
+        });
         for (const ev of events) {
           if (typeof ev === "function") await ev();
           else controller.enqueue(enc.encode(`data: ${JSON.stringify(ev)}\n\n`));
@@ -34,8 +37,12 @@ function mockBridge(rounds: Array<Array<any | (() => Promise<void>)>>) {
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-function ctx(conversationId: string, confirm?: LocalCliContext["confirm"]): LocalCliContext {
-  return { conversationId, confirm: confirm ?? (async () => false) };
+/** 第一轮 / 第二轮发出时的可见历史（id 序列） */
+const H1 = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "u2", role: "user" }];
+const H2 = [...H1, { id: "a2", role: "assistant" }, { id: "u3", role: "user" }];
+
+function ctx(conversationId: string, confirm?: LocalCliContext["confirm"], history = H1): LocalCliContext {
+  return { conversationId, history, confirm: confirm ?? (async () => false) };
 }
 
 const base = { apiUrl: "http://127.0.0.1:18673/", apiKey: "t" };
@@ -83,7 +90,7 @@ test("local-cli：正常流 → content/done，无 tool_calls，记住会话", a
     assertEqual(m.calls[0].url, "http://127.0.0.1:18673/chat");
     assertEqual(m.calls[0].body.sessionId, undefined);
 
-    await collect(streamLocalCli({ ...base, localCli: ctx("conv-a") }, msgs));
+    await collect(streamLocalCli({ ...base, localCli: ctx("conv-a", undefined, H2) }, msgs));
     assertEqual(m.calls[1].body.sessionId, "s-1");
     assertEqual(m.calls[1].body.prompt, "第二问");
   } finally {
@@ -101,7 +108,7 @@ test("local-cli：已收到内容后失败不重试，直接报错", async () =>
     await collect(streamLocalCli({ ...base, localCli: ctx("conv-b") }, msgs));
     let error: any = null;
     try {
-      await collect(streamLocalCli({ ...base, localCli: ctx("conv-b") }, msgs));
+      await collect(streamLocalCli({ ...base, localCli: ctx("conv-b", undefined, H2) }, msgs));
     } catch (err) {
       error = err;
     }
@@ -120,7 +127,7 @@ test("local-cli：续接会话且尚无内容时失败 → 丢 sessionId 重试�
   ]);
   try {
     await collect(streamLocalCli({ ...base, localCli: ctx("conv-c") }, msgs));
-    const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-c") }, msgs));
+    const out = await collect(streamLocalCli({ ...base, localCli: ctx("conv-c", undefined, H2) }, msgs));
     assertEqual(m.calls.length, 3);
     assertEqual(m.calls[1].body.sessionId, "s-3");
     assertEqual(m.calls[2].body.sessionId, undefined);

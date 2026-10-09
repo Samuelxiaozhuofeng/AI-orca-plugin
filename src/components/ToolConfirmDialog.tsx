@@ -132,7 +132,9 @@ export default function ToolConfirmDialog({
 /**
  * 创建一个 Promise，等待用户确认工具执行
  * 使用自定义弹窗替代浏览器原生 confirm()
- * full: 全量显示参数（本机 AI 用，长内容可滚动）；signal 中止时关闭弹窗并按拒绝处理
+ * full: 全量显示参数（本机 AI 用，长内容可滚动）；默认聚焦「拒绝」，「允许」只认鼠标点击且出现 400ms 内的点击忽略
+ * signal 中止时关闭弹窗并按拒绝处理
+ * 键盘只作用于本弹窗：Esc 拒绝，Enter/空格只触发当前聚焦按钮的原生行为
  */
 export function createToolConfirmPromise(
   toolName: string,
@@ -268,7 +270,6 @@ export function createToolConfirmPromise(
     // ── 清理并决议 ──
     const cleanup = (value: boolean) => {
       overlay.removeEventListener("click", onBackdrop);
-      window.removeEventListener("keydown", onKey);
       options?.signal?.removeEventListener("abort", onAbort);
       overlay.remove();
       resolve(value);
@@ -279,17 +280,20 @@ export function createToolConfirmPromise(
     };
     overlay.addEventListener("click", onBackdrop);
 
-    const onKey = (e: KeyboardEvent) => {
+    overlay.addEventListener("keydown", (e: KeyboardEvent) => {
       if (e.key === "Escape") cleanup(false);
-      if (e.key === "Enter") cleanup(true);
-    };
-    window.addEventListener("keydown", onKey);
+    });
 
     const onAbort = () => cleanup(false);
     options?.signal?.addEventListener("abort", onAbort);
 
     denyBtn.addEventListener("click", () => cleanup(false));
-    allowBtn.addEventListener("click", () => cleanup(true));
+    const shownAt = Date.now();
+    allowBtn.addEventListener("click", (e: MouseEvent) => {
+      // full：键盘触发的 click（detail 为 0）和刚出现时的误触都不算允许
+      if (full && (e.detail === 0 || Date.now() - shownAt < 400)) return;
+      cleanup(true);
+    });
 
     // ── 组装并挂载 ──
     btnRow.appendChild(denyBtn);
@@ -301,7 +305,7 @@ export function createToolConfirmPromise(
     overlay.appendChild(card);
     document.body.appendChild(overlay);
 
-    // 自动聚焦允许按钮
-    setTimeout(() => allowBtn.focus(), 50);
+    // full 默认聚焦拒绝，其余聚焦允许
+    setTimeout(() => (full ? denyBtn : allowBtn).focus(), 50);
   });
 }

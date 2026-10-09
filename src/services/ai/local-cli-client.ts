@@ -11,8 +11,10 @@ import type { StreamChunk } from "./chat-stream-handler";
 export const LOCAL_CLI_UNSUPPORTED = "本机 AI 不支持此功能";
 export const LOCAL_CLI_DEFAULT_URL = "http://127.0.0.1:18673";
 const NOT_CONNECTED = "本机 AI 未连接，请先在终端运行 node bridge/orca-agent-bridge.mjs";
-const ABORT_NOTE = "\n\n（已中止，中止前已执行的操作不会撤销）";
+/** 中止提示：由调用方确认请求仍属当前对话后补到原消息上（生成器不输出它） */
+export const LOCAL_CLI_ABORT_NOTE = "（已中止，中止前已执行的操作不会撤销）";
 const MIN_IDLE_MS = 30000;
+const PERMISSION_POST_TIMEOUT_MS = 10000;
 
 export type LocalCliConfirm = (
   tool: string,
@@ -23,6 +25,10 @@ export type LocalCliConfirm = (
 export interface LocalCliContext {
   /** 插件对话 id，用于续接 claude 会话 */
   conversationId: string;
+  /** 本次发出时的可见历史（含最新一条用户消息），用于判断能否续接 claude 会话 */
+  history: Array<{ id: string; role: string }>;
+  /** 用户拖入的笔记/页面等上下文；每轮都拼进 prompt（含续接时） */
+  contextText?: string;
   orcaMcp?: { url: string; token: string };
   confirm: LocalCliConfirm;
 }
@@ -35,8 +41,8 @@ export interface LocalCliStreamOptions {
   localCli: LocalCliContext;
 }
 
-/** 插件对话 id → claude sessionId（仅内存，插件重载后丢失，届时用压缩历史重来） */
-const claudeSessions = new Map<string, string>();
+/** 插件对话 id → claude sessionId + 历史指纹（仅内存，插件重载后丢失，届时用压缩历史重来） */
+const claudeSessions = new Map<string, { id: string; fingerprint: string }>();
 
 class BridgeError extends Error {
   constructor(message: string, readonly retryable = false) {
@@ -77,22 +83,38 @@ function messageText(m: OpenAIChatMessage): string {
   return "";
 }
 
-/** 有 claude 会话就只发最新一条用户消息；没有就把历史压成文字一并发 */
-export function buildLocalCliPrompt(messages: OpenAIChatMessage[], resume: boolean): string {
+function lastUserIndex(list: Array<{ role: string }>): number {
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].role === "user") return i;
+  return -1;
+}
+
+/** 截至最后一条用户消息的 id 序列（其后的助手回复不计，它们由 claude 会话自己产生） */
+function upToLastUser(list: Array<{ id: string; role: string }>): string {
+  return list.slice(0, lastUserIndex(list) + 1).map((m) => m.id).join(",");
+}
+
+/**
+ * 续接指纹。current：本轮发出后 claude 会话里对应的可见历史，随 sessionId 记下；
+ * prior：本轮之前的可见历史，须与上次记下的 current 一致才能续接（清空、回档、切分支后对不上）。
+ */
+export function historyFingerprints(history: Array<{ id: string; role: string }>): { current: string; prior: string } {
+  return { current: upToLastUser(history), prior: upToLastUser(history.slice(0, Math.max(lastUserIndex(history), 0))) };
+}
+
+/** 有 claude 会话就只发最新一条用户消息；没有就把历史压成文字一并发。用户上下文每轮都带 */
+export function buildLocalCliPrompt(messages: OpenAIChatMessage[], resume: boolean, contextText?: string): string {
   const convo = messages.filter((m) => m.role === "user" || m.role === "assistant");
-  let lastUser = -1;
-  for (let i = convo.length - 1; i >= 0; i--) {
-    if (convo[i].role === "user") { lastUser = i; break; }
-  }
+  const lastUser = lastUserIndex(convo);
   const current = lastUser >= 0 ? messageText(convo[lastUser]) : "";
-  if (resume) return current;
+  const context = contextText?.trim() ? `以下是用户提供的上下文：\n\n${contextText.trim()}\n\n---\n` : "";
+  if (resume) return context ? `${context}当前问题：\n${current}` : current;
   const history = convo
     .slice(0, Math.max(lastUser, 0))
     .map((m) => ({ role: m.role, text: messageText(m).trim() }))
     .filter((m) => m.text)
     .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.text}`);
-  if (history.length === 0) return current;
-  return `以下是此前的对话记录：\n\n${history.join("\n\n")}\n\n---\n当前问题：\n${current}`;
+  if (history.length === 0) return context ? `${context}当前问题：\n${current}` : current;
+  return `${context}以下是此前的对话记录：\n\n${history.join("\n\n")}\n\n---\n当前问题：\n${current}`;
 }
 
 async function* readBridge(
@@ -186,37 +208,59 @@ export async function* streamLocalCli(
   const idleMs = Math.max(options.timeoutMs ?? MIN_IDLE_MS, MIN_IDLE_MS);
   // 本次请求的所有确认弹窗；中止/出错/结束时一并关闭
   const dialogs = new AbortController();
+  // 权限结果提交失败时用它终止本次生成
+  const run = new AbortController();
+  const onAbort = () => run.abort();
+  options.signal?.addEventListener("abort", onAbort);
+  if (options.signal?.aborted) run.abort();
+  let permissionError: BridgeError | null = null;
+  // 权限请求串行排队，一次只显示一个弹窗
+  let permissionQueue: Promise<void> = Promise.resolve();
+  const fingerprints = historyFingerprints(ctx.history);
   let content = "";
   let reasoning = "";
 
   const answerPermission = async (ev: any) => {
+    if (dialogs.signal.aborted) return;
     const allow = await ctx
       .confirm(String(ev.tool), ev.input && typeof ev.input === "object" ? ev.input : {}, { signal: dialogs.signal })
       .catch(() => false);
     if (dialogs.signal.aborted) return;
-    await fetch(`${base}/permission`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId: ev.requestId, allow }),
-    }).catch(() => {});
+    let status = 0;
+    try {
+      const res = await fetch(`${base}/permission`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: ev.requestId, allow }),
+        signal: AbortSignal.any([dialogs.signal, AbortSignal.timeout(PERMISSION_POST_TIMEOUT_MS)]),
+      });
+      if (res.ok) return;
+      status = res.status;
+    } catch {}
+    if (dialogs.signal.aborted) return;
+    permissionError = new BridgeError(`本机 AI 确认结果提交失败${status ? `（${status}）` : ""}，本次回复已终止`);
+    run.abort();
   };
 
   try {
     for (let attempt = 0; ; attempt++) {
-      const resumeId = claudeSessions.get(ctx.conversationId);
+      const saved = claudeSessions.get(ctx.conversationId);
+      // 可见历史与会话记下的不一致（清空、回档、切分支）→ 丢掉，按当前历史重建
+      if (saved && saved.fingerprint !== fingerprints.prior) claudeSessions.delete(ctx.conversationId);
+      const resumeId = saved?.fingerprint === fingerprints.prior ? saved.id : undefined;
       let gotOutput = false;
       let done = false;
       try {
         const body = {
-          prompt: buildLocalCliPrompt(messages, Boolean(resumeId)),
+          prompt: buildLocalCliPrompt(messages, Boolean(resumeId), ctx.contextText),
           sessionId: resumeId,
           orcaMcp: ctx.orcaMcp,
         };
-        for await (const ev of readBridge(base, options.apiKey, body, options.signal, idleMs)) {
+        for await (const ev of readBridge(base, options.apiKey, body, run.signal, idleMs)) {
           if (ev.type === "session" && ev.id) {
-            claudeSessions.set(ctx.conversationId, String(ev.id));
+            claudeSessions.set(ctx.conversationId, { id: String(ev.id), fingerprint: fingerprints.current });
           } else if (ev.type === "permission") {
-            void answerPermission(ev);
+            permissionQueue = permissionQueue.then(() => answerPermission(ev));
           } else if (ev.type === "error") {
             throw new BridgeError(`本机 AI 出错：${String(ev.message || "未知错误")}`, true);
           } else if (ev.type === "done") {
@@ -239,13 +283,11 @@ export async function* streamLocalCli(
       }
     }
   } catch (err: any) {
-    if (isAbort(err)) {
-      content += ABORT_NOTE;
-      yield { type: "content", content: ABORT_NOTE };
-    }
+    if (permissionError && !options.signal?.aborted) throw permissionError;
     throw err;
   } finally {
     dialogs.abort();
+    options.signal?.removeEventListener("abort", onAbort);
   }
 
   yield { type: "done", result: { content, toolCalls: [], reasoning, finishReason: "stop" } };

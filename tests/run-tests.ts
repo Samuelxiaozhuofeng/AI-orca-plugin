@@ -11,6 +11,7 @@ import "./tool-round-limit.test";
 import "./mcp-client.test";
 import "./mcp-tool-names.test";
 import "./local-cli-client.test";
+import "./local-cli-fixes.test";
 import { run } from "./test-harness";
 
 await run();

@@ -884,14 +884,14 @@ export default function ModelSelectorMenu({
   const handleUpdateProvider = useCallback((updatedProvider: AiProvider) => {
     console.log("[ModelSelectorMenu] handleUpdateProvider called:", {
       providerId: updatedProvider.id,
-      apiKey: updatedProvider.apiKey ? `${updatedProvider.apiKey.slice(0, 8)}...` : "(empty)",
+      apiKey: updatedProvider.apiKey ? "(set)" : "(empty)",
       modelsCount: updatedProvider.models.length,
     });
     const newProviders = settings.providers.map(p => 
       p.id === updatedProvider.id ? updatedProvider : p
     );
     console.log("[ModelSelectorMenu] Calling onUpdateSettings with providers:", 
-      newProviders.map(p => ({ id: p.id, apiKey: p.apiKey ? `${p.apiKey.slice(0, 8)}...` : "(empty)", modelsCount: p.models.length }))
+      newProviders.map(p => ({ id: p.id, apiKey: p.apiKey ? "(set)" : "(empty)", modelsCount: p.models.length }))
     );
     onUpdateSettings({ ...settings, providers: newProviders });
     // 同步更新 editingProvider 状态

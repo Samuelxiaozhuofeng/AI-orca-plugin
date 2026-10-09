@@ -73,6 +73,8 @@ import { nowId, safeText } from "../utils/text-utils";
 import { buildConversationMessages } from "../services/ai/message-builder";
 import { streamChatWithRetry, type ToolCallInfo } from "../services/ai/chat-stream-handler";
 import { buildLocalCliContext } from "../services/ai/local-cli-context";
+import { LOCAL_CLI_ABORT_NOTE } from "../services/ai/local-cli-client";
+import { createChatRequestOwner } from "../utils/chat-request-owner";
 import type { OpenAIChatMessage } from "../services/ai/openai-client";
 import { sanitizeContent } from "../services/ai/openai-client";
 import {
@@ -420,6 +422,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // 新对话 / 切换对话时作废旧请求；handleSend 内用它包装 setMessages / setLastError
+  const chatOwnerRef = useRef(createChatRequestOwner());
+  const setMessagesUnguarded = setMessages;
+  const setLastErrorUnguarded = setLastError;
   const skillConfirmResolversRef = useRef(new Map<string, (approved: boolean) => void>());
   // 追踪用户是否在底部附近，用于决定流式输出时是否自动滚动
   const isNearBottomRef = useRef(true);
@@ -646,7 +652,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
 
-    // 新对话：中止进行中的生成（本机 AI 会随之结束子进程、关闭确认弹窗）
+    // 新对话：中止进行中的生成（本机 AI 会随之结束子进程、关闭确认弹窗），旧请求的后续写入一律丢弃
+    chatOwnerRef.current.invalidate();
     if (abortRef.current) abortRef.current.abort();
 
     // 创建全新的会话，确保 ID 是新的
@@ -676,6 +683,8 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [currentSession.id]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
+    // 切换对话：中止进行中的生成，旧请求的后续写入一律丢弃
+    if (sessionId !== currentSession.id) chatOwnerRef.current.invalidate();
     const pluginName = getAiChatPluginName();
     const settings = getAiChatSettings(pluginName);
     const defaultModel = settings.selectedModelId;
@@ -953,6 +962,10 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 
   async function handleSend(content: string, files?: FileRef[], historyOverride?: Message[]) {
     if (!content && (!files || files.length === 0)) return;
+    // 归属登记：换对话后，本次请求的消息 / 错误写入一律丢弃，中止器生来即中止
+    const req = chatOwnerRef.current.begin();
+    const setMessages = req.guard(setMessagesUnguarded);
+    const setLastError = req.guard(setLastErrorUnguarded);
     
     // ─────────────────────────────────────────────────────────────────────
     // Todoist 命令拦截（不发送给 AI，直接执行）
@@ -1090,7 +1103,7 @@ export default function AiChatPanel({ panelId }: PanelProps) {
 	        
 	        if (foundSkill) {
 	          // 使用现有的 requestSkillConfirm 机制显示确认对话框
-	          const confirmed = await requestSkillConfirm(foundSkill);
+	          const confirmed = req.isCurrent() && await requestSkillConfirm(foundSkill);
 	          
 	          if (!confirmed) {
 	            // 用户取消，不继续执行
@@ -1449,7 +1462,7 @@ graph TD
 	      // 获取模型特定的 API 配置
 	      const apiConfig = getModelApiConfig(settings, model);
 	      
-	      const aborter = new AbortController();
+	      const aborter = req.newAborter();
 	      abortRef.current = aborter;
 	      
 	      try {
@@ -1633,7 +1646,7 @@ graph TD
       const initialResponses = createInitialResponses(selectedModels);
       setMultiModelResponses(initialResponses);
       
-      const aborter = new AbortController();
+      const aborter = req.newAborter();
       abortRef.current = aborter;
       
       try {
@@ -1697,7 +1710,7 @@ graph TD
       files: userMsg.files,
     };
 
-    const aborter = new AbortController();
+    const aborter = req.newAborter();
     abortRef.current = aborter;
 
     try {
@@ -2034,7 +2047,9 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
           tools: toolsToUse,
           timeoutMs: settings.streamTimeout,
           maxContextTokens: modelContextLength,
-          localCli: apiConfig.protocol === "local-cli" ? buildLocalCliContext(currentSession.id) : undefined,
+          localCli: apiConfig.protocol === "local-cli"
+            ? buildLocalCliContext(currentSession.id, { history: conversation, contextText, isCurrent: req.isCurrent })
+            : undefined,
         },
         apiMessages,
         apiMessagesFallback,
@@ -2361,7 +2376,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
                       if (!skill) {
                         result = `Error: Skill not found: ${resolvedSkillId.id}`;
                       } else {
-                        const userApproved = await requestSkillConfirm(skill);
+                        const userApproved = req.isCurrent() && await requestSkillConfirm(skill);
                         if (!userApproved) {
                           result = `用户拒绝执行技能「${skill.name}」。请尝试其他方式或直接回答用户的问题。`;
                         } else {
@@ -2389,7 +2404,7 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
               if (needsConfirm) {
                 try {
                   const { createToolConfirmPromise } = await import("../components/ToolConfirmDialog");
-                  userApproved = await createToolConfirmPromise(toolName, args);
+                  userApproved = req.isCurrent() && await createToolConfirmPromise(toolName, args);
                 } catch (confirmErr: any) {
                   result = `Error: Tool confirmation failed: ${confirmErr?.message || "Unknown error"}`;
                 }
@@ -2709,12 +2724,16 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
         });
       }
 
+      // 本机 AI 中止：在原消息末尾注明已执行的操作不会撤销（setMessages 已校验仍属当前对话）
+      const localCliAbort = isAbort && getModelApiConfig(settings, model).protocol === "local-cli";
       setMessages((prev) => {
         const lastIdx = prev.findIndex((m, i) => m.role === "assistant" && i === prev.length - 1);
         if (lastIdx >= 0) {
-          return prev.map((m, i) =>
-            i === lastIdx ? { ...m, content: m.content || (isAbort ? "(stopped)" : `(error) ${msg}`) } : m
-          );
+          return prev.map((m, i) => {
+            if (i !== lastIdx) return m;
+            if (localCliAbort) return { ...m, content: m.content ? `${m.content}\n\n${LOCAL_CLI_ABORT_NOTE}` : LOCAL_CLI_ABORT_NOTE };
+            return { ...m, content: m.content || (isAbort ? "(stopped)" : `(error) ${msg}`) };
+          });
         }
         return prev;
       });
