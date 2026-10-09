@@ -107,14 +107,14 @@ test("model only on a disabled provider is not rerouted to the selected provider
   assertEqual(getModelApiConfig(settings, "unknown-model").apiUrl, "https://on.example.com/v1");
 });
 
-test("chat stream refuses to send when resolved config has no url or key", async () => {
+test("chat stream refuses to send when resolved config has no url", async () => {
   const realFetch = globalThis.fetch;
   let fetched = 0;
   globalThis.fetch = (async () => { fetched++; throw new Error("should not fetch"); }) as typeof fetch;
   try {
     let error = "";
     try {
-      for await (const _ of openAIChatCompletionsStream({ apiUrl: "https://api.openai.com/v1", apiKey: "", model: "gpt-4o", messages: [{ role: "user", content: "hi" }] } as any)) { /* drain */ }
+      for await (const _ of openAIChatCompletionsStream({ apiUrl: "", apiKey: "", model: "gpt-4o", messages: [{ role: "user", content: "hi" }] } as any)) { /* drain */ }
     } catch (e) { error = String(e); }
     assertEqual(fetched, 0);
     assertEqual(error.includes("未配置 API"), true);

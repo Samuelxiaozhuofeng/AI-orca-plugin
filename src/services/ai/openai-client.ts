@@ -728,8 +728,8 @@ export async function* openAIChatCompletionsStream(
   args: OpenAIChatStreamArgs,
 ): AsyncGenerator<StreamChunk, void, unknown> {
   if (args.protocol === "local-cli") throw new Error(LOCAL_CLI_UNSUPPORTED);
-  // 没配好地址或密钥（含平台已停用）就不发请求，免得对话内容发到没配置的服务
-  if (!args.apiUrl?.trim() || !args.apiKey?.trim()) throw new Error(`模型 ${args.model} 未配置 API，请检查模型设置里的平台是否启用并填好地址和密钥`);
+  // 没有地址（含平台已停用）就不发请求；不查密钥，本地 Ollama 等服务本来就不要密钥
+  if (!args.apiUrl?.trim()) throw new Error(`模型 ${args.model} 未配置 API，请检查模型设置里的平台是否启用并填好地址`);
   const protocol = args.protocol || "openai";
   const logPrefix = protocol === "anthropic" ? "[anthropic]" : "[openAI]";
   const urlCandidates =
