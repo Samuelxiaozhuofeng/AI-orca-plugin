@@ -420,26 +420,6 @@ export default function AiChatPanel({ panelId }: PanelProps) {
   }, [scrollToBottomIfNeeded]);
   const updateMessageUnguarded = updateMessage;
 
-  const extractJsonPayload = useCallback((raw: string): any | null => {
-    if (!raw) return null;
-    const cleaned = raw
-      .trim()
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
-    if (!cleaned) return null;
-    try {
-      return JSON.parse(cleaned);
-    } catch {}
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      return null;
-    }
-  }, []);
-
   const displaySessionTitle = useMemo(() => {
     const title = (currentSession.title || "").trim();
     if (title) return title;
@@ -2178,11 +2158,6 @@ Do not call any more tools in this response. Do not output DSML, XML, <invoke>, 
   // 本机 AI 工作文件夹：写进当前会话，随会话自动保存
   const handleWorkDirChange = useCallback((workDir: string | undefined) => {
     setCurrentSession((prev) => ({ ...prev, workDir }));
-  }, []);
-
-  // 兼容旧的 handleModelChange（用于 ChatInput）
-  const handleModelChange = useCallback((nextModel: string) => {
-    setCurrentSession((prev) => ({ ...prev, model: nextModel }));
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
