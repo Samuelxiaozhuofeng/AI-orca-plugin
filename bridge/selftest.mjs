@@ -131,8 +131,8 @@ async function chat(body, onText, at = base) {
 const lastArgs = () => JSON.parse(readLog("args.log").trim().split("\n").pop());
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const others = [];
-const checkTools = (args) => {
-  assert.equal(args[args.indexOf("--tools") + 1], "Task,Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Workflow,Write");
+const checkTools = (args, full = false) => {
+  assert.equal(args[args.indexOf("--tools") + 1], (full ? "Task," : "") + "Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Write");
   assert.ok(args.includes("--chrome"), "--chrome");
 };
 const results = [];
@@ -388,7 +388,7 @@ try {
     assert.equal(r.events[0].mode, "full");
     const args = lastArgs();
     assert.equal(args[args.indexOf("--permission-mode") + 1], "bypassPermissions");
-    checkTools(args);
+    checkTools(args, true);
     assert.ok(args.includes("--strict-mcp-config"));
     for (const f of ["--restricted", "--permission-prompts", "--permission-prompt-tool"]) assert.ok(!args.includes(f), f);
     const bad = await chat({ prompt: "safemode" }, undefined, b.base);

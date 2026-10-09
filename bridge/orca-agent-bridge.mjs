@@ -20,7 +20,7 @@ function resolveClaudeBin(bin) {
   return null;
 }
 // 子进程 PATH 只留绝对目录：否则 claude 的 #!/usr/bin/env node 等会按所选文件夹找到里面的同名程序
-const SAFE_ENV = { ...process.env, PATH: (process.env.PATH || "").split(path.delimiter).filter((d) => path.isAbsolute(d)).join(path.delimiter) || "/usr/bin:/bin:/usr/sbin:/sbin" }; // 空串会被当成当前目录
+const SAFE_ENV = { ...process.env, PATH: (process.env.PATH || "").split(path.delimiter).filter((d) => path.isAbsolute(d)).join(path.delimiter) || "/usr/bin:/bin:/usr/sbin:/sbin", CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1" }; // 空串会被当成当前目录；关掉后台任务：子代理/后台命令同步跑完再出 result，不会被结束时的收尾杀掉
 const CLAUDE_NAME = process.env.ORCA_BRIDGE_CLAUDE || "claude";
 const HEARTBEAT_MS = Number(process.env.ORCA_BRIDGE_HEARTBEAT_MS) || 10000;
 const MAX_BODY = 5 * 1024 * 1024;
@@ -39,15 +39,17 @@ const COMMON_ARGS = [
   "--verbose",
   "--include-partial-messages",
 ];
-// 两种模式共用的工具清单，必须显式列：--restricted 下 "default" 会剥掉 Bash/WebFetch，"default" 与具名混写时只取具名。
+// 工具清单必须显式列：--restricted 下 "default" 会剥掉 Bash/WebFetch，"default" 与具名混写时只取具名。
 // 故意不给：后台/定时类（ScheduleWakeup、CronCreate/Delete/List、Monitor、RemoteTrigger，会在本轮结束后让进程无人值守地继续跑）、
 // 跨会话类（SendMessage、ListAgents，不经确认就能碰到用户其他 Claude 会话）、PushNotification、
 // Artifact*/DesignSync/ReportFindings（对外发布或用不上）、EnterWorktree/ExitWorktree（安全模式下不经确认就建分支、删目录）、AskUserQuestion/EnterPlanMode/ExitPlanMode（要交互回答，bridge 接不住）
-const CLI_TOOLS = "Task,Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Workflow,Write";
+// Workflow 两种模式都不给（后台多代理，跑不到本轮结束）；Task 只给完全放开：实测安全模式下子代理带 isolation:"worktree" 不经确认就建 worktree
+const SAFE_TOOLS = "Bash,Edit,Glob,Grep,NotebookEdit,Read,Skill,TaskStop,ToolSearch,WebFetch,WebSearch,Write";
+const FULL_TOOLS = `Task,${SAFE_TOOLS}`;
 const SAFE_ARGS = [
   ...COMMON_ARGS,
   "--restricted",
-  "--tools", CLI_TOOLS,
+  "--tools", SAFE_TOOLS,
   "--chrome",
   "--strict-mcp-config",
   "--permission-mode", "manual",
@@ -56,7 +58,7 @@ const SAFE_ARGS = [
 ];
 // 完全放开：只由启动参数 --full-access 或 config.json 决定，请求体改不了（实测 init 报 permissionMode=bypassPermissions）
 // --setting-sources user：不加载所选文件夹里的项目级 Claude 设置（含 hooks），免得换个文件夹就不经确认跑别人的钩子
-const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", CLI_TOOLS, "--chrome", "--strict-mcp-config", "--setting-sources", "user"];
+const FULL_ARGS = [...COMMON_ARGS, "--permission-mode", "bypassPermissions", "--tools", FULL_TOOLS, "--chrome", "--strict-mcp-config", "--setting-sources", "user"];
 
 const expandHome = (p) => path.resolve(p.replace(/^~(?=$|\/)/, os.homedir()));
 
